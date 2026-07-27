@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Builds
+client/dist/
+
+# Local data & uploads
+server/maintenance.db
+server/uploads/
+
+# Vercel
+.vercel
+.vercel-tmp/
+
+# Env & logs
+.env
+.env.*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

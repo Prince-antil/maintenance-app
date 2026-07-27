@@ -1,0 +1,94 @@
+// ================================================================
+// CCPL CMMS — Shared Domain Constants
+// ================================================================
+import {
+  BookOpen, ClipboardCheck, AlertTriangle, CheckSquare,
+  Zap, Sun, Activity, Lightbulb, TrendingUp, ShieldCheck,
+} from 'lucide-react';
+
+// Report categories (must match backend whitelist — do not modify)
+export const CATEGORIES = [
+  'Monthly PM Report',
+  'Plantwise Breakdown Report',
+  'FAT (Factory Acceptance Test)',
+  'Energy Report (DG 500 & 380KVA)',
+  'Energy Report (Solar)',
+  'Plantwise Energy Consumption',
+  'Kaizen',
+  'Improvement',
+  'ORM Data (Operational Risk Management)',
+];
+
+// Professional icon + color mapping per category
+export const CATEGORY_META = {
+  'Operating Procedure for M/C': { icon: BookOpen, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20' },
+  'Monthly PM Report': { icon: ClipboardCheck, color: 'text-cyan-400', bg: 'bg-cyan-400/10', border: 'border-cyan-400/20' },
+  'Plantwise Breakdown Report': { icon: AlertTriangle, color: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/20' },
+  'FAT (Factory Acceptance Test)': { icon: CheckSquare, color: 'text-violet-400', bg: 'bg-violet-400/10', border: 'border-violet-400/20' },
+  'Energy Report (DG 500 & 380KVA)': { icon: Zap, color: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-400/20' },
+  'Energy Report (Solar)': { icon: Sun, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
+  'Plantwise Energy Consumption': { icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
+  'Kaizen': { icon: Lightbulb, color: 'text-indigo-400', bg: 'bg-indigo-400/10', border: 'border-indigo-400/20' },
+  'Improvement': { icon: TrendingUp, color: 'text-purple-400', bg: 'bg-purple-400/10', border: 'border-purple-400/20' },
+  'ORM Data (Operational Risk Management)': { icon: ShieldCheck, color: 'text-rose-400', bg: 'bg-rose-400/10', border: 'border-rose-400/20' },
+};
+
+// Complete 21 plant sections (includes master combined view)
+export const PLANT_SECTIONS = [
+  'Overall Nathupur Maintenance Formulation Plant',
+  'Formulation Park',
+  'Herbi ACM Formulation',
+  'Herbi EC Packaging',
+  'EC Herbi Formulation',
+  'SC Herbicide Formulation',
+  'SC Herbicide Packaging',
+  'Topper Formulation Herbi',
+  'Herbi Packaging',
+  'ACM-1 INSEC Formulation',
+  'EC INSEC Packaging',
+  'EC INSEC FORMULATION',
+  'Finish Goods',
+  'CARTAP FORMULATION INSEC',
+  'CARTAP PACKAGING INSEC',
+  'JET MILL FORMULATION INSEC',
+  'PRINTING SECTION EC',
+  'SC INSEC FORMULATION',
+  'Acephate/Zivora Packaging INSEC',
+  'STORE',
+  'Utility Section',
+];
+
+export const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+export const YEARS = [2024, 2025, 2026, 2027];
+
+// Full file support: Word, Excel, PowerPoint, PDF (+ CSV legacy)
+export const ALLOWED_EXT = ['.doc', '.docx', '.xlsx', '.xls', '.csv', '.ppt', '.pptx', '.pdf'];
+
+// Color-coded file badges: DOCX Blue, XLSX Green, PPTX Orange, PDF Red
+export const EXT_META = {
+  '.doc':  { badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/30', label: 'DOC' },
+  '.docx': { badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/30', label: 'DOCX' },
+  '.xlsx': { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: 'XLSX' },
+  '.xls':  { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: 'XLS' },
+  '.csv':  { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: 'CSV' },
+  '.pptx': { badge: 'bg-orange-500/15 text-orange-400 border border-orange-500/30', label: 'PPTX' },
+  '.ppt':  { badge: 'bg-orange-500/15 text-orange-400 border border-orange-500/30', label: 'PPT' },
+  '.pdf':  { badge: 'bg-red-500/15 text-red-400 border border-red-500/30', label: 'PDF' },
+};
+
+// Machine profile document tabs
+export const MACHINE_DOC_TABS = [
+  { id: 'sop', label: 'SOP' },
+  { id: 'mop', label: 'MOP' },
+  { id: 'wi', label: 'Work Instructions & Manuals' },
+  { id: 'circuit', label: 'Circuit Diagrams & Schematics' },
+  { id: 'media', label: 'Training Videos / Media' },
+];
+
+export const APP_VERSION = '1.0';
+export const COMPANY_NAME = 'Crystal Crop Protection Ltd.';
+export const UNIT_BADGE = 'NATHUPUR UNIT — MAINTENANCE & RELIABILITY HUB';
