@@ -1,14 +1,26 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import initSqlJs from 'sql.js';
 import path from 'path';
-import fs from 'fs';
+import {
+  ALLOWED_EXTENSIONS,
+  createReportFromUpload,
+  deleteReportRecord,
+  getCategoryStats,
+  getRecentReports,
+  getReportById,
+  getReportMeta,
+  listReports,
+  updateReportRecord,
+} from '../server/lib/reportRepository.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'agro-maint-secret-key-2026';
+
 let db;
 
 async function getDB() {
@@ -26,26 +38,6 @@ async function getDB() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS report_files (
-      id TEXT PRIMARY KEY,
-      category_name TEXT NOT NULL,
-      filename TEXT NOT NULL,
-      file_url TEXT NOT NULL,
-      file_format TEXT NOT NULL,
-      reporting_month TEXT NOT NULL,
-      reporting_year INTEGER NOT NULL,
-      plant_section TEXT NOT NULL,
-      uploaded_at TEXT DEFAULT (datetime('now')),
-      uploaded_by TEXT NOT NULL,
-      FOREIGN KEY (uploaded_by) REFERENCES users(id)
-    )
-  `);
-
-  db.run('CREATE INDEX IF NOT EXISTS idx_reports_category ON report_files(category_name)');
-  db.run('CREATE INDEX IF NOT EXISTS idx_reports_month_year ON report_files(reporting_month, reporting_year)');
-  db.run('CREATE INDEX IF NOT EXISTS idx_reports_plant ON report_files(plant_section)');
 
   // Seed admin
   const adminResult = db.exec("SELECT id FROM users WHERE role = 'admin'");
@@ -69,15 +61,6 @@ async function getDB() {
   return db;
 }
 
-function queryAll(sql, params = []) {
-  const stmt = db.prepare(sql);
-  if (params.length) stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
-}
-
 function queryOne(sql, params = []) {
   const stmt = db.prepare(sql);
   if (params.length) stmt.bind(params);
@@ -85,10 +68,6 @@ function queryOne(sql, params = []) {
   if (stmt.step()) row = stmt.getAsObject();
   stmt.free();
   return row;
-}
-
-function runSql(sql, params = []) {
-  db.run(sql, params);
 }
 
 function generateToken(user) {
@@ -111,20 +90,41 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-const CATEGORIES = [
-  'Monthly PM Report', 'Plantwise Breakdown Report', 'FAT (Factory Acceptance Test)',
-  'Energy Report (DG 500 & 380KVA)', 'Energy Report (Solar)', 'Plantwise Energy Consumption',
-  'Kaizen', 'Improvement', 'ORM Data (Operational Risk Management)'
-];
-const PLANT_SECTIONS = [
-  'Utility Block', 'SC Line', 'EC Line', 'WP Line', 'WDG Line', 'Packaging',
-  'Solar Grid', 'DG Room', 'Raw Material Section', 'Formulation Lines'
-];
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const fileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ALLOWED_EXTENSIONS.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`File type ${ext} not allowed`), false);
+  }
+};
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+const uploadSingle = upload.single('file');
+const REPORT_VALIDATION_ERRORS = new Set([
+  'No file uploaded',
+  'All fields are required',
+  'Invalid category',
+  'Invalid reporting month',
+  'Invalid reporting year',
+  'Report not found',
+]);
+
+function reportErrorStatus(error) {
+  if (REPORT_VALIDATION_ERRORS.has(error?.message)) {
+    return error.message === 'Report not found' ? 404 : 400;
+  }
+  return 500;
+}
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 
 // Auth
@@ -145,53 +145,105 @@ app.get('/api/auth/me', verifyToken, (req, res) => {
 });
 
 // Reports
-app.get('/api/reports', verifyToken, (req, res) => {
-  const { category, month, year, plant_section, file_format, search, page = 1, limit = 20 } = req.query;
-  let conditions = [], params = [];
-  if (category) { conditions.push('r.category_name = ?'); params.push(category); }
-  if (month) { conditions.push('r.reporting_month = ?'); params.push(month); }
-  if (year) { conditions.push('r.reporting_year = ?'); params.push(parseInt(year)); }
-  if (plant_section) { conditions.push('r.plant_section = ?'); params.push(plant_section); }
-  if (file_format) { conditions.push('r.file_format = ?'); params.push(file_format); }
-  if (search) { conditions.push("(r.filename LIKE ? OR r.category_name LIKE ? OR r.plant_section LIKE ?)"); params.push(`%${search}%`,`%${search}%`,`%${search}%`); }
-  const whereClause = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-  const offset = (parseInt(page) - 1) * parseInt(limit);
-  const countRow = queryOne(`SELECT COUNT(*) as total FROM report_files r ${whereClause}`, params);
-  const rows = queryAll(`SELECT r.*, u.full_name as uploader_name FROM report_files r LEFT JOIN users u ON r.uploaded_by = u.id ${whereClause} ORDER BY r.uploaded_at DESC LIMIT ? OFFSET ?`, [...params, parseInt(limit), offset]);
-  res.json({ data: rows, total: countRow?.total || 0, page: parseInt(page), totalPages: Math.ceil((countRow?.total || 0) / parseInt(limit)) });
+app.get('/api/reports', verifyToken, async (req, res) => {
+  try {
+    res.json(await listReports(req.query));
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to fetch reports' });
+  }
 });
 
-app.get('/api/reports/categories', verifyToken, (req, res) => {
-  const stats = CATEGORIES.map(cat => {
-    const row = queryOne('SELECT COUNT(*) as file_count, MAX(uploaded_at) as last_uploaded FROM report_files WHERE category_name = ?', [cat]);
-    return { category_name: cat, file_count: row?.file_count || 0, last_uploaded: row?.last_uploaded || null };
-  });
-  res.json(stats);
+app.get('/api/reports/categories', verifyToken, async (req, res) => {
+  try {
+    res.json(await getCategoryStats());
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to fetch category stats' });
+  }
 });
 
-app.get('/api/reports/recent', verifyToken, (req, res) => {
-  res.json(queryAll(`SELECT r.*, u.full_name as uploader_name FROM report_files r LEFT JOIN users u ON r.uploaded_by = u.id ORDER BY r.uploaded_at DESC LIMIT 10`));
+app.get('/api/reports/recent', verifyToken, async (req, res) => {
+  try {
+    res.json(await getRecentReports());
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to fetch recent reports' });
+  }
 });
 
 app.get('/api/reports/meta', verifyToken, (req, res) => {
-  res.json({ categories: CATEGORIES, plant_sections: PLANT_SECTIONS, months: MONTHS });
+  res.json(getReportMeta());
 });
 
-app.get('/api/reports/:id', verifyToken, (req, res) => {
-  const row = queryOne(`SELECT r.*, u.full_name as uploader_name FROM report_files r LEFT JOIN users u ON r.uploaded_by = u.id WHERE r.id = ?`, [req.params.id]);
-  if (!row) return res.status(404).json({ error: 'Report not found' });
-  res.json(row);
+app.get('/api/reports/:id', verifyToken, async (req, res) => {
+  try {
+    const row = await getReportById(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Report not found' });
+    res.json(row);
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to fetch report' });
+  }
 });
 
-app.delete('/api/reports/:id', verifyToken, requireAdmin, (req, res) => {
-  const existing = queryOne('SELECT * FROM report_files WHERE id = ?', [req.params.id]);
-  if (!existing) return res.status(404).json({ error: 'Report not found' });
-  runSql('DELETE FROM report_files WHERE id = ?', [req.params.id]);
-  res.json({ message: 'Report deleted successfully' });
+app.post('/api/reports', verifyToken, requireAdmin, (req, res, next) => {
+  uploadSingle(req, res, (uploadErr) => {
+    if (uploadErr) {
+      const status = uploadErr instanceof multer.MulterError && uploadErr.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ error: uploadErr.message || 'Upload failed' });
+    }
+    return next();
+  });
+}, async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const newReport = await createReportFromUpload({
+      file: req.file,
+      body: req.body,
+      userName: req.user?.full_name || req.user?.username || 'System',
+    });
+    return res.status(201).json(newReport);
+  } catch (error) {
+    return res.status(reportErrorStatus(error)).json({ error: error.message || 'Failed to upload report' });
+  }
+});
+
+app.put('/api/reports/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const updated = await updateReportRecord(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Report not found' });
+    res.json(updated);
+  } catch (error) {
+    res.status(reportErrorStatus(error)).json({ error: error.message || 'Failed to update report metadata' });
+  }
+});
+
+app.delete('/api/reports/:id', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    await deleteReportRecord(req.params.id);
+    res.json({ message: 'Report deleted successfully' });
+  } catch (error) {
+    res.status(reportErrorStatus(error)).json({ error: error.message || 'Failed to delete report' });
+  }
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled serverless API error:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  return res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
 });
 
 // Vercel serverless handler
 let initialized = false;
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '50mb'
+    }
+  }
+};
 
 export default async function handler(req, res) {
   if (!initialized) {

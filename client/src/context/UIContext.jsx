@@ -11,8 +11,15 @@ export function UIProvider({ children }) {
   const [showAddMachine, setShowAddMachine] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); // null | { filename, file_url, file_format }
   const [refreshKey, setRefreshKey] = useState(0);
+  const [toasts, setToasts] = useState([]);
 
-  const openUpload = useCallback((category) => setUploadState({ category: category || '' }), []);
+  const openUpload = useCallback((config) => {
+    if (typeof config === 'string') {
+      setUploadState({ kind: 'document', category: config || '' });
+      return;
+    }
+    setUploadState({ kind: 'bulk', module: '', category: '', ...(config || {}) });
+  }, []);
   const closeUpload = useCallback(() => setUploadState(null), []);
   const openLogin = useCallback(() => setShowLogin(true), []);
   const closeLogin = useCallback(() => setShowLogin(false), []);
@@ -21,6 +28,16 @@ export function UIProvider({ children }) {
   const openPreview = useCallback((file) => setPreviewFile(file), []);
   const closePreview = useCallback(() => setPreviewFile(null), []);
   const signalRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const dismissToast = useCallback((id) => {
+    setToasts((items) => items.filter((toast) => toast.id !== id));
+  }, []);
+  const pushToast = useCallback((toast) => {
+    const id = `toast-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((items) => [...items, { id, type: 'info', ...toast }]);
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== id));
+    }, toast.duration || 4000);
+  }, []);
   const toggleSidebar = useCallback(() => {
     // Desktop collapses, mobile toggles the off-canvas drawer
     if (window.innerWidth < 1024) setSidebarMobileOpen((v) => !v);
@@ -38,6 +55,7 @@ export function UIProvider({ children }) {
         showAddMachine, openAddMachine, closeAddMachine,
         previewFile, openPreview, closePreview,
         refreshKey, signalRefresh,
+        toasts, pushToast, dismissToast,
       }}
     >
       {children}

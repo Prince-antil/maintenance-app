@@ -1,33 +1,49 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { api } from '../api.js';
+import { useStore } from '../store.js';
+import { buildNotifications } from '../analytics.js';
 import { timeAgo, formatDateLong, loadLS, saveLS } from '../utils.js';
+import { listReportMetadata } from '../reportVault.js';
 import { UNIT_BADGE } from '../constants.js';
 import {
   Menu, Shield, Search, Bell, ChevronDown, LogIn, LogOut,
   Plus, Upload, User, Clock, FileText, CalendarDays, Cog,
+  AlertOctagon, ClipboardCheck, Zap, Settings, AlertTriangle, Info,
 } from 'lucide-react';
 
 const RECENT_KEY = 'ccpl_recent_searches';
 const NOTIF_SEEN_KEY = 'ccpl_notif_seen_at';
 
+const NOTIF_META = {
+  danger: { icon: AlertOctagon, cls: 'text-red-400 bg-red-400/10' },
+  warning: { icon: AlertTriangle, cls: 'text-amber-400 bg-amber-400/10' },
+  info: { icon: Info, cls: 'text-cyan-400 bg-cyan-400/10' },
+  upload: { icon: Upload, cls: 'text-emerald-400 bg-emerald-400/10' },
+};
+
+const RESULT_ICONS = {
+  machine: Cog, breakdown: AlertOctagon, pm: ClipboardCheck, energy: Zap, doc: FileText,
+};
+
 export default function TopNavbar() {
   const { user, logout } = useAuth();
-  const { toggleSidebar, openUpload, openLogin, openAddMachine } = useUI();
+  const { toggleSidebar, openUpload, openLogin, openAddMachine, refreshKey } = useUI();
   const navigate = useNavigate();
+  const store = useStore();
 
   // Instant search
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
+  const [serverResults, setServerResults] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState(() => loadLS(RECENT_KEY, []));
   const searchRef = useRef(null);
   const debounceRef = useRef(null);
 
   // Notifications
-  const [notifs, setNotifs] = useState([]);
+  const [uploadNotifs, setUploadNotifs] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [seenAt, setSeenAt] = useState(() => loadLS(NOTIF_SEEN_KEY, 0));
   const notifRef = useRef(null);
@@ -47,12 +63,33 @@ export default function TopNavbar() {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
-  // Notification feed from recent uploads
+  // Server upload feed → notification entries
   useEffect(() => {
-    api.getRecent().then(setNotifs).catch(() => {});
-  }, []);
+    Promise.allSettled([api.getRecent(), Promise.resolve(listReportMetadata({ limit: 6 }))])
+      .then(([remoteResult, localResult]) => {
+        const remote = remoteResult.status === 'fulfilled' ? remoteResult.value || [] : [];
+        const local = localResult.status === 'fulfilled' ? localResult.value || [] : [];
+        const merged = [...local, ...remote.filter((item) => !local.some((record) => record.id === item.id))];
+        setUploadNotifs(merged);
+      })
+      .catch(() => setUploadNotifs([]));
+  }, [refreshKey]);
 
-  const unread = notifs.filter((n) => new Date((n.uploaded_at || '') + 'Z').getTime() > seenAt).length;
+  // Derived notification centre: pending PM summaries, monthly
+  // breakdown logs, low health/availability (live) + new uploads
+  const notifications = useMemo(() => {
+    const derived = buildNotifications(store);
+    const uploads = uploadNotifs.slice(0, 6).map((n) => ({
+      id: `up-${n.id}`,
+      type: 'upload',
+      title: 'Report Uploaded',
+      detail: `${n.uploader_name || 'System'} uploaded ${n.filename} · ${n.category_name}${n.localOnly ? ' · saved in local vault' : ''}`,
+      ts: (n.uploaded_at || '').endsWith('Z') ? n.uploaded_at : n.uploaded_at + 'Z',
+    }));
+    return [...derived, ...uploads].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 12);
+  }, [store, uploadNotifs]);
+
+  const unread = notifications.filter((n) => new Date(n.ts).getTime() > seenAt).length;
 
   const markNotifsSeen = () => {
     const now = Date.now();
@@ -60,15 +97,50 @@ export default function TopNavbar() {
     saveLS(NOTIF_SEEN_KEY, now);
   };
 
-  // Debounced auto-complete
+  // Local instant search across the whole CMMS store (sync, zero latency)
+  const localResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out = [];
+    store.machines.forEach((m) => {
+      if (m.name.toLowerCase().includes(q) || (m.machineCode || '').toLowerCase().includes(q) || m.section.toLowerCase().includes(q)) {
+        out.push({ kind: 'machine', title: m.name, sub: `Machine · ${m.section}`, to: `/machines/${m.id}` });
+      }
+      (m.docs || []).forEach((d) => {
+        if (d.filename.toLowerCase().includes(q)) {
+          out.push({ kind: 'doc', title: d.filename, sub: `${(d.tab || 'doc').toUpperCase()} · ${m.name}`, to: `/machines/${m.id}` });
+        }
+      });
+    });
+    store.breakdowns.forEach((b) => {
+      const period = b.period ? new Date(`${b.period}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+      if (b.section.toLowerCase().includes(q) || period.toLowerCase().includes(q) || String(b.breakdownCount).includes(q)) {
+        out.push({ kind: 'breakdown', title: `${b.section} — ${period}`, sub: `Breakdown · ${b.breakdownCount} count · ${b.downtimeHours || 0}h`, to: '/breakdowns' });
+      }
+    });
+    store.pms.forEach((p) => {
+      const period = p.period ? new Date(`${p.period}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '';
+      if (p.section.toLowerCase().includes(q) || period.toLowerCase().includes(q) || String(p.plannedCount).includes(q)) {
+        out.push({ kind: 'pm', title: `${p.section} — ${period}`, sub: `PM · ${p.doneCount || 0}/${p.plannedCount || 0} done · ${p.pendingCount || 0} pending`, to: '/pm' });
+      }
+    });
+    store.energy.forEach((e) => {
+      if ((e.source || '').toLowerCase().includes(q)) {
+        out.push({ kind: 'energy', title: `${e.source} · ${e.kwh} kWh`, sub: `Energy · ${new Date(e.date).toLocaleDateString('en-GB')}`, to: '/energy' });
+      }
+    });
+    return out.slice(0, 6);
+  }, [query, store]);
+
+  // Debounced server-side report search
   const runSearch = useCallback((q) => {
     clearTimeout(debounceRef.current);
-    if (!q.trim()) { setResults([]); return; }
+    if (!q.trim()) { setServerResults([]); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const res = await api.getReports({ search: q.trim(), limit: 6 });
-        setResults(res.data || []);
-      } catch { setResults([]); }
+        const res = await api.getReports({ search: q.trim(), limit: 5 });
+        setServerResults(res.data || []);
+      } catch { setServerResults([]); }
     }, 250);
   }, []);
 
@@ -80,12 +152,21 @@ export default function TopNavbar() {
     saveLS(RECENT_KEY, next);
   };
 
+  const openLocal = (r) => {
+    commitSearch(query);
+    setSearchOpen(false);
+    setQuery('');
+    navigate(r.to);
+  };
+
   const openResult = (r) => {
     commitSearch(query);
     setSearchOpen(false);
     setQuery('');
     navigate(`/category/${encodeURIComponent(r.category_name)}`);
   };
+
+  const noMatches = query && localResults.length === 0 && serverResults.length === 0;
 
   return (
     <header className="sticky top-0 z-[80] border-b border-white/[0.08] bg-slate-900/85 backdrop-blur-xl">
@@ -115,14 +196,14 @@ export default function TopNavbar() {
           </div>
         </button>
 
-        {/* Instant search */}
+        {/* Instant global search */}
         <div className="flex-1 max-w-xl mx-auto relative" ref={searchRef}>
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
             <input
               type="search"
               className="input-field pl-9 !py-2 text-[13px]"
-              placeholder="Search machines, SOPs, reports, drawings..."
+              placeholder="Search machines, breakdowns, PM, SOPs, reports..."
               value={query}
               onFocus={() => setSearchOpen(true)}
               onChange={(e) => { setQuery(e.target.value); setSearchOpen(true); runSearch(e.target.value); }}
@@ -134,15 +215,32 @@ export default function TopNavbar() {
           </div>
           {searchOpen && (query || recentSearches.length > 0) && (
             <div className="absolute top-full mt-2 left-0 right-0 glass-card !rounded-xl overflow-hidden shadow-2xl">
-              {query && results.length > 0 && (
-                <ul role="listbox" aria-label="Search results">
-                  {results.map((r) => (
+              {localResults.length > 0 && (
+                <ul role="listbox" aria-label="CMMS results">
+                  <li className="px-4 pt-2 pb-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider">Maintenance Records</li>
+                  {localResults.map((r, i) => {
+                    const Icon = RESULT_ICONS[r.kind] || FileText;
+                    return (
+                      <li key={`${r.kind}-${i}`}>
+                        <button onClick={() => openLocal(r)} className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-cyan-500/8 text-left transition-colors">
+                          <Icon size={13} className="text-cyan-400 flex-shrink-0" aria-hidden="true" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-white text-xs font-medium truncate">{r.title}</p>
+                            <p className="text-slate-500 text-[10px] truncate">{r.sub}</p>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {query && serverResults.length > 0 && (
+                <ul role="listbox" aria-label="Document results">
+                  <li className="px-4 pt-2 pb-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-t border-white/[0.05]">Report Documents</li>
+                  {serverResults.map((r) => (
                     <li key={r.id}>
-                      <button
-                        onClick={() => openResult(r)}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-cyan-500/8 text-left transition-colors"
-                      >
-                        <FileText size={13} className="text-cyan-400 flex-shrink-0" aria-hidden="true" />
+                      <button onClick={() => openResult(r)} className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-cyan-500/8 text-left transition-colors">
+                        <FileText size={13} className="text-emerald-400 flex-shrink-0" aria-hidden="true" />
                         <div className="min-w-0 flex-1">
                           <p className="text-white text-xs font-medium truncate">{r.filename}</p>
                           <p className="text-slate-500 text-[10px] truncate">{r.category_name} · {r.plant_section}</p>
@@ -153,7 +251,7 @@ export default function TopNavbar() {
                   ))}
                 </ul>
               )}
-              {query && results.length === 0 && (
+              {noMatches && (
                 <p className="px-4 py-3 text-slate-500 text-xs">No matches for "{query}"</p>
               )}
               {!query && recentSearches.length > 0 && (
@@ -182,8 +280,8 @@ export default function TopNavbar() {
               <button onClick={openAddMachine} className="btn-primary !py-2 !px-3.5 text-xs inline-flex items-center gap-1.5">
                 <Plus size={13} aria-hidden="true" /> New Machine
               </button>
-              <button onClick={() => openUpload()} className="btn-success !py-2 !px-3.5 text-xs inline-flex items-center gap-1.5">
-                <Upload size={13} aria-hidden="true" /> Upload Report
+              <button onClick={() => openUpload({ kind: 'bulk' })} className="btn-success !py-2 !px-3.5 text-xs inline-flex items-center gap-1.5">
+                <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
               </button>
             </div>
           )}
@@ -194,7 +292,7 @@ export default function TopNavbar() {
             {formatDateLong()}
           </span>
 
-          {/* Notifications */}
+          {/* Notification centre */}
           <div className="relative" ref={notifRef}>
             <button
               onClick={() => { setNotifOpen((v) => !v); if (!notifOpen) markNotifsSeen(); }}
@@ -209,21 +307,28 @@ export default function TopNavbar() {
               )}
             </button>
             {notifOpen && (
-              <div className="absolute right-0 top-full mt-2 w-80 glass-card !rounded-xl overflow-hidden shadow-2xl">
-                <p className="px-4 py-2.5 text-xs font-semibold text-white border-b border-white/[0.06]">Notifications</p>
-                {notifs.length === 0 ? (
-                  <p className="px-4 py-4 text-slate-500 text-xs">No notifications yet.</p>
+              <div className="absolute right-0 top-full mt-2 w-[340px] glass-card !rounded-xl overflow-hidden shadow-2xl">
+                <p className="px-4 py-2.5 text-xs font-semibold text-white border-b border-white/[0.06]">Notification Centre</p>
+                {notifications.length === 0 ? (
+                  <p className="px-4 py-4 text-slate-500 text-xs">All clear — pending PM summaries, monthly breakdown logs, and low health warnings will surface here automatically.</p>
                 ) : (
-                  <ul className="max-h-72 overflow-y-auto">
-                    {notifs.slice(0, 8).map((n) => (
-                      <li key={n.id} className="px-4 py-2.5 border-b border-white/[0.04] hover:bg-white/[0.03]">
-                        <p className="text-slate-200 text-xs">
-                          <span className="text-cyan-400 font-medium">{n.uploader_name || 'System'}</span> uploaded{' '}
-                          <span className="text-white font-medium">{n.filename}</span>
-                        </p>
-                        <p className="text-slate-500 text-[10px] mt-0.5">{n.category_name} · {timeAgo(n.uploaded_at)}</p>
-                      </li>
-                    ))}
+                  <ul className="max-h-80 overflow-y-auto">
+                    {notifications.map((n) => {
+                      const meta = NOTIF_META[n.type] || NOTIF_META.info;
+                      const Icon = meta.icon;
+                      return (
+                        <li key={n.id} className="flex gap-2.5 px-4 py-2.5 border-b border-white/[0.04] hover:bg-white/[0.03]">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${meta.cls}`}>
+                            <Icon size={13} aria-hidden="true" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-white text-xs font-semibold">{n.title}</p>
+                            <p className="text-slate-400 text-[11px] leading-snug mt-0.5">{n.detail}</p>
+                            <p className="text-slate-600 text-[10px] mt-0.5">{timeAgo(n.ts)}</p>
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -262,7 +367,13 @@ export default function TopNavbar() {
                     onClick={() => { setProfileOpen(false); navigate('/machines'); }}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-slate-300 hover:bg-white/[0.04] transition-colors"
                   >
-                    <Cog size={13} aria-hidden="true" /> Machine Directory
+                    <Cog size={13} aria-hidden="true" /> Machine Register
+                  </button>
+                  <button
+                    onClick={() => { setProfileOpen(false); navigate('/settings'); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-slate-300 hover:bg-white/[0.04] transition-colors"
+                  >
+                    <Settings size={13} aria-hidden="true" /> Settings
                   </button>
                   <button
                     onClick={async () => {

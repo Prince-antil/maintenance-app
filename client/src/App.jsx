@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from './context/AuthContext.jsx';
 import { useUI } from './context/UIContext.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -15,6 +15,15 @@ import LoginModal from './components/LoginModal.jsx';
 import UploadModal from './components/UploadModal.jsx';
 import MachineModal from './components/MachineModal.jsx';
 import DocumentPreviewModal from './components/DocumentPreviewModal.jsx';
+import ToastViewport from './components/ToastViewport.jsx';
+
+// Lazily loaded CMMS modules — keeps the initial bundle lean
+const Breakdowns = lazy(() => import('./pages/Breakdowns.jsx'));
+const PreventiveMaintenance = lazy(() => import('./pages/PreventiveMaintenance.jsx'));
+const Energy = lazy(() => import('./pages/Energy.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Settings = lazy(() => import('./pages/Settings.jsx'));
+const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -24,6 +33,7 @@ function AppContent() {
     showAddMachine, closeAddMachine,
     previewFile, closePreview,
     signalRefresh,
+    toasts, dismissToast,
   } = useUI();
   const navigate = useNavigate();
   const [showWelcome, setShowWelcome] = useState(false);
@@ -65,12 +75,30 @@ function AppContent() {
         <Sidebar />
         <main className="flex-1 min-w-0 flex flex-col page-enter">
           <div className="flex-1 p-4 lg:p-6">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/category/:categoryName" element={<CategoryView />} />
-              <Route path="/machines" element={<Machines />} />
-              <Route path="/machines/:machineId" element={<MachineProfile />} />
-            </Routes>
+            <Suspense
+              fallback={
+                <div className="max-w-7xl mx-auto space-y-4 animate-pulse" role="status" aria-label="Loading module">
+                  <div className="h-9 w-64 rounded-control bg-white/[0.05]" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[...Array(4)].map((_, i) => <div key={i} className="h-20 glass-card" />)}
+                  </div>
+                  <div className="h-72 glass-card" />
+                </div>
+              }
+            >
+              <Routes>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/category/:categoryName" element={<CategoryView />} />
+                <Route path="/machines" element={<Machines />} />
+                <Route path="/machines/:machineId" element={<MachineProfile />} />
+                <Route path="/breakdowns" element={<Breakdowns />} />
+                <Route path="/pm" element={<PreventiveMaintenance />} />
+                <Route path="/energy" element={<Energy />} />
+                <Route path="/sop" element={<SOPLibrary />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/settings" element={<Settings />} />
+              </Routes>
+            </Suspense>
           </div>
           <Footer />
         </main>
@@ -82,13 +110,14 @@ function AppContent() {
       {showLogin && <LoginModal onClose={closeLogin} />}
       {uploadState && user?.role === 'admin' && (
         <UploadModal
-          initialCategory={uploadState.category}
+          initialState={uploadState}
           onClose={closeUpload}
           onSuccess={signalRefresh}
         />
       )}
       {showAddMachine && user?.role === 'admin' && <MachineModal onClose={closeAddMachine} />}
       {previewFile && <DocumentPreviewModal file={previewFile} onClose={closePreview} />}
+      <ToastViewport toasts={toasts} dismissToast={dismissToast} />
     </div>
   );
 }

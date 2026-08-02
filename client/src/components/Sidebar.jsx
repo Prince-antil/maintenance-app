@@ -1,23 +1,40 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUI } from '../context/UIContext.jsx';
 import {
-  LayoutDashboard, BookOpen, ClipboardCheck, AlertTriangle, CheckSquare,
-  Zap, Sun, Activity, Lightbulb, TrendingUp, ShieldCheck, X, Shield,
+  LayoutDashboard, Cog, AlertOctagon, ClipboardCheck, BookOpen,
+  Zap, ShieldCheck, Lightbulb, FileBarChart2, Settings,
+  AlertTriangle, CheckSquare, Sun, Activity, TrendingUp, X, Shield,
 } from 'lucide-react';
 
-// Professional icon set per module (replaces legacy colored dots)
-const NAV_ITEMS = [
-  { label: 'Executive Dashboard', icon: LayoutDashboard, to: '/', color: 'text-cyan-400' },
-  { label: 'Operating Procedure for M/C', icon: BookOpen, to: '/machines', color: 'text-cyan-400' },
-  { label: 'Monthly PM Report', icon: ClipboardCheck, to: '/category/Monthly%20PM%20Report', color: 'text-cyan-400' },
-  { label: 'Plantwise Breakdown Report', icon: AlertTriangle, to: '/category/Plantwise%20Breakdown%20Report', color: 'text-amber-400' },
-  { label: 'FAT (Factory Acceptance Test)', icon: CheckSquare, to: '/category/FAT%20(Factory%20Acceptance%20Test)', color: 'text-violet-400' },
-  { label: 'Energy Report (DG 500 & 380KVA)', icon: Zap, to: '/category/Energy%20Report%20(DG%20500%20%26%20380KVA)', color: 'text-yellow-400' },
-  { label: 'Energy Report (Solar)', icon: Sun, to: '/category/Energy%20Report%20(Solar)', color: 'text-emerald-400' },
-  { label: 'Plantwise Energy Consumption', icon: Activity, to: '/category/Plantwise%20Energy%20Consumption', color: 'text-emerald-400' },
-  { label: 'Kaizen', icon: Lightbulb, to: '/category/Kaizen', color: 'text-indigo-400' },
-  { label: 'Improvement', icon: TrendingUp, to: '/category/Improvement', color: 'text-purple-400' },
-  { label: 'ORM Data', icon: ShieldCheck, to: '/category/ORM%20Data%20(Operational%20Risk%20Management)', color: 'text-rose-400' },
+// Enterprise CMMS navigation — core modules first, document archive below
+const NAV_GROUPS = [
+  {
+    title: 'Maintenance',
+    items: [
+      { label: 'Dashboard', icon: LayoutDashboard, to: '/', color: 'text-cyan-400' },
+      { label: 'Machines', icon: Cog, to: '/machines', color: 'text-cyan-400' },
+      { label: 'Breakdowns', icon: AlertOctagon, to: '/breakdowns', color: 'text-red-400' },
+      { label: 'Preventive Maintenance', icon: ClipboardCheck, to: '/pm', color: 'text-emerald-400' },
+      { label: 'SOP Library', icon: BookOpen, to: '/sop', color: 'text-violet-400' },
+      { label: 'Energy', icon: Zap, to: '/energy', color: 'text-amber-400' },
+      { label: 'ORM', icon: ShieldCheck, to: '/category/ORM%20Data%20(Operational%20Risk%20Management)', color: 'text-rose-400' },
+      { label: 'Kaizen', icon: Lightbulb, to: '/category/Kaizen', color: 'text-indigo-400' },
+      { label: 'Reports & Analytics', icon: FileBarChart2, to: '/reports', color: 'text-teal-400' },
+      { label: 'Settings', icon: Settings, to: '/settings', color: 'text-slate-300' },
+    ],
+  },
+  {
+    title: 'Document Library',
+    items: [
+      { label: 'Monthly PM Report', icon: ClipboardCheck, to: '/category/Monthly%20PM%20Report', color: 'text-cyan-400' },
+      { label: 'Plantwise Breakdown Report', icon: AlertTriangle, to: '/category/Plantwise%20Breakdown%20Report', color: 'text-amber-400' },
+      { label: 'FAT (Factory Acceptance Test)', icon: CheckSquare, to: '/category/FAT%20(Factory%20Acceptance%20Test)', color: 'text-violet-400' },
+      { label: 'Energy Report (DG 500 & 380KVA)', icon: Zap, to: '/category/Energy%20Report%20(DG%20500%20%26%20380KVA)', color: 'text-yellow-400' },
+      { label: 'Energy Report (Solar)', icon: Sun, to: '/category/Energy%20Report%20(Solar)', color: 'text-emerald-400' },
+      { label: 'Plantwise Energy Consumption', icon: Activity, to: '/category/Plantwise%20Energy%20Consumption', color: 'text-emerald-400' },
+      { label: 'Improvement', icon: TrendingUp, to: '/category/Improvement', color: 'text-purple-400' },
+    ],
+  },
 ];
 
 export default function Sidebar() {
@@ -26,9 +43,11 @@ export default function Sidebar() {
   const location = useLocation();
 
   const isActive = (to) => {
-    if (to === '/') return location.pathname === '/';
-    return decodeURIComponent(location.pathname) === decodeURIComponent(to)
-      || location.pathname.startsWith(to.split('/category')[0] === '' ? to : to);
+    const path = decodeURIComponent(location.pathname);
+    const target = decodeURIComponent(to);
+    if (target === '/') return path === '/';
+    if (target.startsWith('/category/')) return path === target;
+    return path === target || path.startsWith(`${target}/`);
   };
 
   const go = (to) => {
@@ -37,10 +56,7 @@ export default function Sidebar() {
   };
 
   const content = (collapsed) => (
-    <nav
-      className="flex flex-col h-full"
-      aria-label="Main navigation"
-    >
+    <nav className="flex flex-col h-full" aria-label="Main navigation">
       {/* Mobile drawer header */}
       <div className="lg:hidden flex items-center justify-between px-4 py-4 border-b border-white/[0.06]">
         <div className="flex items-center gap-2">
@@ -58,27 +74,37 @@ export default function Sidebar() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-4 px-2.5 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const active = isActive(item.to);
-          return (
-            <button
-              key={item.to}
-              onClick={() => go(item.to)}
-              className={`sidebar-item relative w-full flex items-center gap-3 rounded-control px-3 py-2.5 text-[13px] font-medium transition-all text-left
-                ${active
-                  ? 'bg-cyan-500/10 text-white border border-cyan-500/25'
-                  : 'text-slate-400 hover:text-white hover:bg-white/[0.04] border border-transparent'}`}
-              aria-current={active ? 'page' : undefined}
-              title={collapsed ? undefined : item.label}
-            >
-              <Icon size={17} className={`flex-shrink-0 ${active ? item.color : ''}`} aria-hidden="true" />
-              {!collapsed && <span className="truncate">{item.label}</span>}
-              {collapsed && <span className="sidebar-tooltip" role="tooltip">{item.label}</span>}
-            </button>
-          );
-        })}
+      <div className="flex-1 overflow-y-auto py-4 px-2.5 space-y-4">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title} className="space-y-1">
+            {!collapsed && (
+              <p className="px-3 pb-1 text-[10px] text-slate-600 font-semibold uppercase tracking-wider">
+                {group.title}
+              </p>
+            )}
+            {collapsed && <div className="mx-3 border-t border-white/[0.06]" aria-hidden="true" />}
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.to);
+              return (
+                <button
+                  key={item.to}
+                  onClick={() => go(item.to)}
+                  className={`sidebar-item relative w-full flex items-center gap-3 rounded-control px-3 py-2.5 text-[13px] font-medium transition-all text-left
+                    ${active
+                      ? 'bg-cyan-500/10 text-white border border-cyan-500/25'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.04] border border-transparent'}`}
+                  aria-current={active ? 'page' : undefined}
+                  title={collapsed ? undefined : item.label}
+                >
+                  <Icon size={17} className={`flex-shrink-0 ${active ? item.color : ''}`} aria-hidden="true" />
+                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {collapsed && <span className="sidebar-tooltip" role="tooltip">{item.label}</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
       {!collapsed && (

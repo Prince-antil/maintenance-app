@@ -16,8 +16,8 @@ export default function QuickActionsPanel() {
   const actions = [
     { label: '+ Upload SOP', icon: BookOpen, run: () => openUpload('Monthly PM Report') },
     { label: '+ Add Machine', icon: Plus, run: () => openAddMachine() },
-    { label: '+ Upload PM / Breakdown Report', icon: ClipboardCheck, run: () => openUpload('Plantwise Breakdown Report') },
-    { label: '+ Add Energy Log', icon: Activity, run: () => openUpload('Plantwise Energy Consumption') },
+    { label: '+ Bulk Import PM', icon: ClipboardCheck, run: () => openUpload({ kind: 'bulk', module: 'pm' }) },
+    { label: '+ Bulk Import Energy', icon: Activity, run: () => openUpload({ kind: 'bulk', module: 'energy' }) },
     { label: '+ Create Kaizen Entry', icon: Lightbulb, run: () => openUpload('Kaizen') },
   ];
 

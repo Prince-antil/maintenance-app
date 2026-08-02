@@ -5,7 +5,9 @@ import { useUI } from '../context/UIContext.jsx';
 import { api } from '../api.js';
 import EnterpriseTable from '../components/EnterpriseTable.jsx';
 import { CATEGORY_META, PLANT_SECTIONS, MONTHS, YEARS, EXT_META, ALLOWED_EXT } from '../constants.js';
+import { getDocumentUrl, toPreviewDocument } from '../lib/documentLinks.js';
 import { timeAgo } from '../utils.js';
+import { deleteReportFromVault, getLocalReports, revokeReportUrls } from '../reportVault.js';
 import {
   ArrowLeft, Download, Trash2, Upload, Eye, AlertTriangle, FileText,
 } from 'lucide-react';
@@ -44,23 +46,58 @@ export default function CategoryView() {
         params.plant_section = filters.plant_section;
       }
       if (filters.file_format) params.file_format = filters.file_format;
-      const res = await api.getReports(params);
-      setReports(res.data);
-      setTotal(res.total);
+
+      const [remoteResult, localResult] = await Promise.allSettled([
+        api.getReports(params),
+        getLocalReports({
+          category: decodedName,
+          month: filters.reporting_month,
+          year: filters.reporting_year,
+          plant_section: filters.plant_section && filters.plant_section !== PLANT_SECTIONS[0] ? filters.plant_section : '',
+          file_format: filters.file_format,
+        }),
+      ]);
+
+      const remoteReports = remoteResult.status === 'fulfilled' ? remoteResult.value.data || [] : [];
+      const localReports = localResult.status === 'fulfilled' ? localResult.value || [] : [];
+      const merged = [...localReports, ...remoteReports.filter((report) => !localReports.some((local) => local.id === report.id))];
+
+      setReports(merged);
+      setTotal(merged.length);
     } catch (e) {
       console.error(e);
+      setReports([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { loadReports(); }, [categoryName, filters, refreshKey]);
+  useEffect(() => () => revokeReportUrls(reports), [reports]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await api.deleteReport(deleteTarget.id);
+      let remoteError = null;
+
+      if (!deleteTarget.localOnly) {
+        try {
+          await api.deleteReport(deleteTarget.id);
+        } catch (err) {
+          remoteError = err;
+        }
+      }
+
+      if (deleteTarget.isLocalVault) {
+        await deleteReportFromVault(deleteTarget.id);
+      }
+
+      if (remoteError && !deleteTarget.isLocalVault) {
+        throw remoteError;
+      }
+
       setDeleteTarget(null);
       loadReports();
     } catch (e) {
@@ -97,34 +134,39 @@ export default function CategoryView() {
     {
       key: '_actions',
       label: 'Actions',
-      render: (r) => (
-        <div className="flex items-center gap-1.5">
-          <button
-            onClick={() => openPreview(r)}
-            className="btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5"
-            aria-label={`Preview ${r.filename}`}
-          >
-            <Eye size={11} aria-hidden="true" /> Preview
-          </button>
-          <a
-            href={r.file_url}
-            download={r.filename}
-            className="btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5 text-cyan-400 hover:text-cyan-300"
-            aria-label={`Download ${r.filename}`}
-          >
-            <Download size={11} aria-hidden="true" /> Download
-          </a>
-          {user?.role === 'admin' && (
+      render: (r) => {
+        const fileUrl = getDocumentUrl(r);
+        return (
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setDeleteTarget(r)}
-              className="btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5 text-red-400 hover:text-red-300"
-              aria-label={`Delete ${r.filename}`}
+              onClick={() => fileUrl && openPreview(toPreviewDocument(r))}
+              disabled={!fileUrl}
+              className="btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5 disabled:opacity-40"
+              aria-label={`Preview ${r.filename}`}
             >
-              <Trash2 size={11} aria-hidden="true" />
+              <Eye size={11} aria-hidden="true" /> Preview
             </button>
-          )}
-        </div>
-      ),
+            <a
+              href={fileUrl || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5 text-cyan-400 hover:text-cyan-300 ${fileUrl ? '' : 'pointer-events-none opacity-40'}`}
+              aria-label={`Download ${r.filename}`}
+            >
+              <Download size={11} aria-hidden="true" /> Download
+            </a>
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => setDeleteTarget(r)}
+                className="btn-ghost inline-flex items-center gap-1 text-[11px] !py-1 !px-2.5 text-red-400 hover:text-red-300"
+                aria-label={`Delete ${r.filename}`}
+              >
+                <Trash2 size={11} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        );
+      },
       value: () => '',
     },
   ];

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { X, Download, FileText, ExternalLink } from 'lucide-react';
 import { EXT_META } from '../constants.js';
+import { getDocumentUrl } from '../lib/documentLinks.js';
 
 const OFFICE_EXTS = ['.doc', '.docx', '.xlsx', '.xls', '.ppt', '.pptx', '.csv'];
 const VIDEO_EXTS = ['.mp4', '.webm', '.mov'];
@@ -20,23 +21,33 @@ export default function DocumentPreviewModal({ file, onClose }) {
 
   const ext = (file.file_format || '.' + (file.filename?.split('.').pop() || '')).toLowerCase();
   const extMeta = EXT_META[ext];
-  const isDataUrl = file.file_url?.startsWith('data:');
-  const absoluteUrl = isDataUrl ? file.file_url : new URL(file.file_url, window.location.origin).href;
+  const fileUrl = getDocumentUrl(file);
+  const isInlineUrl = fileUrl.startsWith('data:') || fileUrl.startsWith('blob:');
+  const absoluteUrl = fileUrl ? (isInlineUrl ? fileUrl : new URL(fileUrl, window.location.origin).href) : '';
 
   let viewer = null;
-  if (ext === '.pdf') {
+  if (!fileUrl) {
+    viewer = (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-center px-6">
+        <FileText size={40} className="text-slate-600" aria-hidden="true" />
+        <p className="text-body max-w-sm">
+          This document does not have a public file URL yet. Re-upload it to restore cross-device access.
+        </p>
+      </div>
+    );
+  } else if (ext === '.pdf') {
     viewer = (
       <iframe
-        src={`${file.file_url}#toolbar=1&view=FitH`}
+        src={`${fileUrl}#toolbar=1&view=FitH`}
         title={`Preview: ${file.filename}`}
         className="w-full h-full rounded-b-card bg-white"
       />
     );
   } else if (VIDEO_EXTS.includes(ext)) {
     viewer = (
-      <video src={file.file_url} controls className="w-full h-full bg-black rounded-b-card" aria-label={`Video: ${file.filename}`} />
+      <video src={fileUrl} controls className="w-full h-full bg-black rounded-b-card" aria-label={`Video: ${file.filename}`} />
     );
-  } else if (OFFICE_EXTS.includes(ext) && !isDataUrl) {
+  } else if (OFFICE_EXTS.includes(ext) && !isInlineUrl) {
     // Microsoft Office Docs Viewer wrapper (requires a publicly reachable URL)
     viewer = (
       <iframe
@@ -52,7 +63,7 @@ export default function DocumentPreviewModal({ file, onClose }) {
         <p className="text-body max-w-sm">
           Inline preview is not available for this file. Use the download button to open it locally.
         </p>
-        <a href={file.file_url} download={file.filename} className="btn-primary inline-flex items-center gap-2">
+        <a href={fileUrl} download={file.filename} className="btn-primary inline-flex items-center gap-2">
           <Download size={15} aria-hidden="true" /> Download File
         </a>
       </div>
@@ -74,16 +85,17 @@ export default function DocumentPreviewModal({ file, onClose }) {
           <p className="text-white text-sm font-semibold truncate flex-1" title={file.filename}>{file.filename}</p>
           {extMeta && <span className={`badge ${extMeta.badge}`}>{extMeta.label}</span>}
           <a
-            href={file.file_url}
-            download={file.filename}
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
             className="btn-ghost inline-flex items-center gap-1.5 !py-1.5 !px-3 text-xs"
             aria-label="Download file"
           >
             <Download size={13} aria-hidden="true" /> Download File
           </a>
-          {!isDataUrl && (
+          {!isInlineUrl && (
             <a
-              href={file.file_url}
+              href={fileUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-ghost inline-flex items-center gap-1.5 !py-1.5 !px-3 text-xs hidden sm:inline-flex"
