@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useStore } from '../store.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useStore, updateBreakdown, deleteBreakdown, updatePM, deletePM, updateEnergyLog, deleteEnergyLog } from '../store.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import {
   availabilityTrend,
   breakdownByDepartment,
@@ -25,7 +26,7 @@ import { COMPANY_NAME } from '../constants.js';
 import {
   AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
   Factory, FileBarChart2, FileSpreadsheet, FileText, Gauge, Lightbulb,
-  Printer, ShieldCheck, Timer, TimerReset, TrendingUp, Zap,
+  Pencil, Printer, ShieldCheck, Timer, TimerReset, Trash2, TrendingUp, X, Zap,
 } from 'lucide-react';
 
 const cellValue = (col, row) => String(col.value ? col.value(row) : row[col.key] ?? '');
@@ -72,11 +73,248 @@ function exportPDF(title, columns, rows) {
 
 const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—');
 
+// Reports where rows have real store IDs and can be edited / deleted
+const EDITABLE_REPORTS = new Set(['pm', 'breakdown', 'energy']);
+
+const SOURCES = ['DG 500 kVA', 'DG 380 kVA', 'Solar Generation', 'Grid / HT Supply', 'Plant SEC'];
+
+// ---------- Edit Modal ----------
+function EditModal({ reportId, row, onSave, onDelete, onClose }) {
+  const initialState = useMemo(() => {
+    if (reportId === 'pm') {
+      return {
+        plannedCount: String(row.plannedCount ?? ''),
+        doneCount: String(row.doneCount ?? ''),
+        pendingCount: String(row.pendingCount ?? ''),
+        remarks: row.remarks || '',
+      };
+    }
+    if (reportId === 'breakdown') {
+      return {
+        breakdownCount: String(row.breakdownCount ?? ''),
+        downtimeHours: String(row.downtimeHours ?? ''),
+        operatingHours: String(row.operatingHours ?? ''),
+        mttr: String(row.mttr ?? ''),
+        mtbf: String(row.mtbf ?? ''),
+        remarks: row.remarks || '',
+      };
+    }
+    // energy
+    return {
+      date: row.date || '',
+      source: row.source || SOURCES[0],
+      kwh: String(row.kwh ?? ''),
+      fuelConsumedLitres: String(row.fuelConsumedLitres ?? ''),
+      solarGenerationKwh: String(row.solarGenerationKwh ?? ''),
+      dg500RunHours: String(row.dg500RunHours ?? ''),
+      dg380RunHours: String(row.dg380RunHours ?? ''),
+      plantSection: row.plantSection || '',
+      remarks: row.remarks || '',
+    };
+  }, [reportId, row]);
+
+  const [form, setForm] = useState(initialState);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const overlayRef = useRef(null);
+
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    onSave(form);
+  };
+
+  const handleOverlayClick = (e) => {
+    if (e.target === overlayRef.current) onClose();
+  };
+
+  const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
+  const labelCls = 'block text-xs text-slate-400 mb-1';
+
+  const periodLabel = row.period
+    ? new Date(`${row.period}-01`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    : row.date
+      ? new Date(row.date).toLocaleDateString('en-GB')
+      : '';
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={handleOverlayClick}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Edit record"
+    >
+      <div className="glass-card w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div>
+            <h3 className="text-card-title">Edit Record</h3>
+            {periodLabel && <p className="text-meta mt-0.5">{periodLabel}{row.section ? ` · ${row.section}` : ''}</p>}
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSave} className="p-5 space-y-4">
+          {reportId === 'pm' && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Planned PM</label>
+                  <input type="number" min="0" value={form.plannedCount} onChange={set('plannedCount')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Done PM</label>
+                  <input type="number" min="0" value={form.doneCount} onChange={set('doneCount')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Pending PM</label>
+                  <input type="number" min="0" value={form.pendingCount} onChange={set('pendingCount')} className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Remarks</label>
+                <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+              </div>
+            </>
+          )}
+
+          {reportId === 'breakdown' && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Breakdown Count</label>
+                  <input type="number" min="0" value={form.breakdownCount} onChange={set('breakdownCount')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Downtime (hrs)</label>
+                  <input type="number" min="0" step="0.1" value={form.downtimeHours} onChange={set('downtimeHours')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Operating Hours</label>
+                  <input type="number" min="0" step="0.1" value={form.operatingHours} onChange={set('operatingHours')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>MTTR (hrs)</label>
+                  <input type="number" min="0" step="0.01" value={form.mttr} onChange={set('mttr')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>MTBF (hrs)</label>
+                  <input type="number" min="0" step="0.01" value={form.mtbf} onChange={set('mtbf')} className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Remarks</label>
+                <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+              </div>
+            </>
+          )}
+
+          {reportId === 'energy' && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>Date</label>
+                  <input type="date" value={form.date} onChange={set('date')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Source</label>
+                  <select value={form.source} onChange={set('source')} className={inputCls}>
+                    {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>kWh</label>
+                  <input type="number" min="0" step="0.01" value={form.kwh} onChange={set('kwh')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Fuel (L)</label>
+                  <input type="number" min="0" step="0.01" value={form.fuelConsumedLitres} onChange={set('fuelConsumedLitres')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Solar (kWh)</label>
+                  <input type="number" min="0" step="0.01" value={form.solarGenerationKwh} onChange={set('solarGenerationKwh')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>DG 500 Run Hrs</label>
+                  <input type="number" min="0" step="0.1" value={form.dg500RunHours} onChange={set('dg500RunHours')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>DG 380 Run Hrs</label>
+                  <input type="number" min="0" step="0.1" value={form.dg380RunHours} onChange={set('dg380RunHours')} className={inputCls} />
+                </div>
+                <div>
+                  <label className={labelCls}>Plant Section</label>
+                  <input type="text" value={form.plantSection} onChange={set('plantSection')} className={inputCls} />
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>Remarks</label>
+                <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+              </div>
+            </>
+          )}
+
+          <div className="flex items-center justify-between pt-1">
+            {!confirmDelete ? (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="btn-danger text-xs inline-flex items-center gap-1.5"
+              >
+                <Trash2 size={13} /> Delete
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-red-400">Sure?</span>
+                <button type="button" onClick={onDelete} className="btn-danger text-xs px-3 py-1">Yes, delete</button>
+                <button type="button" onClick={() => setConfirmDelete(false)} className="btn-ghost text-xs px-3 py-1">Cancel</button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
+              <button type="submit" className="btn-primary text-xs">Save Changes</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Reports() {
   const store = useStore();
+  const { user } = useAuth();
   const { machines, breakdowns, pms, energy } = store;
   const [active, setActive] = useState('equipment');
   const [serverDocs, setServerDocs] = useState([]);
+  const [editRow, setEditRow] = useState(null); // { reportId, row }
+
+  const isAdmin = user?.role === 'admin';
+  const userName = user?.full_name || user?.username || 'Admin';
+
+  const handleEdit = (reportId, row) => setEditRow({ reportId, row });
+  const handleCloseEdit = () => setEditRow(null);
+
+  const handleSaveEdit = (form) => {
+    if (!editRow) return;
+    const { reportId, row } = editRow;
+    if (reportId === 'pm') updatePM(row.id, form, userName);
+    else if (reportId === 'breakdown') updateBreakdown(row.id, form, userName);
+    else if (reportId === 'energy') updateEnergyLog(row.id, form, userName);
+    setEditRow(null);
+  };
+
+  const handleDeleteRow = () => {
+    if (!editRow) return;
+    const { reportId, row } = editRow;
+    if (reportId === 'pm') deletePM(row.id, userName);
+    else if (reportId === 'breakdown') deleteBreakdown(row.id, userName);
+    else if (reportId === 'energy') deleteEnergyLog(row.id, userName);
+    setEditRow(null);
+  };
 
   useEffect(() => {
     api.getReports({ limit: 500 }).then((response) => setServerDocs(response.data || [])).catch(() => {});
@@ -441,16 +679,31 @@ export default function Reports() {
           <div className="overflow-x-auto max-h-[520px]">
             <table className="enterprise-table w-full min-w-[720px]">
               <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
-                <tr>{report.columns.map((col) => <th key={col.label}>{col.label}</th>)}</tr>
+                <tr>
+                  {report.columns.map((col) => <th key={col.label}>{col.label}</th>)}
+                  {isAdmin && EDITABLE_REPORTS.has(report.id) && <th className="w-16">Edit</th>}
+                </tr>
               </thead>
               <tbody>
                 {report.rows.slice(0, 200).map((row, index) => (
-                  <tr key={index}>
+                  <tr key={row.id || index}>
                     {report.columns.map((col) => (
                       <td key={col.label} className="text-slate-300 max-w-[240px] truncate" title={cellValue(col, row)}>
                         {cellValue(col, row) || '—'}
                       </td>
                     ))}
+                    {isAdmin && EDITABLE_REPORTS.has(report.id) && (
+                      <td>
+                        <button
+                          onClick={() => handleEdit(report.id, row)}
+                          className="btn-ghost p-1.5 text-slate-400 hover:text-cyan-400"
+                          aria-label="Edit row"
+                          title="Edit"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -466,6 +719,16 @@ export default function Reports() {
         <FileText size={12} aria-hidden="true" />
         Exports carry the {COMPANY_NAME} letterhead with generation timestamp. PDF opens the print dialog — choose "Save as PDF".
       </p>
+
+      {editRow && (
+        <EditModal
+          reportId={editRow.reportId}
+          row={editRow.row}
+          onSave={handleSaveEdit}
+          onDelete={handleDeleteRow}
+          onClose={handleCloseEdit}
+        />
+      )}
     </div>
   );
 }

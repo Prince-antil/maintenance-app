@@ -51,7 +51,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -380,6 +380,39 @@ function pmToCloudRow(record) {
   };
 }
 
+function normalizeEnergyCloudRow(row) {
+  return normalizeEnergyRecord({
+    id: row.id,
+    date: row.date,
+    source: row.source || '',
+    remarks: row.remarks || '',
+    plantSection: row.plant_section || '',
+    dg500RunHours: row.dg500_run_hours,
+    dg380RunHours: row.dg380_run_hours,
+    fuelConsumedLitres: row.fuel_consumed_litres,
+    solarGenerationKwh: row.solar_generation_kwh,
+    plantSec: row.plant_sec,
+    kwh: row.kwh,
+    createdAt: row.created_at || row.date,
+  });
+}
+
+function energyToCloudRow(record) {
+  return {
+    id: record.id,
+    date: record.date,
+    source: record.source || '',
+    remarks: record.remarks || '',
+    plant_section: record.plantSection || '',
+    dg500_run_hours: record.dg500RunHours || 0,
+    dg380_run_hours: record.dg380RunHours || 0,
+    fuel_consumed_litres: record.fuelConsumedLitres || 0,
+    solar_generation_kwh: record.solarGenerationKwh || 0,
+    plant_sec: record.plantSec || 0,
+    kwh: record.kwh || 0,
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -398,6 +431,12 @@ const CLOUD_ENTITY_CONFIG = {
     fromRow: normalizePMCloudRow,
     toRow: pmToCloudRow,
     orderBy: [{ column: 'year', ascending: false }, { column: 'month', ascending: false }, { column: 'section', ascending: true }],
+  },
+  energy: {
+    table: 'energy_logs',
+    fromRow: normalizeEnergyCloudRow,
+    toRow: energyToCloudRow,
+    orderBy: [{ column: 'date', ascending: false }],
   },
 };
 
@@ -704,16 +743,18 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
+      fetchCloudEntity('energy'),
     ]);
 
     const remoteSnapshots = {
       machines: remoteMachines,
       breakdowns: remoteBreakdowns,
       pms: remotePMs,
+      energy: remoteEnergy,
     };
 
     if (remoteMachines.length) {
@@ -724,6 +765,9 @@ async function initializeCloudSync() {
     }
     if (remotePMs.length) {
       replaceEntityState('pms', remotePMs, false);
+    }
+    if (remoteEnergy.length) {
+      replaceEntityState('energy', remoteEnergy, false);
     }
     notifyStoreUpdate();
 
@@ -1003,7 +1047,7 @@ export function deletePM(id, userName) {
 export function addEnergyLog(fields, userName) {
   const log = normalizeEnergyRecord(fields);
   state = { ...state, energy: [log, ...state.energy] };
-  commit('energy');
+  commitAndQueue('energy', 'upsert', log);
   const detail = log.source
     ? `${log.source} · ${log.kwh} kWh`
     : `${log.plantSection || 'Plant'} · Solar ${log.solarGenerationKwh} kWh · Fuel ${log.fuelConsumedLitres} L`;
@@ -1011,9 +1055,22 @@ export function addEnergyLog(fields, userName) {
   return log;
 }
 
+export function updateEnergyLog(id, patch, userName) {
+  const existing = state.energy.find((entry) => entry.id === id);
+  if (!existing) return null;
+  const updated = normalizeEnergyRecord({ ...existing, ...patch, id: existing.id });
+  state = {
+    ...state,
+    energy: state.energy.map((entry) => (entry.id === id ? updated : entry)),
+  };
+  commitAndQueue('energy', 'upsert', updated);
+  logActivity(userName, 'updated energy log', updated.source || updated.plantSection || '', 'energy');
+  return updated;
+}
+
 export function deleteEnergyLog(id, userName) {
   state = { ...state, energy: state.energy.filter((entry) => entry.id !== id) };
-  commit('energy');
+  commitAndQueue('energy', 'delete', id);
   logActivity(userName, 'deleted energy log', '', 'energy');
 }
 
@@ -1209,6 +1266,8 @@ export function importEnergyBulk(rows, userName) {
 
   state = { ...state, energy: [...imports, ...state.energy] };
   commit('energy');
+  imports.forEach((record) => queueCloudMutation('energy', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
   logActivity(userName, 'bulk imported energy logs', `${imports.length} rows added`, 'energy');
   return { created: imports.length, total: imports.length };
 }
@@ -1216,7 +1275,7 @@ export function importEnergyBulk(rows, userName) {
 export async function syncCloudDataNow() {
   await flushPendingCloudOps();
   if (supabase && isSupabaseConfigured) {
-    await Promise.all(SYNCED_ENTITIES.map((entity) => refreshCloudEntity(entity, false)));
+    await Promise.all([...SYNCED_ENTITIES].map((entity) => refreshCloudEntity(entity, false)));
     notifyStoreUpdate();
   }
 }

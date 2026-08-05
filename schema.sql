@@ -102,3 +102,43 @@ begin
   end if;
 end
 $$;
+
+-- Energy logs table (added to enable cross-device cloud sync)
+create table if not exists public.energy_logs (
+  id text primary key,
+  date date not null,
+  source text not null default '',
+  remarks text not null default '',
+  plant_section text not null default '',
+  dg500_run_hours numeric(10, 2) not null default 0,
+  dg380_run_hours numeric(10, 2) not null default 0,
+  fuel_consumed_litres numeric(10, 2) not null default 0,
+  solar_generation_kwh numeric(10, 2) not null default 0,
+  plant_sec numeric(10, 2) not null default 0,
+  kwh numeric(10, 2) not null default 0,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_energy_logs_date on public.energy_logs (date desc);
+
+alter table public.energy_logs enable row level security;
+
+drop policy if exists "public energy access" on public.energy_logs;
+create policy "public energy access"
+on public.energy_logs
+for all
+to anon, authenticated
+using (true)
+with check (true);
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'energy_logs'
+  ) then
+    alter publication supabase_realtime add table public.energy_logs;
+  end if;
+end
+$$;
