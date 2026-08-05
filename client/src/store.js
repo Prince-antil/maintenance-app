@@ -229,6 +229,14 @@ function normalizeBreakdownSummary(fields) {
   const mtbf = isPresent(fields.mtbf)
     ? round1(fields.mtbf)
     : breakdownCount > 0 ? round1(Math.max(0, operatingHours - downtimeHours) / breakdownCount) : 0;
+
+  // availability_override: explicit percentage (0-100) set by admin to bypass
+  // the dynamic formula. null / undefined means use auto-calculation.
+  const rawOverride = fields.availability_override ?? fields.availabilityOverride;
+  const availability_override = isPresent(rawOverride)
+    ? Math.max(0, Math.min(100, round1(rawOverride)))
+    : null;
+
   return {
     id: fields.id || uid('bdm'),
     period,
@@ -240,6 +248,7 @@ function normalizeBreakdownSummary(fields) {
     operatingHours,
     mttr,
     mtbf,
+    availability_override,
     remarks: fields.remarks || fields.notes || '',
     createdAt: fields.createdAt || now(),
     updatedAt: fields.updatedAt || now(),
@@ -338,6 +347,8 @@ function normalizeBreakdownCloudRow(row) {
     downtimeHours: row.downtime_hours,
     mttr: row.mttr,
     mtbf: row.mtbf,
+    availability_override: row.availability_override ?? null,
+    remarks: row.remarks || '',
   });
 }
 
@@ -352,6 +363,8 @@ function breakdownToCloudRow(record) {
     downtime_hours: record.downtimeHours,
     mttr: record.mttr,
     mtbf: record.mtbf,
+    availability_override: record.availability_override ?? null,
+    remarks: record.remarks || '',
   };
 }
 
@@ -1316,5 +1329,120 @@ export async function syncMachineRecordNow(machineId) {
       lastError: error.message || 'Failed to sync machine record',
     });
     throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Master Excel bulk import — runs PM, Breakdown, and Energy imports in one
+// call from the result of parseMasterImportFile(). Every upsert goes through
+// the standard commitAndQueue path so changes reach Supabase Realtime and
+// every connected client PC immediately.
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {import('./bulkImport.js').MasterImportResult} masterResult
+ * @param {string} userName
+ * @returns {{ pm: object, breakdowns: object, energy: object, total: number }}
+ */
+export function importMasterExcelBulk(masterResult, userName) {
+  const pmResult = masterResult?.pm?.parsedRows?.length
+    ? importPMBulk(masterResult.pm.parsedRows, userName)
+    : { created: 0, updated: 0, total: 0 };
+
+  const bdResult = masterResult?.breakdowns?.parsedRows?.length
+    ? importBreakdownsBulk(masterResult.breakdowns.parsedRows, userName)
+    : { created: 0, updated: 0, total: 0 };
+
+  const energyResult = masterResult?.energy?.parsedRows?.length
+    ? importEnergyBulk(masterResult.energy.parsedRows, userName)
+    : { created: 0, updated: 0, total: 0 };
+
+  const total = pmResult.total + bdResult.total + energyResult.total;
+
+  logActivity(
+    userName,
+    'master Excel import',
+    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows — syncing to all connected PCs`,
+    'upload'
+  );
+
+  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total };
+}
+
+// ---------------------------------------------------------------------------
+// Live Sheet API / URL polling sync (Option B)
+//
+// Consumers can configure a remote JSON endpoint in app settings:
+//   updateSettings({ masterSheetEndpoint: 'https://script.google.com/...' })
+//
+// The endpoint must return JSON in the shape:
+//   { pm?: Row[], breakdowns?: Row[], energy?: Row[] }
+// where each array uses the same column keys accepted by the bulk importers.
+//
+// Call syncFromMasterSheet() on-demand or on a polling interval.
+// ---------------------------------------------------------------------------
+
+let masterSheetPollingTimer = null;
+
+/**
+ * Pull data from the configured remote sheet endpoint and apply it to the
+ * store, syncing all three entities to Supabase.
+ *
+ * @returns {Promise<{ pm: object, breakdowns: object, energy: object, total: number, endpoint: string }>}
+ */
+export async function syncFromMasterSheet() {
+  const endpoint = state.settings?.masterSheetEndpoint;
+  if (!endpoint) {
+    throw new Error('No masterSheetEndpoint configured. Add it via Settings → Master Sheet Sync.');
+  }
+
+  const response = await fetch(endpoint, { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Master sheet fetch failed: ${response.status} ${response.statusText}`);
+  }
+
+  const json = await response.json();
+  const userName = 'Master Sheet Sync';
+
+  const pmRows = Array.isArray(json.pm) ? json.pm : [];
+  const bdRows = Array.isArray(json.breakdowns) ? json.breakdowns : [];
+  const energyRows = Array.isArray(json.energy) ? json.energy : [];
+
+  const pmResult = pmRows.length ? importPMBulk(pmRows, userName) : { created: 0, updated: 0, total: 0 };
+  const bdResult = bdRows.length ? importBreakdownsBulk(bdRows, userName) : { created: 0, updated: 0, total: 0 };
+  const energyResult = energyRows.length ? importEnergyBulk(energyRows, userName) : { created: 0, updated: 0, total: 0 };
+
+  const total = pmResult.total + bdResult.total + energyResult.total;
+
+  logActivity(
+    userName,
+    'live sheet sync',
+    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows pulled from remote endpoint`,
+    'upload'
+  );
+
+  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total, endpoint };
+}
+
+/**
+ * Start polling the configured master sheet endpoint at a given interval.
+ * Calling again with a new interval replaces the existing timer.
+ *
+ * @param {number} intervalMs  Default: 5 minutes (300_000 ms)
+ */
+export function startMasterSheetPolling(intervalMs = 300_000) {
+  stopMasterSheetPolling();
+  masterSheetPollingTimer = setInterval(() => {
+    syncFromMasterSheet().catch((err) => {
+      updateSyncState({ lastError: `Master sheet poll: ${err.message}` }, false);
+    });
+  }, intervalMs);
+}
+
+/** Cancel any active master sheet polling timer. */
+export function stopMasterSheetPolling() {
+  if (masterSheetPollingTimer !== null) {
+    clearInterval(masterSheetPollingTimer);
+    masterSheetPollingTimer = null;
   }
 }

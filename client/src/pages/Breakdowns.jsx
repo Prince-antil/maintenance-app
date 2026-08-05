@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addBreakdown, deleteBreakdown } from '../store.js';
+import { useStore, addBreakdown, deleteBreakdown, updateBreakdown } from '../store.js';
 import {
   aggregateBreakdownRecords,
   computeAvailability,
@@ -13,7 +13,7 @@ import EmptyState from '../components/EmptyState.jsx';
 import { ChartCard, DualTrendChart, TrendChart } from '../components/AnalyticsCharts.jsx';
 import { exportToCSV } from '../utils.js';
 import {
-  AlertCircle, AlertOctagon, Download, Eye, Gauge, Plus, Search,
+  AlertCircle, AlertOctagon, Download, Eye, Gauge, Pencil, Plus, Search,
   Timer, TimerReset, Trash2, Upload, Wrench, X,
 } from 'lucide-react';
 
@@ -131,6 +131,103 @@ function DetailModal({ row, onClose }) {
   );
 }
 
+// ── Inline edit modal ────────────────────────────────────────────────────────
+function EditBreakdownModal({ row, userName, onClose }) {
+  const [form, setForm] = useState({
+    breakdownCount: String(row.breakdownCount ?? ''),
+    downtimeHours: String(row.downtimeHours ?? ''),
+    operatingHours: String(row.operatingHours ?? ''),
+    mttr: String(row.mttr ?? ''),
+    mtbf: String(row.mtbf ?? ''),
+    availability_override: row.availability_override != null ? String(row.availability_override) : '',
+    remarks: row.remarks || '',
+  });
+  const overlayRef = useRef(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    updateBreakdown(row.id, {
+      ...form,
+      availability_override: form.availability_override !== '' ? Number(form.availability_override) : null,
+    }, userName);
+    onClose();
+  };
+
+  const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
+  const labelCls = 'block text-xs text-slate-400 mb-1';
+  const periodLabel = new Date(`${row.period}-01`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={(e) => e.target === overlayRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      role="dialog" aria-modal="true" aria-label="Edit breakdown record"
+    >
+      <div className="glass-card w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div>
+            <h3 className="text-card-title">Edit Breakdown Summary</h3>
+            <p className="text-meta mt-0.5">{periodLabel} · {row.section}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Breakdown Count</label>
+              <input type="number" min="0" value={form.breakdownCount} onChange={set('breakdownCount')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Downtime (hrs)</label>
+              <input type="number" min="0" step="0.1" value={form.downtimeHours} onChange={set('downtimeHours')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Operating Hours</label>
+              <input type="number" min="0" step="0.1" value={form.operatingHours} onChange={set('operatingHours')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>MTTR (hrs)</label>
+              <input type="number" min="0" step="0.01" value={form.mttr} onChange={set('mttr')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>MTBF (hrs)</label>
+              <input type="number" min="0" step="0.01" value={form.mtbf} onChange={set('mtbf')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Availability Override %
+                <span className="ml-1.5 text-slate-500 text-[10px]">(blank = auto)</span>
+              </label>
+              <input
+                type="number" min="0" max="100" step="0.1"
+                value={form.availability_override}
+                onChange={set('availability_override')}
+                placeholder="e.g. 94.5"
+                className={`${inputCls} ${form.availability_override !== '' ? 'border-amber-400/50' : ''}`}
+              />
+            </div>
+          </div>
+          {form.availability_override !== '' && (
+            <p className="text-xs text-amber-300 bg-amber-400/8 border border-amber-400/20 rounded-control px-3 py-2">
+              Override active — availability KPIs will use <strong>{form.availability_override}%</strong> for this period.
+            </p>
+          )}
+          <div>
+            <label className={labelCls}>Remarks</label>
+            <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
+            <button type="submit" className="btn-primary text-xs">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Breakdowns() {
   const { user } = useAuth();
   const { openUpload } = useUI();
@@ -141,6 +238,7 @@ export default function Breakdowns() {
   const [yearF, setYearF] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [viewing, setViewing] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
   const userName = user?.full_name || 'Admin';
@@ -294,9 +392,14 @@ export default function Breakdowns() {
                     <div className="flex items-center justify-end gap-1.5">
                       <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label={`View ${row.section} ${row.period}`}><Eye size={13} aria-hidden="true" /></button>
                       {isAdmin && (
-                        <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
-                          <Trash2 size={13} aria-hidden="true" />
-                        </button>
+                        <>
+                          <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label={`Edit ${row.section} ${row.period}`}>
+                            <Pencil size={13} aria-hidden="true" />
+                          </button>
+                          <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -309,6 +412,9 @@ export default function Breakdowns() {
 
       {showNew && <SummaryModal userName={userName} sections={sections} onClose={() => setShowNew(false)} />}
       {viewing && <DetailModal row={viewing} onClose={() => setViewing(null)} />}
+      {editing && isAdmin && (
+        <EditBreakdownModal row={editing} userName={userName} onClose={() => setEditing(null)} />
+      )}
       {deleting && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setDeleting(null)} role="dialog" aria-modal="true">
           <div className="modal-content glass-card p-6 w-full max-w-sm">

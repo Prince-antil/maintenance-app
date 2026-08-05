@@ -86,6 +86,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
         plannedCount: String(row.plannedCount ?? ''),
         doneCount: String(row.doneCount ?? ''),
         pendingCount: String(row.pendingCount ?? ''),
+        compliancePct: String(row.compliancePct ?? ''),
         remarks: row.remarks || '',
       };
     }
@@ -96,12 +97,14 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
         operatingHours: String(row.operatingHours ?? ''),
         mttr: String(row.mttr ?? ''),
         mtbf: String(row.mtbf ?? ''),
+        // availability_override: stored as null when absent; show empty string in the field
+        availability_override: row.availability_override != null ? String(row.availability_override) : '',
         remarks: row.remarks || '',
       };
     }
     // energy
     return {
-      date: row.date || '',
+      date: row.date ? String(row.date).slice(0, 10) : '',
       source: row.source || SOURCES[0],
       kwh: String(row.kwh ?? ''),
       fuelConsumedLitres: String(row.fuelConsumedLitres ?? ''),
@@ -121,7 +124,15 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
 
   const handleSave = (e) => {
     e.preventDefault();
-    onSave(form);
+    // Convert availability_override: empty string → null (auto mode)
+    const payload = { ...form };
+    if (reportId === 'breakdown') {
+      payload.availability_override =
+        payload.availability_override !== '' && payload.availability_override != null
+          ? Number(payload.availability_override)
+          : null;
+    }
+    onSave(payload);
   };
 
   const handleOverlayClick = (e) => {
@@ -136,6 +147,15 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
     : row.date
       ? new Date(row.date).toLocaleDateString('en-GB')
       : '';
+
+  // Live compliance auto-preview for PM
+  const liveCompliance = useMemo(() => {
+    if (reportId !== 'pm') return null;
+    const planned = Number(form.plannedCount);
+    const done = Number(form.doneCount);
+    if (!planned) return null;
+    return Math.round((done / planned) * 1000) / 10;
+  }, [reportId, form.plannedCount, form.doneCount]);
 
   return (
     <div
@@ -158,9 +178,10 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
         </div>
 
         <form onSubmit={handleSave} className="p-5 space-y-4">
+          {/* ── PM section ── */}
           {reportId === 'pm' && (
             <>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className={labelCls}>Planned PM</label>
                   <input type="number" min="0" value={form.plannedCount} onChange={set('plannedCount')} className={inputCls} />
@@ -173,6 +194,21 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
                   <label className={labelCls}>Pending PM</label>
                   <input type="number" min="0" value={form.pendingCount} onChange={set('pendingCount')} className={inputCls} />
                 </div>
+                <div>
+                  <label className={labelCls}>
+                    Compliance %
+                    {liveCompliance !== null && (
+                      <span className="ml-2 text-cyan-400 text-[10px] font-normal">auto: {liveCompliance}%</span>
+                    )}
+                  </label>
+                  <input
+                    type="number" min="0" max="100" step="0.1"
+                    value={form.compliancePct}
+                    onChange={set('compliancePct')}
+                    className={inputCls}
+                    placeholder={liveCompliance !== null ? `Auto: ${liveCompliance}` : 'Leave blank to auto-calc'}
+                  />
+                </div>
               </div>
               <div>
                 <label className={labelCls}>Remarks</label>
@@ -181,6 +217,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
             </>
           )}
 
+          {/* ── Breakdown section ── */}
           {reportId === 'breakdown' && (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -204,7 +241,26 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
                   <label className={labelCls}>MTBF (hrs)</label>
                   <input type="number" min="0" step="0.01" value={form.mtbf} onChange={set('mtbf')} className={inputCls} />
                 </div>
+                <div>
+                  <label className={labelCls}>
+                    Availability Override %
+                    <span className="ml-1.5 text-slate-500 text-[10px] font-normal">(blank = auto-calculate)</span>
+                  </label>
+                  <input
+                    type="number" min="0" max="100" step="0.1"
+                    value={form.availability_override}
+                    onChange={set('availability_override')}
+                    placeholder="e.g. 94.5 — leave blank for auto"
+                    className={`${inputCls} ${form.availability_override !== '' ? 'border-amber-400/50 focus:border-amber-400/80' : ''}`}
+                  />
+                </div>
               </div>
+              {form.availability_override !== '' && (
+                <div className="flex items-start gap-2 rounded-control border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-xs text-amber-300">
+                  <Gauge size={12} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                  Override active — availability charts and KPIs will use <strong className="ml-1">{form.availability_override}%</strong> instead of the calculated value for this section/period.
+                </div>
+              )}
               <div>
                 <label className={labelCls}>Remarks</label>
                 <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
@@ -212,6 +268,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
             </>
           )}
 
+          {/* ── Energy section ── */}
           {reportId === 'energy' && (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -392,7 +449,7 @@ export default function Reports() {
           { key: 'plannedCount', label: 'Planned PM' },
           { key: 'doneCount', label: 'Done PM' },
           { key: 'pendingCount', label: 'Pending PM' },
-          { key: 'compliancePct', label: 'Compliance %' },
+          { label: 'Compliance %', value: (row) => row.compliancePct != null ? `${row.compliancePct}%` : '—' },
           { key: 'remarks', label: 'Remarks' },
         ],
         rows: pms,
@@ -410,6 +467,7 @@ export default function Reports() {
           { key: 'mttr', label: 'MTTR (hrs)' },
           { key: 'mtbf', label: 'MTBF (hrs)' },
           { key: 'operatingHours', label: 'Operating Hours' },
+          { label: 'Availability Override %', value: (row) => row.availability_override != null ? String(row.availability_override) : '—' },
           { key: 'remarks', label: 'Remarks' },
         ],
         rows: breakdowns,

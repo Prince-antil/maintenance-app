@@ -12,6 +12,7 @@ import {
   Menu, Shield, Search, Bell, ChevronDown, LogIn, LogOut,
   Plus, Upload, User, Clock, FileText, CalendarDays, Cog,
   AlertOctagon, ClipboardCheck, Zap, Settings, AlertTriangle, Info,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 const RECENT_KEY = 'ccpl_recent_searches';
@@ -30,7 +31,7 @@ const RESULT_ICONS = {
 
 export default function TopNavbar() {
   const { user, logout } = useAuth();
-  const { toggleSidebar, openUpload, openLogin, openAddMachine, refreshKey } = useUI();
+  const { toggleSidebar, openUpload, openLogin, openAddMachine, openMasterImport, refreshKey } = useUI();
   const navigate = useNavigate();
   const store = useStore();
 
@@ -282,6 +283,9 @@ export default function TopNavbar() {
               </button>
               <button onClick={() => openUpload({ kind: 'bulk' })} className="btn-success !py-2 !px-3.5 text-xs inline-flex items-center gap-1.5">
                 <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
+              </button>
+              <button onClick={openMasterImport} className="btn-primary !py-2 !px-3.5 text-xs inline-flex items-center gap-1.5 !bg-emerald-600/80 hover:!bg-emerald-600 border-emerald-500/50">
+                <FileSpreadsheet size={13} aria-hidden="true" /> Import Master Excel
               </button>
             </div>
           )}

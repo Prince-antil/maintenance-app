@@ -21,7 +21,7 @@ import {
   Factory, Activity, Wrench, AlertOctagon, ClipboardCheck, ClipboardList,
   FolderArchive, Timer, TimerReset, Gauge, ListChecks, Clock, ChevronRight,
   FileText, User, Zap, BrainCircuit, AlertTriangle, Info, CalendarDays,
-  Sparkles, ArrowRight, Upload,
+  Sparkles, ArrowRight, Upload, FileSpreadsheet,
 } from 'lucide-react';
 import { ProgressGauge } from '../components/charts.jsx';
 
@@ -57,7 +57,7 @@ function useClock() {
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const { refreshKey, openUpload } = useUI();
+  const { refreshKey, openUpload, openMasterImport } = useUI();
   const navigate = useNavigate();
   const store = useStore();
   const clock = useClock();
@@ -168,9 +168,14 @@ export default function Dashboard() {
             </p>
             <p className="text-slate-500 text-[11px] mt-1">Logged in as {user?.username || 'guest'}</p>
             {user?.role === 'admin' && (
-              <button onClick={() => openUpload({ kind: 'bulk' })} className="btn-success mt-4 inline-flex items-center gap-2 text-xs">
-                <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
-              </button>
+              <div className="flex flex-wrap items-center gap-2 mt-4">
+                <button onClick={() => openUpload({ kind: 'bulk' })} className="btn-success inline-flex items-center gap-2 text-xs">
+                  <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
+                </button>
+                <button onClick={openMasterImport} className="btn-primary inline-flex items-center gap-2 text-xs">
+                  <FileSpreadsheet size={13} aria-hidden="true" /> Import Master Excel
+                </button>
+              </div>
             )}
           </div>
         </div>

@@ -117,6 +117,21 @@ export function computeMTBF(breakdowns, machineCount, mKey = null) {
 
 export function computeAvailability(breakdowns, machineCount, mKey = null) {
   if (!machineCount) return 100;
+
+  // If every row for this month carries an override, use the weighted average
+  // of overrides instead of the dynamic formula. If even one row is missing an
+  // override we fall back to the standard downtime-based calculation so the
+  // result is always deterministic.
+  const rows = breakdowns.filter((row) => !mKey || summaryMonthKey(row) === mKey);
+  const overrideRows = rows.filter((row) => row.availability_override != null);
+  if (overrideRows.length > 0 && overrideRows.length === rows.length) {
+    // Weighted average by section count (equal weight per row — same as a
+    // simple mean since we aggregate across sections).
+    const avg = overrideRows.reduce((sum, row) => sum + row.availability_override, 0) / overrideRows.length;
+    return round1(avg);
+  }
+
+  // Standard formula: (planned hours – downtime) / planned hours
   const summary = aggregateBreakdownRecords(breakdowns, mKey);
   const planned = machineCount * HOURS_PER_MONTH;
   return Math.max(0, round1(((planned - summary.downtimeHours) / planned) * 100));
@@ -278,10 +293,18 @@ export function healthDistribution(machines, breakdowns, pms) {
 }
 
 export function availabilityTrend(breakdowns, machineCount, n = 6) {
-  return lastNMonths(n).map((month) => ({
-    label: month.label,
-    value: computeAvailability(breakdowns, machineCount, month.key),
-  }));
+  return lastNMonths(n).map((month) => {
+    // Per-month override: if any breakdown row for this month has a single
+    // override value, surface it as a distinct marker so charts can annotate it.
+    const monthRows = breakdowns.filter((row) => summaryMonthKey(row) === month.key);
+    const overrideRows = monthRows.filter((row) => row.availability_override != null);
+    const isOverridden = overrideRows.length > 0 && overrideRows.length === monthRows.length;
+    return {
+      label: month.label,
+      value: computeAvailability(breakdowns, machineCount, month.key),
+      overridden: isOverridden,
+    };
+  });
 }
 
 export function mttrTrend(breakdowns, n = 6) {

@@ -15,6 +15,7 @@ import LoginModal from './components/LoginModal.jsx';
 import UploadModal from './components/UploadModal.jsx';
 import MachineModal from './components/MachineModal.jsx';
 import DocumentPreviewModal from './components/DocumentPreviewModal.jsx';
+import MasterImportModal from './components/MasterImportModal.jsx';
 import ToastViewport from './components/ToastViewport.jsx';
 
 // Lazily loaded CMMS modules — keeps the initial bundle lean
@@ -31,6 +32,7 @@ function AppContent() {
     uploadState, closeUpload,
     showLogin, closeLogin,
     showAddMachine, closeAddMachine,
+    showMasterImport, closeMasterImport,
     previewFile, closePreview,
     signalRefresh,
     toasts, dismissToast,
@@ -116,6 +118,12 @@ function AppContent() {
         />
       )}
       {showAddMachine && user?.role === 'admin' && <MachineModal onClose={closeAddMachine} />}
+      {showMasterImport && user?.role === 'admin' && (
+        <MasterImportModal
+          onClose={closeMasterImport}
+          onSuccess={signalRefresh}
+        />
+      )}
       {previewFile && <DocumentPreviewModal file={previewFile} onClose={closePreview} />}
       <ToastViewport toasts={toasts} dismissToast={dismissToast} />
     </div>

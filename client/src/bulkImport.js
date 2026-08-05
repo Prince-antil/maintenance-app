@@ -349,3 +349,176 @@ export function inferUploadMeta(moduleId, parsedRows) {
     plant_section: first.section || first.plantSection || 'Overall Nathupur Maintenance Formulation Plant (Master Combined View)',
   };
 }
+
+// ---------------------------------------------------------------------------
+// Master Excel multi-sheet parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical sheet name aliases for each module in a master workbook.
+ * Matching is case-insensitive and strips non-alphanumeric chars.
+ */
+const MASTER_SHEET_ALIASES = {
+  pm: ['pmdata', 'preventivemaintenance', 'pm', 'pmreport', 'pmsummary', 'preventive'],
+  breakdowns: ['breakdowndata', 'breakdowns', 'breakdownreport', 'breakdownsummary', 'breakdown'],
+  energy: ['energydata', 'energylogs', 'energy', 'energyreport', 'energylog'],
+};
+
+/**
+ * Detect which module a sheet name maps to.
+ * @param {string} sheetName
+ * @returns {'pm'|'breakdowns'|'energy'|null}
+ */
+function detectSheetModule(sheetName) {
+  const key = toKey(sheetName);
+  for (const [moduleId, aliases] of Object.entries(MASTER_SHEET_ALIASES)) {
+    if (aliases.includes(key)) return moduleId;
+  }
+  return null;
+}
+
+/**
+ * Parse a single sheet from a workbook into rows for the given module.
+ * Returns { parsedRows, errors, counts }.
+ */
+function parseSheet(workbook, sheetName, moduleId) {
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) return { parsedRows: [], errors: [], counts: { total: 0, valid: 0, invalid: 0 } };
+
+  const rawRows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+  const nonEmptyRows = rawRows.filter((row) => !isRowEmpty(row));
+  if (!nonEmptyRows.length) return { parsedRows: [], errors: [], counts: { total: 0, valid: 0, invalid: 0 } };
+
+  const headers = Object.keys(nonEmptyRows[0]);
+  const mapping = buildMapping(moduleId, headers);
+  const definition = IMPORT_MODULES[moduleId];
+  const missingRequired = definition.required.filter((field) => !mapping[field]);
+  const errors = missingRequired.map((field) => `[${sheetName}] Missing required column for "${field}".`);
+  const parsedRows = [];
+
+  nonEmptyRows.forEach((row, idx) => {
+    const parsed = parseModuleRow(moduleId, row, mapping, idx + 2);
+    if (parsed.error) errors.push(`[${sheetName}] ${parsed.error}`);
+    else parsedRows.push(parsed);
+  });
+
+  return {
+    parsedRows,
+    errors,
+    counts: {
+      total: nonEmptyRows.length,
+      valid: parsedRows.length,
+      invalid: errors.length,
+    },
+  };
+}
+
+/**
+ * Parse a master multi-sheet workbook.
+ *
+ * Accepts a .xlsx file whose sheets are named (case-insensitive):
+ *   - PM_Data / Preventive Maintenance / PM
+ *   - Breakdown_Data / Breakdowns
+ *   - Energy_Data / Energy Logs / Energy
+ *
+ * Returns a result object per module plus aggregate totals.
+ *
+ * @param {File} file
+ * @returns {Promise<MasterImportResult>}
+ *
+ * @typedef {{ parsedRows: object[], errors: string[], counts: object }} SheetResult
+ * @typedef {{ pm: SheetResult, breakdowns: SheetResult, energy: SheetResult, sheetMap: object, totalValid: number, totalErrors: string[], hasData: boolean }} MasterImportResult
+ */
+export async function parseMasterImportFile(file) {
+  const workbook = await readWorkbook(file);
+  const sheetNames = workbook.SheetNames;
+
+  // Map each sheet name to a module
+  const sheetMap = {}; // moduleId -> sheetName
+  sheetNames.forEach((name) => {
+    const moduleId = detectSheetModule(name);
+    if (moduleId && !sheetMap[moduleId]) {
+      sheetMap[moduleId] = name;
+    }
+  });
+
+  const results = {};
+  const totalErrors = [];
+  let totalValid = 0;
+
+  for (const moduleId of ['pm', 'breakdowns', 'energy']) {
+    const sheetName = sheetMap[moduleId];
+    if (!sheetName) {
+      results[moduleId] = {
+        parsedRows: [],
+        errors: [],
+        counts: { total: 0, valid: 0, invalid: 0 },
+        sheetName: null,
+      };
+      continue;
+    }
+    const result = parseSheet(workbook, sheetName, moduleId);
+    results[moduleId] = { ...result, sheetName };
+    totalErrors.push(...result.errors);
+    totalValid += result.counts.valid;
+  }
+
+  return {
+    pm: results.pm,
+    breakdowns: results.breakdowns,
+    energy: results.energy,
+    sheetMap,
+    sheetNames,
+    totalValid,
+    totalErrors,
+    hasData: totalValid > 0,
+  };
+}
+
+/**
+ * Generate and download a master template workbook with all three sheets pre-populated.
+ */
+export function downloadMasterTemplate() {
+  const workbook = XLSX.utils.book_new();
+
+  const pmSample = [
+    {
+      'Reporting Period': new Date().toISOString().slice(0, 7),
+      'Plant Section': 'Herbi EC Packaging',
+      'Planned PM Count': 24,
+      'Done PM Count': 21,
+      'Pending PM Count': 3,
+      'Compliance %': 87.5,
+      Remarks: '',
+    },
+  ];
+  const bdSample = [
+    {
+      'Reporting Period': new Date().toISOString().slice(0, 7),
+      'Plant Section': 'EC INSEC Packaging',
+      'Breakdown Count': 8,
+      'Downtime Hours': 26.5,
+      'Operating Hours': 35280,
+      MTTR: 3.31,
+      MTBF: 4406.69,
+      Remarks: '',
+    },
+  ];
+  const energySample = [
+    {
+      Date: new Date().toISOString().slice(0, 10),
+      'Plant Section': 'Utility Section',
+      'DG 500kVA Run Hrs': 4.5,
+      'DG 380kVA Run Hrs': 2,
+      'Fuel Consumed (Ltrs)': 180,
+      'Solar Generation (kWh)': 620,
+      'Plant SEC (kWh/MT)': 7.8,
+      Remarks: '',
+    },
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pmSample), 'PM_Data');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(bdSample), 'Breakdown_Data');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(energySample), 'Energy_Data');
+  XLSX.writeFile(workbook, 'Master_Import_Template.xlsx');
+}

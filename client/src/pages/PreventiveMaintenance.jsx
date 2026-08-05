@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM } from '../store.js';
+import { useStore, addPM, deletePM, updatePM } from '../store.js';
 import { aggregatePMRecords, formatPeriodKey, monthlyPMCompletion, pmStats } from '../analytics.js';
 import { MASTER_PLANT_SECTION, getOperationalSections } from '../constants.js';
 import EmptyState from '../components/EmptyState.jsx';
@@ -10,7 +10,7 @@ import { ProgressGauge } from '../components/charts.jsx';
 import { exportToCSV } from '../utils.js';
 import {
   AlertCircle, CalendarX2, CheckCircle2, ClipboardCheck, Download, Eye,
-  ListChecks, Percent, Plus, Search, Trash2, Upload, X,
+  ListChecks, Pencil, Percent, Plus, Search, Trash2, Upload, X,
 } from 'lucide-react';
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
@@ -126,6 +126,94 @@ function DetailModal({ row, onClose }) {
   );
 }
 
+// ── Inline edit modal ────────────────────────────────────────────────────────
+function EditPMModal({ row, userName, onClose }) {
+  const [form, setForm] = useState({
+    plannedCount: String(row.plannedCount ?? ''),
+    doneCount: String(row.doneCount ?? ''),
+    pendingCount: String(row.pendingCount ?? ''),
+    compliancePct: String(row.compliancePct ?? ''),
+    remarks: row.remarks || '',
+  });
+  const overlayRef = useRef(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const liveCompliance = (() => {
+    const planned = Number(form.plannedCount);
+    const done = Number(form.doneCount);
+    if (!planned) return null;
+    return Math.round((done / planned) * 1000) / 10;
+  })();
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    updatePM(row.id, form, userName);
+    onClose();
+  };
+
+  const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
+  const labelCls = 'block text-xs text-slate-400 mb-1';
+  const periodLabel = new Date(`${row.period}-01`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={(e) => e.target === overlayRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      role="dialog" aria-modal="true" aria-label="Edit PM record"
+    >
+      <div className="glass-card w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div>
+            <h3 className="text-card-title">Edit PM Summary</h3>
+            <p className="text-meta mt-0.5">{periodLabel} · {row.section}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Planned PM</label>
+              <input type="number" min="0" value={form.plannedCount} onChange={set('plannedCount')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Done PM</label>
+              <input type="number" min="0" value={form.doneCount} onChange={set('doneCount')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Pending PM</label>
+              <input type="number" min="0" value={form.pendingCount} onChange={set('pendingCount')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Compliance %
+                {liveCompliance !== null && (
+                  <span className="ml-2 text-cyan-400 text-[10px] font-normal">auto: {liveCompliance}%</span>
+                )}
+              </label>
+              <input
+                type="number" min="0" max="100" step="0.1"
+                value={form.compliancePct}
+                onChange={set('compliancePct')}
+                placeholder={liveCompliance !== null ? `Auto: ${liveCompliance}` : 'Leave blank to auto-calc'}
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Remarks</label>
+            <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
+            <button type="submit" className="btn-primary text-xs">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function PreventiveMaintenance() {
   const { user } = useAuth();
   const { openUpload } = useUI();
@@ -136,6 +224,7 @@ export default function PreventiveMaintenance() {
   const [yearF, setYearF] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [viewing, setViewing] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
 
   const userName = user?.full_name || 'Admin';
@@ -286,9 +375,14 @@ export default function PreventiveMaintenance() {
                     <div className="flex items-center justify-end gap-1.5">
                       <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label={`View ${row.section} ${row.period}`}><Eye size={13} aria-hidden="true" /></button>
                       {isAdmin && (
-                        <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
-                          <Trash2 size={13} aria-hidden="true" />
-                        </button>
+                        <>
+                          <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label={`Edit ${row.section} ${row.period}`}>
+                            <Pencil size={13} aria-hidden="true" />
+                          </button>
+                          <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -301,6 +395,9 @@ export default function PreventiveMaintenance() {
 
       {showNew && <SummaryModal userName={userName} sections={sections} onClose={() => setShowNew(false)} />}
       {viewing && <DetailModal row={viewing} onClose={() => setViewing(null)} />}
+      {editing && isAdmin && (
+        <EditPMModal row={editing} userName={userName} onClose={() => setEditing(null)} />
+      )}
       {deleting && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && setDeleting(null)} role="dialog" aria-modal="true">
           <div className="modal-content glass-card p-6 w-full max-w-sm">

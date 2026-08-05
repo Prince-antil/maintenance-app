@@ -9,6 +9,7 @@ export function UIProvider({ children }) {
   const [uploadState, setUploadState] = useState(null); // null | { category?: string }
   const [showLogin, setShowLogin] = useState(false);
   const [showAddMachine, setShowAddMachine] = useState(false);
+  const [showMasterImport, setShowMasterImport] = useState(false);
   const [previewFile, setPreviewFile] = useState(null); // null | { filename, file_url, file_format }
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState([]);
@@ -25,6 +26,8 @@ export function UIProvider({ children }) {
   const closeLogin = useCallback(() => setShowLogin(false), []);
   const openAddMachine = useCallback(() => setShowAddMachine(true), []);
   const closeAddMachine = useCallback(() => setShowAddMachine(false), []);
+  const openMasterImport = useCallback(() => setShowMasterImport(true), []);
+  const closeMasterImport = useCallback(() => setShowMasterImport(false), []);
   const openPreview = useCallback((file) => setPreviewFile(file), []);
   const closePreview = useCallback(() => setPreviewFile(null), []);
   const signalRefresh = useCallback(() => setRefreshKey((k) => k + 1), []);
@@ -53,6 +56,7 @@ export function UIProvider({ children }) {
         uploadState, openUpload, closeUpload,
         showLogin, openLogin, closeLogin,
         showAddMachine, openAddMachine, closeAddMachine,
+        showMasterImport, openMasterImport, closeMasterImport,
         previewFile, openPreview, closePreview,
         refreshKey, signalRefresh,
         toasts, pushToast, dismissToast,

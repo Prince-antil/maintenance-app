@@ -1,14 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addEnergyLog, deleteEnergyLog } from '../store.js';
+import { useStore, addEnergyLog, deleteEnergyLog, updateEnergyLog } from '../store.js';
 import { monthlyEnergy, monthlyEnergyOverview, monthKey } from '../analytics.js';
 import { ChartCard, TrendChart, PieDonutChart } from '../components/AnalyticsCharts.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import {
-  Zap, Plus, Trash2, Download, AlertCircle, Sun, Fuel, PlugZap, FolderOpen, Upload,
+  Zap, Plus, Pencil, Trash2, Download, AlertCircle, Sun, Fuel, PlugZap, FolderOpen, Upload, X,
 } from 'lucide-react';
 
 const SOURCES = ['DG 500 kVA', 'DG 380 kVA', 'Solar Generation', 'Grid / HT Supply', 'Plant SEC'];
@@ -16,6 +16,97 @@ const SOURCE_COLORS = {
   'DG 500 kVA': '#F59E0B', 'DG 380 kVA': '#FB923C', 'Solar Generation': '#10B981',
   'Grid / HT Supply': '#06B6D4', 'Plant SEC': '#8B5CF6',
 };
+
+// ── Inline edit modal ────────────────────────────────────────────────────────
+function EditEnergyModal({ row, userName, onClose }) {
+  const [form, setForm] = useState({
+    date: row.date ? String(row.date).slice(0, 10) : '',
+    source: row.source || SOURCES[0],
+    kwh: String(row.kwh ?? ''),
+    fuelConsumedLitres: String(row.fuelConsumedLitres ?? ''),
+    solarGenerationKwh: String(row.solarGenerationKwh ?? ''),
+    dg500RunHours: String(row.dg500RunHours ?? ''),
+    dg380RunHours: String(row.dg380RunHours ?? ''),
+    plantSection: row.plantSection || '',
+    remarks: row.remarks || '',
+  });
+  const overlayRef = useRef(null);
+  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const handleSave = (e) => {
+    e.preventDefault();
+    updateEnergyLog(row.id, form, userName);
+    onClose();
+  };
+
+  const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
+  const labelCls = 'block text-xs text-slate-400 mb-1';
+
+  return (
+    <div
+      ref={overlayRef}
+      onClick={(e) => e.target === overlayRef.current && onClose()}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      role="dialog" aria-modal="true" aria-label="Edit energy record"
+    >
+      <div className="glass-card w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div>
+            <h3 className="text-card-title">Edit Energy Log</h3>
+            <p className="text-meta mt-0.5">{new Date(row.date).toLocaleDateString('en-GB')} · {row.source || row.plantSection || 'Energy Log'}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSave} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Date</label>
+              <input type="date" value={form.date} onChange={set('date')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Source</label>
+              <select value={form.source} onChange={set('source')} className={inputCls}>
+                {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>kWh</label>
+              <input type="number" min="0" step="0.01" value={form.kwh} onChange={set('kwh')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Fuel (L)</label>
+              <input type="number" min="0" step="0.01" value={form.fuelConsumedLitres} onChange={set('fuelConsumedLitres')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Solar (kWh)</label>
+              <input type="number" min="0" step="0.01" value={form.solarGenerationKwh} onChange={set('solarGenerationKwh')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>DG 500 Run Hrs</label>
+              <input type="number" min="0" step="0.1" value={form.dg500RunHours} onChange={set('dg500RunHours')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>DG 380 Run Hrs</label>
+              <input type="number" min="0" step="0.1" value={form.dg380RunHours} onChange={set('dg380RunHours')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Plant Section</label>
+              <input type="text" value={form.plantSection} onChange={set('plantSection')} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Remarks</label>
+            <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
+            <button type="submit" className="btn-primary text-xs">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 export default function Energy() {
   const { user } = useAuth();
@@ -26,6 +117,7 @@ export default function Energy() {
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), source: SOURCES[0], kwh: '', remarks: '' });
   const [error, setError] = useState('');
   const [sourceF, setSourceF] = useState('');
+  const [editing, setEditing] = useState(null);
 
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
@@ -186,7 +278,7 @@ export default function Energy() {
           <div className="overflow-x-auto">
             <table className="enterprise-table w-full min-w-[560px]">
               <thead>
-                <tr><th>Date</th><th>Source</th><th>kWh</th><th>Remarks</th>{isAdmin && <th className="w-12 text-right" aria-label="Actions" />}</tr>
+                <tr><th>Date</th><th>Source</th><th>kWh</th><th>Remarks</th>{isAdmin && <th className="w-20 text-right" aria-label="Actions" />}</tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
@@ -201,9 +293,14 @@ export default function Energy() {
                     <td className="text-slate-400">{r.remarks || `${r.plantSection || '—'} · Fuel ${r.fuelConsumedLitres || 0} L · DG ${((r.dg500RunHours || 0) + (r.dg380RunHours || 0)).toFixed(1)} h`}</td>
                     {isAdmin && (
                       <td className="text-right">
-                        <button onClick={() => deleteEnergyLog(r.id, userName)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete reading">
-                          <Trash2 size={13} aria-hidden="true" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => setEditing(r)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit reading">
+                            <Pencil size={13} aria-hidden="true" />
+                          </button>
+                          <button onClick={() => deleteEnergyLog(r.id, userName)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete reading">
+                            <Trash2 size={13} aria-hidden="true" />
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -213,6 +310,10 @@ export default function Energy() {
           </div>
         )}
       </div>
+
+      {editing && isAdmin && (
+        <EditEnergyModal row={editing} userName={userName} onClose={() => setEditing(null)} />
+      )}
     </div>
   );
 }
