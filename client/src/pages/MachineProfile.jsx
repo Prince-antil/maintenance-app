@@ -7,7 +7,7 @@ import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
   addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
 } from '../store.js';
-import { machineHealth } from '../analytics.js';
+import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { removeStoredDocument, uploadMachineAttachment } from '../lib/documentStorage.js';
@@ -17,7 +17,7 @@ import { timeAgo } from '../utils.js';
 import {
   ArrowLeft, Cog, MapPin, Upload, Eye, Download, Trash2, FileText, AlertCircle,
   QrCode, Pencil, X, Save, HeartPulse, Timer, AlertOctagon, Wrench, Package,
-  Plus, Image as ImageIcon, History, ClipboardCheck,
+  Plus, Image as ImageIcon, History, ClipboardCheck, Filter,
 } from 'lucide-react';
 
 const MEDIA_EXT = ['.mp4', '.webm', '.mov'];
@@ -112,35 +112,106 @@ export default function MachineProfile() {
   const [editing, setEditing] = useState(false);
   const [showQR, setShowQR] = useState(false);
   const [spareForm, setSpareForm] = useState({ name: '', partCode: '', qty: '', remarks: '' });
+  // History tab filters
+  const [histMonthFilter, setHistMonthFilter] = useState('');
+  const [histSectionFilter, setHistSectionFilter] = useState('');
   const fileRef = useRef(null);
   const photoRef = useRef(null);
 
+  // ── derive available month options from section data ──────────────────────
+  const historyMonthOptions = useMemo(() => {
+    const section = histSectionFilter || machine?.section || '';
+    const bdPeriods = store.breakdowns
+      .filter((r) => !section || r.section === section)
+      .map((r) => summaryMonthKey(r));
+    const pmPeriods = store.pms
+      .filter((r) => !section || r.section === section)
+      .map((r) => summaryMonthKey(r));
+    const all = [...new Set([...bdPeriods, ...pmPeriods])].filter(Boolean).sort((a, b) => b.localeCompare(a));
+    return all;
+  }, [store.breakdowns, store.pms, machine, histSectionFilter]);
+
+  // ── unique sections from data (for section override filter) ───────────────
+  const historySectionOptions = useMemo(() => {
+    const all = [...new Set([
+      ...store.breakdowns.map((r) => r.section),
+      ...store.pms.map((r) => r.section),
+    ])].filter(Boolean).sort();
+    return all;
+  }, [store.breakdowns, store.pms]);
+
   const stats = useMemo(() => {
     if (!machine) return null;
-    const bds = store.breakdowns.filter((b) => b.machineId === machine.id);
-    const closed = bds.filter((b) => b.status === 'closed');
-    const downtime = closed.reduce((s, b) => s + (b.totalDowntimeHrs || 0), 0);
-    const pms = store.pms.filter((p) => p.machineId === machine.id);
+
+    // Section to use for filtering — allow override via histSectionFilter
+    const effectiveSection = histSectionFilter || machine.section;
+
+    // Filter breakdown and PM summaries by section + optional month
+    const sectionBreakdowns = store.breakdowns.filter((r) =>
+      r.section === effectiveSection &&
+      (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
+    );
+    const sectionPMs = store.pms.filter((r) =>
+      r.section === effectiveSection &&
+      (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
+    );
+
+    const bdSummary = aggregateBreakdownRecords(sectionBreakdowns);
+    const pmSummary = aggregatePMRecords(sectionPMs);
+
+    // Health uses unfiltered 90-day window (spec: health is always live)
+    const health = machineHealth(machine, store.breakdowns, store.pms);
+
+    // Breakdown history rows — sorted newest first
+    const breakdownHistory = [...store.breakdowns]
+      .filter((r) =>
+        r.section === effectiveSection &&
+        (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
+      )
+      .sort((a, b) => (b.period || '').localeCompare(a.period || ''));
+
+    // PM history rows — sorted newest first
+    const pmHistory = [...store.pms]
+      .filter((r) =>
+        r.section === effectiveSection &&
+        (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
+      )
+      .sort((a, b) => (b.period || '').localeCompare(a.period || ''));
+
     return {
-      health: machineHealth(machine, store.breakdowns, store.pms),
-      breakdowns: bds.length,
-      downtime: Math.round(downtime * 10) / 10,
-      mttr: closed.length ? Math.round((downtime / closed.length) * 10) / 10 : 0,
-      pmDone: pms.filter((p) => p.status === 'completed').length,
+      health,
+      breakdownCount: bdSummary.breakdownCount,
+      downtimeHours: bdSummary.downtimeHours,
+      mttr: bdSummary.mttr,
+      mtbf: bdSummary.mtbf,
+      pmDone: pmSummary.doneCount,
+      pmPlanned: pmSummary.plannedCount,
+      pmCompliance: pmSummary.compliance,
+      breakdownHistory,
+      pmHistory,
+      // Keep legacy combined timeline for the "all history" view
       history: [
-        ...bds.map((b) => ({
-          id: b.id, kind: 'breakdown', ts: b.createdAt, title: `${b.complaintNo} — ${b.problem || 'Breakdown reported'}`,
-          detail: b.status === 'closed' ? `Closed · ${b.totalDowntimeHrs} hrs downtime · ${b.actionTaken || 'action recorded'}` : 'Open — under repair',
-          status: b.status,
+        ...breakdownHistory.map((r) => ({
+          id: r.id,
+          kind: 'breakdown',
+          ts: r.createdAt,
+          period: r.period,
+          title: `Breakdown Summary — ${formatPeriodKey(r.period, true)}`,
+          detail: `${r.breakdownCount} breakdown${r.breakdownCount !== 1 ? 's' : ''} · ${r.downtimeHours}h downtime · MTTR ${r.mttr}h · MTBF ${r.mtbf}h${r.remarks ? ' · ' + r.remarks : ''}`,
+          status: 'closed',
         })),
-        ...pms.map((p) => ({
-          id: p.id, kind: 'pm', ts: p.completedAt || p.pmDate, title: `${p.frequency} PM ${p.status === 'completed' ? 'completed' : 'scheduled'}`,
-          detail: p.status === 'completed' ? `By ${p.engineer || '—'} · ${p.timeTakenHrs || 0} hrs${p.remarks ? ' · ' + p.remarks : ''}` : `Due ${new Date(p.pmDate).toLocaleDateString('en-GB')} · ${p.engineer || 'Unassigned'}`,
-          status: p.status,
+        ...pmHistory.map((r) => ({
+          id: r.id,
+          kind: 'pm',
+          ts: r.createdAt,
+          period: r.period,
+          title: `PM Summary — ${formatPeriodKey(r.period, true)}`,
+          detail: `Planned ${r.plannedCount} · Done ${r.doneCount} · Pending ${r.pendingCount} · Compliance ${r.compliancePct}%${r.remarks ? ' · ' + r.remarks : ''}`,
+          status: r.doneCount >= r.plannedCount ? 'completed' : 'pending',
         })),
-      ].sort((a, b) => new Date(b.ts) - new Date(a.ts)),
+      ].sort((a, b) => (b.period || '').localeCompare(a.period || '')),
     };
-  }, [machine, store.breakdowns, store.pms]);
+  }, [machine, store.breakdowns, store.pms, histMonthFilter, histSectionFilter]);
 
   if (!machine) {
     return (
@@ -162,7 +233,7 @@ export default function MachineProfile() {
     ...Object.fromEntries(MACHINE_DOC_TABS.map((t) => [t.id, (machine.docs || []).filter((d) => d.tab === t.id).length])),
     spares: (machine.spares || []).length,
     photos: (machine.photos || []).length,
-    history: stats.history.length,
+    history: (stats?.breakdownHistory?.length || 0) + (stats?.pmHistory?.length || 0),
   };
   const acceptExt = tab === 'media' ? [...MEDIA_EXT, ...ALLOWED_EXT] : ALLOWED_EXT;
   const qrValue = `${window.location.origin}/machines/${machine.id}`;
@@ -333,11 +404,11 @@ export default function MachineProfile() {
           </div>
           <div className="grid grid-cols-2 gap-2.5 text-center">
             <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-2.5">
-              <p className="text-white text-base font-bold flex items-center justify-center gap-1"><AlertOctagon size={13} className="text-red-400" aria-hidden="true" />{stats.breakdowns}</p>
+              <p className="text-white text-base font-bold flex items-center justify-center gap-1"><AlertOctagon size={13} className="text-red-400" aria-hidden="true" />{stats.breakdownCount}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">Breakdowns</p>
             </div>
             <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-2.5">
-              <p className="text-white text-base font-bold flex items-center justify-center gap-1"><Timer size={13} className="text-amber-400" aria-hidden="true" />{stats.downtime}h</p>
+              <p className="text-white text-base font-bold flex items-center justify-center gap-1"><Timer size={13} className="text-amber-400" aria-hidden="true" />{stats.downtimeHours}h</p>
               <p className="text-slate-500 text-[10px] mt-0.5">Downtime</p>
             </div>
             <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-2.5">
@@ -465,30 +536,171 @@ export default function MachineProfile() {
 
           {/* ---- Maintenance history ---- */}
           {tab === 'history' && (
-            stats.history.length === 0 ? (
-              <EmptyState title="No maintenance history" description="Breakdowns and PM completions for this machine will build its lifetime service record automatically." />
-            ) : (
-              <ol className="relative border-l border-white/[0.08] ml-3 space-y-5 py-1">
-                {stats.history.map((h) => (
-                  <li key={`${h.kind}-${h.id}`} className="pl-5 relative">
-                    <span
-                      className={`absolute -left-[7px] top-1 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
-                        h.kind === 'breakdown' ? (h.status === 'closed' ? 'bg-amber-400' : 'bg-red-500') : h.status === 'completed' ? 'bg-emerald-400' : 'bg-cyan-400'
-                      }`}
-                      aria-hidden="true"
-                    />
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {h.kind === 'breakdown'
-                        ? <AlertOctagon size={13} className="text-red-400" aria-hidden="true" />
-                        : <ClipboardCheck size={13} className="text-emerald-400" aria-hidden="true" />}
-                      <p className="text-white text-[13px] font-semibold">{h.title}</p>
-                      <span className="text-slate-500 text-[11px]">{h.ts ? timeAgo(h.ts) : ''}</span>
-                    </div>
-                    <p className="text-slate-400 text-xs mt-0.5">{h.detail}</p>
-                  </li>
+            <div className="space-y-5">
+              {/* Filter bar */}
+              <div className="flex flex-col sm:flex-row gap-2.5 p-3 rounded-control bg-white/[0.03] border border-white/[0.06]">
+                <div className="flex items-center gap-2 text-slate-400 text-xs shrink-0">
+                  <Filter size={13} aria-hidden="true" /> Filters:
+                </div>
+                <select
+                  className="select-field !py-1 text-xs flex-1"
+                  value={histMonthFilter}
+                  onChange={(e) => setHistMonthFilter(e.target.value)}
+                  aria-label="Filter by month"
+                >
+                  <option value="">All Months</option>
+                  {historyMonthOptions.map((m) => (
+                    <option key={m} value={m}>{formatPeriodKey(m, true)}</option>
+                  ))}
+                </select>
+                <select
+                  className="select-field !py-1 text-xs flex-1"
+                  value={histSectionFilter}
+                  onChange={(e) => setHistSectionFilter(e.target.value)}
+                  aria-label="Filter by plant section"
+                >
+                  <option value="">Section: {machine.section}</option>
+                  {historySectionOptions.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {(histMonthFilter || histSectionFilter) && (
+                  <button
+                    className="btn-ghost text-xs !py-1 shrink-0"
+                    onClick={() => { setHistMonthFilter(''); setHistSectionFilter(''); }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Filtered KPI bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {[
+                  { label: 'Breakdowns', value: stats.breakdownCount, icon: <AlertOctagon size={12} className="text-red-400" /> },
+                  { label: 'Downtime (hrs)', value: stats.downtimeHours, icon: <Timer size={12} className="text-amber-400" /> },
+                  { label: 'MTTR (hrs)', value: stats.mttr, icon: <Wrench size={12} className="text-cyan-400" /> },
+                  { label: 'MTBF (hrs)', value: stats.mtbf, icon: <History size={12} className="text-violet-400" /> },
+                ].map((kpi) => (
+                  <div key={kpi.label} className="rounded-control bg-white/[0.03] border border-white/[0.06] p-3 text-center">
+                    <p className="text-white text-base font-bold flex items-center justify-center gap-1.5">{kpi.icon}{kpi.value}</p>
+                    <p className="text-slate-500 text-[10px] mt-0.5">{kpi.label}</p>
+                  </div>
                 ))}
-              </ol>
-            )
+              </div>
+
+              {/* ── Breakdown History & Duration ── */}
+              <section>
+                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mb-2.5">
+                  <AlertOctagon size={13} className="text-red-400" aria-hidden="true" />
+                  Breakdown History &amp; Duration
+                  <span className="badge bg-red-500/15 text-red-400">{stats.breakdownHistory.length}</span>
+                </h4>
+                {stats.breakdownHistory.length === 0 ? (
+                  <p className="text-slate-500 text-xs py-3 pl-1">No breakdown records for this filter.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="enterprise-table w-full min-w-[640px]">
+                      <thead>
+                        <tr>
+                          <th>Period</th>
+                          <th>Plant Section</th>
+                          <th>Breakdowns</th>
+                          <th>Downtime (hrs)</th>
+                          <th>MTTR (hrs)</th>
+                          <th>MTBF (hrs)</th>
+                          <th>Operating Hrs</th>
+                          <th>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.breakdownHistory.map((r) => (
+                          <tr key={r.id}>
+                            <td className="text-white font-medium whitespace-nowrap">{formatPeriodKey(r.period, true)}</td>
+                            <td className="text-slate-300 max-w-[180px] truncate" title={r.section}>{r.section}</td>
+                            <td>
+                              <span className={`font-semibold ${r.breakdownCount > 5 ? 'text-red-400' : r.breakdownCount > 2 ? 'text-amber-400' : 'text-slate-200'}`}>
+                                {r.breakdownCount}
+                              </span>
+                            </td>
+                            <td className="text-amber-300">{r.downtimeHours}</td>
+                            <td className="text-cyan-300">{r.mttr}</td>
+                            <td className="text-violet-300">{r.mtbf}</td>
+                            <td className="text-slate-400">{r.operatingHours || '—'}</td>
+                            <td className="text-slate-400 max-w-[200px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              {/* ── PM History ── */}
+              <section>
+                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mb-2.5">
+                  <ClipboardCheck size={13} className="text-emerald-400" aria-hidden="true" />
+                  PM History
+                  <span className="badge bg-emerald-500/15 text-emerald-400">{stats.pmHistory.length}</span>
+                </h4>
+                {stats.pmHistory.length === 0 ? (
+                  <p className="text-slate-500 text-xs py-3 pl-1">No PM records for this filter.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="enterprise-table w-full min-w-[620px]">
+                      <thead>
+                        <tr>
+                          <th>Period</th>
+                          <th>Plant Section</th>
+                          <th>Planned</th>
+                          <th>Done</th>
+                          <th>Pending</th>
+                          <th>Compliance %</th>
+                          <th>Schedule Adherence</th>
+                          <th>Remarks</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.pmHistory.map((r) => {
+                          const adherence = r.plannedCount > 0
+                            ? Math.round((r.doneCount / r.plannedCount) * 100)
+                            : 0;
+                          const adherenceColor = adherence >= 90
+                            ? 'text-emerald-400'
+                            : adherence >= 75
+                              ? 'text-amber-400'
+                              : 'text-red-400';
+                          return (
+                            <tr key={r.id}>
+                              <td className="text-white font-medium whitespace-nowrap">{formatPeriodKey(r.period, true)}</td>
+                              <td className="text-slate-300 max-w-[180px] truncate" title={r.section}>{r.section}</td>
+                              <td className="text-slate-200">{r.plannedCount}</td>
+                              <td className="text-emerald-300 font-semibold">{r.doneCount}</td>
+                              <td className={r.pendingCount > 0 ? 'text-amber-400' : 'text-slate-400'}>{r.pendingCount}</td>
+                              <td>
+                                <span className={`font-semibold ${adherenceColor}`}>{r.compliancePct}%</span>
+                              </td>
+                              <td>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${adherence >= 90 ? 'bg-emerald-400' : adherence >= 75 ? 'bg-amber-400' : 'bg-red-400'}`}
+                                      style={{ width: `${Math.min(adherence, 100)}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-[11px] ${adherenceColor}`}>{adherence}%</span>
+                                </div>
+                              </td>
+                              <td className="text-slate-400 max-w-[180px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            </div>
           )}
 
           {/* ---- Document tabs ---- */}

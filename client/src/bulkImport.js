@@ -42,8 +42,9 @@ export const IMPORT_MODULES = {
         'Breakdown Count': 8,
         'Downtime Hours': 26.5,
         'Operating Hours': 35280,
-        MTTR: 3.31,
-        MTBF: 4406.69,
+        'MTTR': '',
+        'MTBF': '',
+        'Remarks': '(MTTR/MTBF auto-calculated if blank)',
       },
     ],
   },
@@ -56,13 +57,24 @@ export const IMPORT_MODULES = {
     required: ['date'],
     sampleRows: [
       {
-        Date: new Date().toISOString().slice(0, 10),
+        'Date': new Date().toISOString().slice(0, 10),
         'Plant Section': 'Utility Section',
+        'UHBVNL Unit 1 KWh (Col H)': 4200,
+        'UHBVNL Unit 2 KWh (Col U)': 1850,
         'DG 500kVA Run Hrs': 4.5,
         'DG 380kVA Run Hrs': 2,
         'Fuel Consumed (Ltrs)': 180,
         'Solar Generation (kWh)': 620,
-        'Plant SEC (kWh/MT)': 7.8,
+        'DG KWh': 0,
+        'Total KWh': '',
+        'Production MT': 120,
+        'Plant SEC (kWh/MT)': '',
+        'Glyphosate (kWh)': 310,
+        'ACM (kWh)': 820,
+        'Jet-mill (kWh)': 540,
+        'Cartap (kWh)': 270,
+        'Compressors (kWh)': 95,
+        'Water/STP (kWh)': 65,
       },
     ],
   },
@@ -111,11 +123,29 @@ const FIELD_ALIASES = {
   energy: {
     date: ['date', 'logdate', 'readingdate'],
     plantSection: ['plantsection', 'section', 'department'],
-    dg500RunHours: ['dg500kvarunhrs', 'dg500runhrs', 'dg500hours', 'dg500kvahours'],
-    dg380RunHours: ['dg380kvarunhrs', 'dg380runhrs', 'dg380hours', 'dg380kvahours'],
-    fuelConsumedLitres: ['fuelconsumedltrs', 'fuelconsumedlitres', 'fuelconsumed', 'fuel'],
-    solarGenerationKwh: ['solargenerationkwh', 'solarkwh', 'solargeneration'],
-    plantSec: ['plantseckwhmt', 'plantsec', 'sec'],
+    // Dual UHBVNL grid feeders
+    uhbvnlUnit1Kwh: ['uhbvnlunit1kwh', 'unit1kwh', 'kwhi', 'kwh_i', 'columnh', 'gridunit1', 'uhbvnl1', 'unit1import', 'u1kwh'],
+    uhbvnlUnit2Kwh: ['uhbvnlunit2kwh', 'unit2kwh', 'kwhi10', 'kwh_i10', 'columnu', 'gridunit2', 'uhbvnl2', 'unit2import', 'u2kwh'],
+    totalGridKwh:   ['totalgridkwh', 'gridkwh', 'totalgrid', 'gridtotal', 'totalimport'],
+    // DG generators
+    dg500RunHours: ['dg500kvarunhrs', 'dg500runhrs', 'dg500hours', 'dg500kvahours', 'dg500runhours'],
+    dg380RunHours: ['dg380kvarunhrs', 'dg380runhrs', 'dg380hours', 'dg380kvahours', 'dg380runhours'],
+    fuelConsumedLitres: ['fuelconsumedltrs', 'fuelconsumedlitres', 'fuelconsumed', 'fuel', 'fuellitres', 'fuelltrs'],
+    // Solar — individual inverters and aggregates
+    solarGenerationKwh: ['solargenerationkwh', 'solarkwh', 'solargeneration', 'totalsolar',
+                         'unit1inv1', 'unit1inv2', 'unit1inv3', 'unit1inv4',
+                         'unit2inv1', 'unit2inv2', 'unit2inv3'],
+    dgKwh:       ['dgkwh', 'dgeneration', 'dgtotalkwh', 'dgkwhtotal'],
+    totalKwh:    ['totalkwh', 'totalconsumption', 'totalenergy', 'planttotalkwh'],
+    plantSec:    ['plantseckwhmt', 'plantsec', 'sec', 'specifickwh', 'seckwhmt'],
+    productionMT: ['productionmt', 'production', 'outputmt', 'mton'],
+    // Section sub-meters (Plantwise Monitoring Report)
+    secGlyphosate:   ['glyphosate', 'glyphosatecons', 'glyphosatekwh', 'glyphosateunitcons'],
+    secAcm:          ['acm', 'acmcons', 'acmkwh', 'acmunitcons'],
+    secJetmill:      ['jetmill', 'jetmillcons', 'jetmillkwh', 'jetmillunitcons'],
+    secCartap:       ['cartap', 'cartapcons', 'cartapkwh', 'cartapunitcons'],
+    secCompressors:  ['compressors', 'compressorcons', 'compressorkwh', 'compressorunitcons'],
+    secWaterStp:     ['waterstp', 'water', 'stp', 'watercons', 'stpkwh', 'waterunitcons'],
   },
   machines: {
     machineId: ['machineid', 'machinecode', 'equipmentid', 'equipmentcode', 'assetid'],
@@ -221,13 +251,19 @@ function parseModuleRow(moduleId, row, mapping, index) {
     if (!section || !period || !mapping.plannedCount) {
       return { error: `Row ${index}: reporting period, plant section, and planned PM count are required.` };
     }
+    const plannedCount = parseNumber(getCell(row, mapping, 'plannedCount'));
+    const doneCount    = parseNumber(getCell(row, mapping, 'doneCount'));
+    const pendingCount = parseNumber(getCell(row, mapping, 'pendingCount'));
+    // Auto-calculate compliance if not supplied or zero
+    const rawCompliance = parseNumber(getCell(row, mapping, 'compliancePct'));
+    const compliancePct = rawCompliance || (plannedCount > 0 ? Math.round((doneCount / plannedCount) * 1000) / 10 : 0);
     return {
       period,
       section,
-      plannedCount: parseNumber(getCell(row, mapping, 'plannedCount')),
-      doneCount: parseNumber(getCell(row, mapping, 'doneCount')),
-      pendingCount: parseNumber(getCell(row, mapping, 'pendingCount')),
-      compliancePct: parseNumber(getCell(row, mapping, 'compliancePct')),
+      plannedCount,
+      doneCount,
+      pendingCount,
+      compliancePct,
     };
   }
 
@@ -237,28 +273,83 @@ function parseModuleRow(moduleId, row, mapping, index) {
     if (!section || !period || !mapping.breakdownCount) {
       return { error: `Row ${index}: reporting period, plant section, and breakdown count are required.` };
     }
+    const breakdownCount = parseNumber(getCell(row, mapping, 'breakdownCount'));
+    const downtimeHours = parseNumber(getCell(row, mapping, 'downtimeHours'));
+    const operatingHours = parseNumber(getCell(row, mapping, 'operatingHours'));
+    // Auto-calculate MTTR and MTBF if not provided or zero in the sheet
+    const rawMttr = parseNumber(getCell(row, mapping, 'mttr'));
+    const rawMtbf = parseNumber(getCell(row, mapping, 'mtbf'));
+    const mttr = rawMttr || (breakdownCount > 0 ? Math.round((downtimeHours / breakdownCount) * 100) / 100 : 0);
+    const mtbf = rawMtbf || (breakdownCount > 0 ? Math.round((Math.max(0, operatingHours - downtimeHours) / breakdownCount) * 100) / 100 : 0);
     return {
       period,
       section,
-      breakdownCount: parseNumber(getCell(row, mapping, 'breakdownCount')),
-      downtimeHours: parseNumber(getCell(row, mapping, 'downtimeHours')),
-      operatingHours: parseNumber(getCell(row, mapping, 'operatingHours')),
-      mttr: parseNumber(getCell(row, mapping, 'mttr')),
-      mtbf: parseNumber(getCell(row, mapping, 'mtbf')),
+      breakdownCount,
+      downtimeHours,
+      operatingHours,
+      mttr,
+      mtbf,
     };
   }
 
   if (moduleId === 'energy') {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
+
+    // ── Dual-unit UHBVNL grid ──────────────────────────────────────────────
+    const uhbvnlUnit1Kwh = parseNumber(getCell(row, mapping, 'uhbvnlUnit1Kwh'));
+    const uhbvnlUnit2Kwh = parseNumber(getCell(row, mapping, 'uhbvnlUnit2Kwh'));
+    const rawTotalGrid   = parseNumber(getCell(row, mapping, 'totalGridKwh'));
+    const totalGridKwh   = rawTotalGrid || (uhbvnlUnit1Kwh + uhbvnlUnit2Kwh);
+
+    // ── DG generators ─────────────────────────────────────────────────────
+    const dg500RunHours      = parseNumber(getCell(row, mapping, 'dg500RunHours'));
+    const dg380RunHours      = parseNumber(getCell(row, mapping, 'dg380RunHours'));
+    const fuelConsumedLitres = parseNumber(getCell(row, mapping, 'fuelConsumedLitres'));
+
+    // ── Solar (aggregate of individual inverters if present) ───────────────
+    // solarGenerationKwh column may itself be a pre-aggregated total, or one
+    // of the individual inverter columns (Unit1 INV 1-4 / Unit2 INV 1-3).
+    // When the sheet has a dedicated "Solar Generation (kWh)" total column we
+    // use it; the individual INV columns are handled by the master parser.
+    const solarGenerationKwh = parseNumber(getCell(row, mapping, 'solarGenerationKwh'));
+    const dgKwh              = parseNumber(getCell(row, mapping, 'dgKwh'));
+
+    // ── Total plant kWh ───────────────────────────────────────────────────
+    const rawTotal  = parseNumber(getCell(row, mapping, 'totalKwh'));
+    const totalKwh  = rawTotal || (totalGridKwh + solarGenerationKwh + dgKwh) || 0;
+
+    // ── Specific Energy Consumption ────────────────────────────────────────
+    const rawPlantSec    = parseNumber(getCell(row, mapping, 'plantSec'));
+    const productionMT   = parseNumber(getCell(row, mapping, 'productionMT'));
+    const plantSec       = rawPlantSec || (productionMT > 0 ? Math.round((totalKwh / productionMT) * 100) / 100 : 0);
+
+    // ── Section sub-meter consumption ─────────────────────────────────────
+    const sectionConsumption = {
+      glyphosate:   parseNumber(getCell(row, mapping, 'secGlyphosate')),
+      acm:          parseNumber(getCell(row, mapping, 'secAcm')),
+      jetmill:      parseNumber(getCell(row, mapping, 'secJetmill')),
+      cartap:       parseNumber(getCell(row, mapping, 'secCartap')),
+      compressors:  parseNumber(getCell(row, mapping, 'secCompressors')),
+      waterStp:     parseNumber(getCell(row, mapping, 'secWaterStp')),
+    };
+
     return {
       date,
       plantSection: String(getCell(row, mapping, 'plantSection') || '').trim(),
-      dg500RunHours: parseNumber(getCell(row, mapping, 'dg500RunHours')),
-      dg380RunHours: parseNumber(getCell(row, mapping, 'dg380RunHours')),
-      fuelConsumedLitres: parseNumber(getCell(row, mapping, 'fuelConsumedLitres')),
-      solarGenerationKwh: parseNumber(getCell(row, mapping, 'solarGenerationKwh')),
-      plantSec: parseNumber(getCell(row, mapping, 'plantSec')),
+      uhbvnlUnit1Kwh,
+      uhbvnlUnit2Kwh,
+      totalGridKwh,
+      dg500RunHours,
+      dg380RunHours,
+      fuelConsumedLitres,
+      solarGenerationKwh,
+      dgKwh,
+      totalKwh,
+      plantSec,
+      sectionConsumption,
+      // legacy single kwh for analytics backward compat
+      kwh: totalKwh || solarGenerationKwh,
     };
   }
 
@@ -499,21 +590,32 @@ export function downloadMasterTemplate() {
       'Breakdown Count': 8,
       'Downtime Hours': 26.5,
       'Operating Hours': 35280,
-      MTTR: 3.31,
-      MTBF: 4406.69,
-      Remarks: '',
+      'MTTR': '',
+      'MTBF': '',
+      'Remarks': '(MTTR and MTBF are auto-calculated if left blank)',
     },
   ];
   const energySample = [
     {
-      Date: new Date().toISOString().slice(0, 10),
+      'Date': new Date().toISOString().slice(0, 10),
       'Plant Section': 'Utility Section',
+      'UHBVNL Unit 1 KWh (Col H)': 4200,
+      'UHBVNL Unit 2 KWh (Col U)': 1850,
       'DG 500kVA Run Hrs': 4.5,
       'DG 380kVA Run Hrs': 2,
       'Fuel Consumed (Ltrs)': 180,
       'Solar Generation (kWh)': 620,
-      'Plant SEC (kWh/MT)': 7.8,
-      Remarks: '',
+      'DG KWh': 0,
+      'Total KWh': '',
+      'Production MT': 120,
+      'Plant SEC (kWh/MT)': '',
+      'Glyphosate (kWh)': 310,
+      'ACM (kWh)': 820,
+      'Jet-mill (kWh)': 540,
+      'Cartap (kWh)': 270,
+      'Compressors (kWh)': 95,
+      'Water/STP (kWh)': 65,
+      'Remarks': '(Total KWh & SEC auto-calculated if blank)',
     },
   ];
 

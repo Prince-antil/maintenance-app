@@ -4,11 +4,13 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { useStore, addEnergyLog, deleteEnergyLog, updateEnergyLog } from '../store.js';
 import { monthlyEnergy, monthlyEnergyOverview, monthKey } from '../analytics.js';
-import { ChartCard, TrendChart, PieDonutChart } from '../components/AnalyticsCharts.jsx';
+import { ChartCard, TrendChart, PieDonutChart, GroupedBarChart } from '../components/AnalyticsCharts.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
+import { SECTION_METERS } from '../constants.js';
 import {
-  Zap, Plus, Pencil, Trash2, Download, AlertCircle, Sun, Fuel, PlugZap, FolderOpen, Upload, X,
+  Zap, Plus, Pencil, Trash2, Download, AlertCircle, Sun, Fuel,
+  PlugZap, FolderOpen, Upload, X, BarChart3, Grid2x2,
 } from 'lucide-react';
 
 const SOURCES = ['DG 500 kVA', 'DG 380 kVA', 'Solar Generation', 'Grid / HT Supply', 'Plant SEC'];
@@ -124,26 +126,72 @@ export default function Energy() {
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const stats = useMemo(() => {
-    const today = energy.filter((e) => (e.date || '').slice(0, 10) === new Date().toISOString().slice(0, 10));
-    const month = energy.filter((e) => monthKey(e.date || e.createdAt) === monthKey(new Date()));
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const currentMK = monthKey(new Date());
+    const todayRows  = energy.filter((e) => (e.date || '').slice(0, 10) === todayStr);
+    const monthRows  = energy.filter((e) => monthKey(e.date || e.createdAt) === currentMK);
+
+    // ── Dual UHBVNL grid ──────────────────────────────────────────────────
+    const unit1KwhMonth  = Math.round(monthRows.reduce((s, e) => s + (e.uhbvnlUnit1Kwh || 0), 0));
+    const unit2KwhMonth  = Math.round(monthRows.reduce((s, e) => s + (e.uhbvnlUnit2Kwh || 0), 0));
+    const totalGridMonth = Math.round(monthRows.reduce((s, e) => s + (e.totalGridKwh || 0), 0)) || (unit1KwhMonth + unit2KwhMonth);
+
+    // ── DG generators ─────────────────────────────────────────────────────
+    const dg500HrsMonth  = Math.round(monthRows.reduce((s, e) => s + (e.dg500RunHours || 0), 0) * 10) / 10;
+    const dg380HrsMonth  = Math.round(monthRows.reduce((s, e) => s + (e.dg380RunHours || 0), 0) * 10) / 10;
+    const fuelMonth      = Math.round(monthRows.reduce((s, e) => s + (e.fuelConsumedLitres || 0), 0));
+    const fuelToday      = Math.round(todayRows.reduce((s, e) => s + (e.fuelConsumedLitres || 0), 0));
+
+    // ── Solar ─────────────────────────────────────────────────────────────
+    const solarMonth     = Math.round(monthRows.reduce((s, e) => s + (e.solarGenerationKwh || 0), 0));
+    const totalKwhMonth  = Math.round(monthRows.reduce((s, e) => s + (e.totalKwh || e.kwh || 0), 0));
+
+    // ── Overall totals (all-time) ─────────────────────────────────────────
+    const totalLogged    = Math.round(energy.reduce((s, e) => s + (e.totalKwh || e.kwh || 0), 0));
+    const totalSolar     = Math.round(energy.reduce((s, e) => s + (e.solarGenerationKwh || 0), 0));
+    const solarShare     = totalLogged ? Math.round((totalSolar / totalLogged) * 100) : 0;
+
+    // ── Pie chart by source ───────────────────────────────────────────────
     const bySource = {};
     energy.forEach((e) => {
       const label = e.source || (e.plantSection ? 'Bulk Energy Import' : 'Unspecified');
       bySource[label] = (bySource[label] || 0) + (e.solarGenerationKwh || e.kwh || 0);
     });
-    const overview = monthlyEnergyOverview(energy);
+    const pie = Object.entries(bySource).map(([label, value]) => ({
+      label, value: Math.round(value), color: SOURCE_COLORS[label],
+    }));
+
+    // ── Grid unit pie ─────────────────────────────────────────────────────
+    const gridPie = [
+      { label: 'UHBVNL Unit 1', value: unit1KwhMonth, color: '#06B6D4' },
+      { label: 'UHBVNL Unit 2', value: unit2KwhMonth, color: '#8B5CF6' },
+    ].filter((d) => d.value > 0);
+
+    // ── DG split grouped bar (last 6 months) ─────────────────────────────
+    const dgTrend = monthlyEnergyOverview(energy, 6).map((m) => ({
+      label: m.label,
+      'DG 500 kVA': m.dg500RunHours || 0,
+      'DG 380 kVA': m.dg380RunHours || 0,
+    }));
+
+    // ── Section sub-meter totals (month) ──────────────────────────────────
+    const sectionTotals = {};
+    SECTION_METERS.forEach(({ key }) => { sectionTotals[key] = 0; });
+    monthRows.forEach((e) => {
+      const sc = e.sectionConsumption || {};
+      SECTION_METERS.forEach(({ key }) => {
+        sectionTotals[key] += Number(sc[key] || 0);
+      });
+    });
+
     return {
-      today: Math.round(today.reduce((s, e) => s + (e.fuelConsumedLitres || 0), 0)),
-      month: Math.round(month.reduce((s, e) => s + (e.solarGenerationKwh || e.kwh || 0), 0)),
-      total: Math.round(energy.reduce((s, e) => s + (e.solarGenerationKwh || e.kwh || 0), 0)),
-      solarShare: (() => {
-        const total = energy.reduce((s, e) => s + (e.solarGenerationKwh || e.kwh || 0), 0);
-        const solar = energy.reduce((s, e) => s + (e.solarGenerationKwh || (e.source === 'Solar Generation' ? e.kwh : 0) || 0), 0);
-        return total ? Math.round((solar / total) * 100) : 0;
-      })(),
-      pie: Object.entries(bySource).map(([label, value]) => ({ label, value: Math.round(value), color: SOURCE_COLORS[label] })),
-      trend: monthlyEnergy(energy),
-      overview,
+      fuelToday,
+      unit1KwhMonth, unit2KwhMonth, totalGridMonth,
+      dg500HrsMonth, dg380HrsMonth, fuelMonth, solarMonth,
+      totalKwhMonth, totalLogged, solarShare,
+      pie, gridPie, dgTrend, sectionTotals,
+      trend:    monthlyEnergy(energy),
+      overview: monthlyEnergyOverview(energy),
     };
   }, [energy]);
 
@@ -169,10 +217,15 @@ export default function Energy() {
       [
         { label: 'Date', value: (r) => new Date(r.date).toLocaleDateString('en-GB') },
         { key: 'source', label: 'Source' },
-        { key: 'kwh', label: 'kWh' },
-        { key: 'fuelConsumedLitres', label: 'Fuel (L)' },
+        { key: 'uhbvnlUnit1Kwh', label: 'Unit 1 kWh' },
+        { key: 'uhbvnlUnit2Kwh', label: 'Unit 2 kWh' },
+        { key: 'totalGridKwh', label: 'Total Grid kWh' },
         { key: 'solarGenerationKwh', label: 'Solar (kWh)' },
-        { label: 'DG Run Hours', value: (r) => (r.dg500RunHours || 0) + (r.dg380RunHours || 0) },
+        { key: 'dg500RunHours', label: 'DG 500 Hrs' },
+        { key: 'dg380RunHours', label: 'DG 380 Hrs' },
+        { key: 'fuelConsumedLitres', label: 'Fuel (L)' },
+        { key: 'totalKwh', label: 'Total kWh' },
+        { key: 'plantSec', label: 'SEC (kWh/MT)' },
         { key: 'plantSection', label: 'Plant Section' },
         { key: 'remarks', label: 'Remarks' },
       ],
@@ -207,32 +260,158 @@ export default function Energy() {
         </div>
       </div>
 
-      {/* Live energy KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { icon: Fuel, label: 'Fuel Today', value: `${stats.today.toLocaleString()} L`, cls: 'text-amber-400' },
-          { icon: Zap, label: 'Solar This Month', value: `${stats.month.toLocaleString()} kWh`, cls: 'text-cyan-400' },
-          { icon: PlugZap, label: 'Total Logged', value: `${stats.total.toLocaleString()} kWh`, cls: 'text-orange-400' },
-          { icon: Sun, label: 'Solar Share', value: `${stats.solarShare}%`, cls: 'text-emerald-400' },
-        ].map((k) => {
-          const Icon = k.icon;
-          return (
-            <div key={k.label} className="glass-card p-4 flex items-center gap-3">
-              <Icon size={18} className={k.cls} aria-hidden="true" />
-              <div>
-                <p className="text-white text-base font-bold leading-tight">{k.value}</p>
-                <p className="text-slate-500 text-[10px]">{k.label}</p>
+      {/* ── Row 1: UHBVNL Dual-Unit Grid ── */}
+      <div className="glass-card p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Grid2x2 size={15} className="text-cyan-400" aria-hidden="true" />
+          <h3 className="text-card-title">UHBVNL Grid Import — This Month</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {/* Unit 1 */}
+          <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-4">
+            <p className="text-slate-400 text-[11px] uppercase tracking-wider mb-1.5">Unit 1 (Col H / KWh_I)</p>
+            <p className="text-white text-2xl font-bold tabular-nums">{stats.unit1KwhMonth.toLocaleString()}</p>
+            <p className="text-cyan-400 text-xs mt-0.5">kWh</p>
+          </div>
+          {/* Unit 2 */}
+          <div className="rounded-control bg-violet-500/[0.07] border border-violet-500/20 p-4">
+            <p className="text-slate-400 text-[11px] uppercase tracking-wider mb-1.5">Unit 2 (Col U / KWh_I 10)</p>
+            <p className="text-white text-2xl font-bold tabular-nums">{stats.unit2KwhMonth.toLocaleString()}</p>
+            <p className="text-violet-400 text-xs mt-0.5">kWh</p>
+          </div>
+          {/* Combined */}
+          <div className="rounded-control bg-white/[0.04] border border-white/[0.10] p-4 flex flex-col justify-between">
+            <p className="text-slate-400 text-[11px] uppercase tracking-wider mb-1.5">Total Grid (Unit 1 + 2)</p>
+            <p className="text-white text-2xl font-bold tabular-nums">{stats.totalGridMonth.toLocaleString()}</p>
+            <div className="flex items-center gap-2 mt-2">
+              <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full bg-cyan-400" style={{ width: stats.totalGridMonth ? `${Math.round((stats.unit1KwhMonth / stats.totalGridMonth) * 100)}%` : '50%' }} />
               </div>
+              <span className="text-slate-500 text-[10px] whitespace-nowrap">
+                U1 {stats.totalGridMonth ? Math.round((stats.unit1KwhMonth / stats.totalGridMonth) * 100) : 0}% / U2 {stats.totalGridMonth ? Math.round((stats.unit2KwhMonth / stats.totalGridMonth) * 100) : 0}%
+              </span>
             </div>
-          );
-        })}
+          </div>
+        </div>
+        {/* Mini grid pie if data exists */}
+        {stats.gridPie.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <ChartCard title="Grid Unit Split" subtitle="Unit 1 vs Unit 2 this month" empty={false} height={180}>
+              <PieDonutChart data={stats.gridPie} donut centerLabel={`${stats.totalGridMonth.toLocaleString()}`} centerSub="kWh grid" />
+            </ChartCard>
+            <ChartCard title="Monthly Energy Trend" subtitle="Total kWh · last 6 months" empty={!energy.length} height={180}>
+              <TrendChart data={stats.trend} dataKey="kwh" color="#F59E0B" unit=" kWh" />
+            </ChartCard>
+          </div>
+        )}
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <ChartCard title="Monthly Energy Consumption" subtitle="Total kWh · last 6 months" empty={!energy.length}>
-          <TrendChart data={stats.trend} dataKey="kwh" color="#F59E0B" unit=" kWh" />
+      {/* ── Row 2: DG 500 kVA vs 380 kVA ── */}
+      <div className="glass-card p-5 space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <Zap size={15} className="text-amber-400" aria-hidden="true" />
+          <h3 className="text-card-title">DG Backup Generators — This Month</h3>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[
+            { label: 'DG 500 kVA Run Hrs', value: stats.dg500HrsMonth, unit: 'hrs', color: 'text-amber-300', bg: 'bg-amber-500/[0.07] border-amber-500/20' },
+            { label: 'DG 380 kVA Run Hrs', value: stats.dg380HrsMonth, unit: 'hrs', color: 'text-orange-300', bg: 'bg-orange-500/[0.07] border-orange-500/20' },
+            { label: 'Total DG Run Hrs',   value: Math.round((stats.dg500HrsMonth + stats.dg380HrsMonth) * 10) / 10, unit: 'hrs', color: 'text-yellow-300', bg: 'bg-yellow-500/[0.07] border-yellow-500/20' },
+            { label: 'Fuel Consumed',      value: stats.fuelMonth.toLocaleString(), unit: 'Ltrs', color: 'text-red-300', bg: 'bg-red-500/[0.07] border-red-500/20' },
+          ].map((k) => (
+            <div key={k.label} className={`rounded-control border p-4 ${k.bg}`}>
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1.5 leading-tight">{k.label}</p>
+              <p className={`text-xl font-bold tabular-nums ${k.color}`}>{k.value}</p>
+              <p className="text-slate-500 text-xs mt-0.5">{k.unit}</p>
+            </div>
+          ))}
+        </div>
+        <ChartCard title="DG Run Hours Split — Last 6 Months" subtitle="DG 500 kVA vs DG 380 kVA" empty={!energy.length} height={200}>
+          <GroupedBarChart
+            data={stats.dgTrend}
+            bars={[
+              { dataKey: 'DG 500 kVA', name: 'DG 500 kVA (hrs)', color: '#F59E0B' },
+              { dataKey: 'DG 380 kVA', name: 'DG 380 kVA (hrs)', color: '#FB923C' },
+            ]}
+          />
         </ChartCard>
+      </div>
+
+      {/* ── Row 3: Solar + Source pie ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="glass-card p-4 flex items-center gap-3">
+          <Sun size={18} className="text-emerald-400" aria-hidden="true" />
+          <div>
+            <p className="text-white text-xl font-bold tabular-nums">{stats.solarMonth.toLocaleString()} kWh</p>
+            <p className="text-slate-500 text-[10px]">Solar Generation This Month</p>
+          </div>
+        </div>
+        <div className="glass-card p-4 flex items-center gap-3">
+          <PlugZap size={18} className="text-orange-400" aria-hidden="true" />
+          <div>
+            <p className="text-white text-xl font-bold tabular-nums">{stats.solarShare}%</p>
+            <p className="text-slate-500 text-[10px]">Solar Share of Total Consumption</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Row 4: Section sub-meter + Consumption-by-source pie ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Section sub-meter table */}
+        <div className="glass-card overflow-hidden">
+          <div className="px-5 py-4 border-b border-white/[0.06]">
+            <h3 className="text-card-title flex items-center gap-2">
+              <BarChart3 size={14} className="text-cyan-400" aria-hidden="true" />
+              Section Sub-Meter Consumption
+            </h3>
+            <p className="text-meta mt-0.5">Plant-wise kWh this month from sub-meters</p>
+          </div>
+          {SECTION_METERS.every(({ key }) => !stats.sectionTotals[key]) ? (
+            <div className="p-5">
+              <EmptyState
+                title="No sub-meter data"
+                description="Upload the Plantwise Monitoring Report to populate section-wise consumption."
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="enterprise-table w-full">
+                <thead>
+                  <tr>
+                    <th>Section</th>
+                    <th>kWh This Month</th>
+                    <th>Share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const total = SECTION_METERS.reduce((s, { key }) => s + (stats.sectionTotals[key] || 0), 0) || 1;
+                    return SECTION_METERS.map(({ key, label }) => {
+                      const val = Math.round(stats.sectionTotals[key] || 0);
+                      const pct = Math.round((val / total) * 100);
+                      return (
+                        <tr key={key}>
+                          <td className="text-white font-medium">{label}</td>
+                          <td className="text-amber-300 font-semibold tabular-nums">{val.toLocaleString()}</td>
+                          <td>
+                            <div className="flex items-center gap-2">
+                              <div className="w-20 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                                <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="text-slate-400 text-[11px]">{pct}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Source pie */}
         <ChartCard title="Consumption by Source" subtitle="Lifetime split across DG / solar / grid" empty={!energy.length}>
           <PieDonutChart data={stats.pie} donut centerLabel={`${stats.solarShare}%`} centerSub="Solar" />
         </ChartCard>
@@ -276,21 +455,39 @@ export default function Energy() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="enterprise-table w-full min-w-[560px]">
+            <table className="enterprise-table w-full min-w-[900px]">
               <thead>
-                <tr><th>Date</th><th>Source</th><th>kWh</th><th>Remarks</th>{isAdmin && <th className="w-20 text-right" aria-label="Actions" />}</tr>
+                <tr>
+                  <th>Date</th>
+                  <th>Source / Section</th>
+                  <th className="text-cyan-400">Unit 1 kWh</th>
+                  <th className="text-violet-400">Unit 2 kWh</th>
+                  <th>Total Grid kWh</th>
+                  <th className="text-emerald-400">Solar kWh</th>
+                  <th className="text-amber-400">DG 500 Hrs</th>
+                  <th className="text-orange-400">DG 380 Hrs</th>
+                  <th>Fuel (L)</th>
+                  <th>Total kWh</th>
+                  {isAdmin && <th className="w-20 text-right" aria-label="Actions" />}
+                </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id}>
                     <td className="text-slate-300 whitespace-nowrap">{new Date(r.date).toLocaleDateString('en-GB')}</td>
                     <td>
-                      <span className="badge border" style={{ color: SOURCE_COLORS[r.source] || '#10B981', borderColor: `${SOURCE_COLORS[r.source] || '#10B981'}40`, backgroundColor: `${SOURCE_COLORS[r.source] || '#10B981'}14` }}>
-                        {r.source || (r.plantSection ? 'Bulk Entry' : 'Energy Log')}
+                      <span className="badge border truncate max-w-[140px]" style={{ color: SOURCE_COLORS[r.source] || '#10B981', borderColor: `${SOURCE_COLORS[r.source] || '#10B981'}40`, backgroundColor: `${SOURCE_COLORS[r.source] || '#10B981'}14` }}>
+                        {r.source || (r.plantSection ? r.plantSection : 'Energy Log')}
                       </span>
                     </td>
-                    <td className="text-white font-semibold">{(r.solarGenerationKwh || r.kwh || 0).toLocaleString()}</td>
-                    <td className="text-slate-400">{r.remarks || `${r.plantSection || '—'} · Fuel ${r.fuelConsumedLitres || 0} L · DG ${((r.dg500RunHours || 0) + (r.dg380RunHours || 0)).toFixed(1)} h`}</td>
+                    <td className="text-cyan-300 tabular-nums">{r.uhbvnlUnit1Kwh ? r.uhbvnlUnit1Kwh.toLocaleString() : '—'}</td>
+                    <td className="text-violet-300 tabular-nums">{r.uhbvnlUnit2Kwh ? r.uhbvnlUnit2Kwh.toLocaleString() : '—'}</td>
+                    <td className="text-slate-200 font-semibold tabular-nums">{r.totalGridKwh ? r.totalGridKwh.toLocaleString() : '—'}</td>
+                    <td className="text-emerald-300 tabular-nums">{r.solarGenerationKwh ? r.solarGenerationKwh.toLocaleString() : '—'}</td>
+                    <td className="text-amber-300 tabular-nums">{r.dg500RunHours || '—'}</td>
+                    <td className="text-orange-300 tabular-nums">{r.dg380RunHours || '—'}</td>
+                    <td className="text-red-300 tabular-nums">{r.fuelConsumedLitres || '—'}</td>
+                    <td className="text-white font-bold tabular-nums">{(r.totalKwh || r.kwh || 0).toLocaleString()}</td>
                     {isAdmin && (
                       <td className="text-right">
                         <div className="flex items-center justify-end gap-1">

@@ -117,3 +117,31 @@ export const MACHINE_DOC_TABS = [
 export const APP_VERSION = '1.0';
 export const COMPANY_NAME = 'Crystal Crop Protection Ltd.';
 export const UNIT_BADGE = 'NATHUPUR UNIT — MAINTENANCE & RELIABILITY HUB';
+
+// ── Energy metering constants ─────────────────────────────────────────────
+// UHBVNL dual-feeder labels (Col H = Unit 1 import, Col U = Unit 2 import)
+export const GRID_UNITS = [
+  { key: 'uhbvnlUnit1Kwh', label: 'UHBVNL Unit 1', colRef: 'H / KWh_I',      color: '#06B6D4' },
+  { key: 'uhbvnlUnit2Kwh', label: 'UHBVNL Unit 2', colRef: 'U / KWh_I 10',   color: '#8B5CF6' },
+];
+
+// DG generator specs
+export const DG_UNITS = [
+  { key: 'dg500RunHours', label: 'DG 500 kVA', color: '#F59E0B' },
+  { key: 'dg380RunHours', label: 'DG 380 kVA', color: '#FB923C' },
+];
+
+// Section sub-meter keys and display labels
+// (Plantwise Monitoring Report — "Unit Cons." columns)
+export const SECTION_METERS = [
+  { key: 'glyphosate',   label: 'Glyphosate'          },
+  { key: 'acm',         label: 'ACM'                  },
+  { key: 'jetmill',     label: 'Jet-mill'             },
+  { key: 'cartap',      label: 'Cartap'               },
+  { key: 'compressors', label: 'Compressors'          },
+  { key: 'waterStp',    label: 'Water / STP'          },
+];
+
+export const EMPTY_SECTION_CONSUMPTION = Object.fromEntries(
+  SECTION_METERS.map(({ key }) => [key, 0])
+);

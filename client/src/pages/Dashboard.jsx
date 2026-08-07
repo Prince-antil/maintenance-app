@@ -199,6 +199,79 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* Energy snapshot — dual-unit UHBVNL grid + DG 500/380 split */}
+      <section aria-label="Energy snapshot">
+        <div className="glass-card p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Zap size={16} className="text-amber-400" aria-hidden="true" />
+            <h3 className="text-card-title">Energy Snapshot — This Month</h3>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+            {/* UHBVNL Unit 1 */}
+            <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 1 Grid</p>
+              <p className="text-white text-base font-bold tabular-nums">{(kpi.unit1KwhMonth || 0).toLocaleString()}</p>
+              <p className="text-cyan-400 text-[10px] mt-0.5">kWh</p>
+            </div>
+            {/* UHBVNL Unit 2 */}
+            <div className="rounded-control bg-violet-500/[0.07] border border-violet-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 2 Grid</p>
+              <p className="text-white text-base font-bold tabular-nums">{(kpi.unit2KwhMonth || 0).toLocaleString()}</p>
+              <p className="text-violet-400 text-[10px] mt-0.5">kWh</p>
+            </div>
+            {/* Total Grid */}
+            <div className="rounded-control bg-white/[0.04] border border-white/[0.10] p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Total Grid</p>
+              <p className="text-white text-base font-bold tabular-nums">{(kpi.totalGridMonth || 0).toLocaleString()}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
+            </div>
+            {/* DG 500 */}
+            <div className="rounded-control bg-amber-500/[0.07] border border-amber-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500 kVA</p>
+              <p className="text-amber-300 text-base font-bold tabular-nums">{kpi.dg500HrsMonth || 0}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
+            </div>
+            {/* DG 380 */}
+            <div className="rounded-control bg-orange-500/[0.07] border border-orange-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380 kVA</p>
+              <p className="text-orange-300 text-base font-bold tabular-nums">{kpi.dg380HrsMonth || 0}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
+            </div>
+            {/* Solar */}
+            <div className="rounded-control bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Solar</p>
+              <p className="text-emerald-300 text-base font-bold tabular-nums">{(kpi.solarMonth || 0).toLocaleString()}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
+            </div>
+            {/* Fuel */}
+            <div className="rounded-control bg-red-500/[0.07] border border-red-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Fuel</p>
+              <p className="text-red-300 text-base font-bold tabular-nums">{(kpi.fuelMonth || 0).toLocaleString()}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">Ltrs</p>
+            </div>
+          </div>
+          {/* Unit 1 vs Unit 2 split bar */}
+          {(kpi.totalGridMonth || 0) > 0 && (
+            <div className="flex items-center gap-3 pt-1">
+              <span className="text-slate-500 text-[10px] whitespace-nowrap">Grid split:</span>
+              <div className="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
+                <div
+                  className="h-full bg-cyan-400 transition-all duration-500"
+                  style={{ width: `${Math.round(((kpi.unit1KwhMonth || 0) / kpi.totalGridMonth) * 100)}%` }}
+                />
+                <div
+                  className="h-full bg-violet-400 transition-all duration-500"
+                  style={{ width: `${Math.round(((kpi.unit2KwhMonth || 0) / kpi.totalGridMonth) * 100)}%` }}
+                />
+              </div>
+              <span className="text-slate-500 text-[10px] whitespace-nowrap">
+                U1 {Math.round(((kpi.unit1KwhMonth || 0) / kpi.totalGridMonth) * 100)}% · U2 {Math.round(((kpi.unit2KwhMonth || 0) / kpi.totalGridMonth) * 100)}%
+              </span>
+            </div>
+          )}
+        </div>
+      </section>
+
       {/* AI reliability insights */}
       <section aria-label="AI analytics">
         <div className="glass-card p-5">
@@ -250,13 +323,13 @@ export default function Dashboard() {
             <ProgressGauge value={kpi.pmCompliance} label="PM Compliance" />
           </div>
         </ChartCard>
-        <ChartCard title="Energy Consumption Overview" subtitle="Fuel litres, solar kWh and DG run hours" empty={noEnergy}>
+        <ChartCard title="Energy Consumption Overview" subtitle="DG 500 kVA vs DG 380 kVA run hours and solar generation" empty={noEnergy}>
           <GroupedBarChart
             data={charts.energyOverview}
             bars={[
-              { dataKey: 'fuelLitres', name: 'Fuel (L)', color: '#F59E0B' },
-              { dataKey: 'solarKwh', name: 'Solar (kWh)', color: '#10B981' },
-              { dataKey: 'dgRunHours', name: 'DG Run Hrs', color: '#06B6D4' },
+              { dataKey: 'dg500RunHours', name: 'DG 500 kVA (hrs)', color: '#F59E0B' },
+              { dataKey: 'dg380RunHours', name: 'DG 380 kVA (hrs)', color: '#FB923C' },
+              { dataKey: 'solarKwh',      name: 'Solar (kWh)',       color: '#10B981' },
             ]}
           />
         </ChartCard>

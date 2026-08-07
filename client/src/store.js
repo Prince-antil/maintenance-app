@@ -97,6 +97,26 @@ const periodLabel = (period) => {
 };
 
 function normalizeEnergyRecord(fields) {
+  const dg500RunHours = toNumber(fields.dg500RunHours ?? fields.dg500RunHrs);
+  const dg380RunHours = toNumber(fields.dg380RunHours ?? fields.dg380RunHrs);
+  const fuelConsumedLitres = toNumber(fields.fuelConsumedLitres ?? fields.fuelLtrs);
+  const solarGenerationKwh = toNumber(fields.solarGenerationKwh ?? fields.solarKwh);
+  const uhbvnlUnit1Kwh = toNumber(fields.uhbvnlUnit1Kwh);
+  const uhbvnlUnit2Kwh = toNumber(fields.uhbvnlUnit2Kwh);
+  const totalGridKwh = toNumber(fields.totalGridKwh) || (uhbvnlUnit1Kwh + uhbvnlUnit2Kwh);
+  // totalKwh = grid + solar + DG-generated (if separate DG kWh provided; else omit)
+  const dgKwh = toNumber(fields.dgKwh);
+  const totalKwh = toNumber(fields.totalKwh) ||
+    (totalGridKwh + solarGenerationKwh + dgKwh) ||
+    toNumber(fields.kwh || fields.solarGenerationKwh);
+  const plantSec = toNumber(fields.plantSec);
+
+  // Section sub-meter consumption dict — preserve as plain object
+  const raw = fields.sectionConsumption;
+  const sectionConsumption = (raw && typeof raw === 'object' && !Array.isArray(raw))
+    ? { ...raw }
+    : {};
+
   return {
     id: fields.id || uid('e'),
     createdAt: fields.createdAt || now(),
@@ -104,12 +124,24 @@ function normalizeEnergyRecord(fields) {
     source: fields.source || '',
     remarks: fields.remarks || '',
     plantSection: fields.plantSection || fields.section || '',
-    dg500RunHours: toNumber(fields.dg500RunHours),
-    dg380RunHours: toNumber(fields.dg380RunHours),
-    fuelConsumedLitres: toNumber(fields.fuelConsumedLitres),
-    solarGenerationKwh: toNumber(fields.solarGenerationKwh),
-    plantSec: toNumber(fields.plantSec),
-    kwh: toNumber(fields.kwh || fields.solarGenerationKwh),
+    // ── Dual-unit grid ─────────────────────────────────────────────────────
+    uhbvnlUnit1Kwh,
+    uhbvnlUnit2Kwh,
+    totalGridKwh,
+    // ── DG generators ──────────────────────────────────────────────────────
+    dg500RunHours,      // kept for backward compat
+    dg380RunHours,      // kept for backward compat
+    // ── Fuel & solar ───────────────────────────────────────────────────────
+    fuelConsumedLitres, // kept for backward compat
+    solarGenerationKwh, // kept for backward compat
+    // ── Totals ─────────────────────────────────────────────────────────────
+    dgKwh,
+    totalKwh,
+    plantSec,
+    // legacy single-value kwh (used by Reports.jsx / analytics energyTotal)
+    kwh: totalKwh || toNumber(fields.kwh || fields.solarGenerationKwh),
+    // ── Section sub-meters ─────────────────────────────────────────────────
+    sectionConsumption,
   };
 }
 
@@ -404,8 +436,14 @@ function normalizeEnergyCloudRow(row) {
     dg380RunHours: row.dg380_run_hours,
     fuelConsumedLitres: row.fuel_consumed_litres,
     solarGenerationKwh: row.solar_generation_kwh,
+    uhbvnlUnit1Kwh: row.uhbvnl_unit1_kwh,
+    uhbvnlUnit2Kwh: row.uhbvnl_unit2_kwh,
+    totalGridKwh: row.total_grid_kwh,
+    dgKwh: row.dg_kwh,
+    totalKwh: row.total_kwh,
     plantSec: row.plant_sec,
     kwh: row.kwh,
+    sectionConsumption: row.section_consumption || {},
     createdAt: row.created_at || row.date,
   });
 }
@@ -421,8 +459,14 @@ function energyToCloudRow(record) {
     dg380_run_hours: record.dg380RunHours || 0,
     fuel_consumed_litres: record.fuelConsumedLitres || 0,
     solar_generation_kwh: record.solarGenerationKwh || 0,
+    uhbvnl_unit1_kwh: record.uhbvnlUnit1Kwh || 0,
+    uhbvnl_unit2_kwh: record.uhbvnlUnit2Kwh || 0,
+    total_grid_kwh: record.totalGridKwh || 0,
+    dg_kwh: record.dgKwh || 0,
+    total_kwh: record.totalKwh || 0,
     plant_sec: record.plantSec || 0,
     kwh: record.kwh || 0,
+    section_consumption: record.sectionConsumption || {},
   };
 }
 
@@ -1269,11 +1313,18 @@ export function importEnergyBulk(rows, userName) {
   const imports = rows.map((row) => normalizeEnergyRecord({
     date: String(row.date || '').slice(0, 10),
     plantSection: row.plantSection || '',
+    uhbvnlUnit1Kwh: row.uhbvnlUnit1Kwh,
+    uhbvnlUnit2Kwh: row.uhbvnlUnit2Kwh,
+    totalGridKwh: row.totalGridKwh,
     dg500RunHours: row.dg500RunHours,
     dg380RunHours: row.dg380RunHours,
     fuelConsumedLitres: row.fuelConsumedLitres,
     solarGenerationKwh: row.solarGenerationKwh,
+    dgKwh: row.dgKwh,
+    totalKwh: row.totalKwh,
     plantSec: row.plantSec,
+    sectionConsumption: row.sectionConsumption || {},
+    kwh: row.kwh,
     remarks: 'Imported from bulk file',
   }));
 

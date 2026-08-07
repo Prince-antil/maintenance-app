@@ -166,6 +166,14 @@ export function computeKPIs(state, totalDocuments = 0) {
   const energyToday = energy
     .filter((entry) => isToday(entry.date || entry.createdAt))
     .reduce((sum, entry) => sum + energyTotal(entry), 0);
+  const energyThisMonth = energy.filter((entry) => monthKey(entry.date || entry.createdAt) === currentKey);
+  const unit1KwhMonth  = Math.round(energyThisMonth.reduce((s, e) => s + (e.uhbvnlUnit1Kwh || 0), 0));
+  const unit2KwhMonth  = Math.round(energyThisMonth.reduce((s, e) => s + (e.uhbvnlUnit2Kwh || 0), 0));
+  const totalGridMonth = Math.round(energyThisMonth.reduce((s, e) => s + (e.totalGridKwh || 0), 0)) || (unit1KwhMonth + unit2KwhMonth);
+  const solarMonth     = Math.round(energyThisMonth.reduce((s, e) => s + (e.solarGenerationKwh || 0), 0));
+  const dg500HrsMonth  = round1(energyThisMonth.reduce((s, e) => s + (e.dg500RunHours || 0), 0));
+  const dg380HrsMonth  = round1(energyThisMonth.reduce((s, e) => s + (e.dg380RunHours || 0), 0));
+  const fuelMonth      = Math.round(energyThisMonth.reduce((s, e) => s + (e.fuelConsumedLitres || 0), 0));
   const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
 
   return {
@@ -184,6 +192,14 @@ export function computeKPIs(state, totalDocuments = 0) {
     mtbf: bd.mtbf,
     totalDocuments: totalDocuments + machineDocs,
     energyToday: Math.round(energyToday),
+    // ── Energy detail ──────────────────────────────────────────────────────
+    unit1KwhMonth,
+    unit2KwhMonth,
+    totalGridMonth,
+    solarMonth,
+    dg500HrsMonth,
+    dg380HrsMonth,
+    fuelMonth,
     openWorkOrders: pm.pendingCount,
     breakdownsThisMonth: bd.breakdownCount,
     downtimeThisMonth: bd.downtimeHours,
@@ -260,9 +276,16 @@ export function monthlyEnergyOverview(energy, n = 6) {
     const rows = energy.filter((entry) => monthKey(entry.date || entry.createdAt) === month.key);
     return {
       label: month.label,
-      fuelLitres: Math.round(rows.reduce((sum, entry) => sum + (entry.fuelConsumedLitres || 0), 0)),
-      solarKwh: Math.round(rows.reduce((sum, entry) => sum + (entry.solarGenerationKwh || 0), 0)),
-      dgRunHours: round1(rows.reduce((sum, entry) => sum + (entry.dg500RunHours || 0) + (entry.dg380RunHours || 0), 0)),
+      fuelLitres:      Math.round(rows.reduce((sum, e) => sum + (e.fuelConsumedLitres || 0), 0)),
+      solarKwh:        Math.round(rows.reduce((sum, e) => sum + (e.solarGenerationKwh || 0), 0)),
+      dg500RunHours:   round1(rows.reduce((sum, e) => sum + (e.dg500RunHours || 0), 0)),
+      dg380RunHours:   round1(rows.reduce((sum, e) => sum + (e.dg380RunHours || 0), 0)),
+      // backward-compat key used by existing Dashboard chart
+      dgRunHours:      round1(rows.reduce((sum, e) => sum + (e.dg500RunHours || 0) + (e.dg380RunHours || 0), 0)),
+      unit1Kwh:        Math.round(rows.reduce((sum, e) => sum + (e.uhbvnlUnit1Kwh || 0), 0)),
+      unit2Kwh:        Math.round(rows.reduce((sum, e) => sum + (e.uhbvnlUnit2Kwh || 0), 0)),
+      totalGridKwh:    Math.round(rows.reduce((sum, e) => sum + (e.totalGridKwh || 0), 0)),
+      totalKwh:        Math.round(rows.reduce((sum, e) => sum + (e.totalKwh || e.kwh || 0), 0)),
     };
   });
 }
