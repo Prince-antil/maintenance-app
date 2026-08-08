@@ -524,15 +524,46 @@ function amcToCloudRow(record) {
 }
 
 // ── Per-machine breakdown log records ─────────────────────────────────────
+
+/**
+ * Compute downtime hours from startTime / endTime ISO strings.
+ * Returns null when either value is missing or the range is invalid.
+ */
+function calcDowntimeFromTimes(startTime, endTime) {
+  if (!startTime || !endTime) return null;
+  const start = new Date(startTime).getTime();
+  const end   = new Date(endTime).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
+  return Math.round(((end - start) / 3_600_000) * 100) / 100; // hours, 2 dp
+}
+
 function normalizeMachineBreakdownLog(fields) {
+  const startTime = fields.startTime || fields.start_time || '';
+  const endTime   = fields.endTime   || fields.end_time   || '';
+
+  // Derive date from startTime when date is absent
+  let date = fields.date || '';
+  if (!date && startTime) {
+    date = new Date(startTime).toISOString().slice(0, 10);
+  }
+  if (!date) date = new Date().toISOString().slice(0, 10);
+
+  // Downtime: auto-calculate from times when not explicitly provided
+  const autoDowntime = calcDowntimeFromTimes(startTime, endTime);
+  const downtimeHours = isPresent(fields.downtimeHours) && toNumber(fields.downtimeHours) > 0
+    ? toNumber(fields.downtimeHours)
+    : (autoDowntime !== null ? autoDowntime : 0);
+
   return {
     id: fields.id || uid('bdl'),
     machineId: fields.machineId || '',
     machineCode: fields.machineCode || '',
     machineName: fields.machineName || '',
     plantSection: fields.plantSection || '',
-    date: fields.date || new Date().toISOString().slice(0, 10),
-    downtimeHours: toNumber(fields.downtimeHours),
+    date,
+    startTime,
+    endTime,
+    downtimeHours,
     failureCause: String(fields.failureCause || '').trim(),
     actionTaken: String(fields.actionTaken || '').trim(),
     status: String(fields.status || 'closed').toLowerCase(),
@@ -549,6 +580,8 @@ function normalizeMachineBreakdownLogCloudRow(row) {
     machineName: row.machine_name || '',
     plantSection: row.plant_section || '',
     date: row.date,
+    startTime: row.start_time || '',
+    endTime: row.end_time || '',
     downtimeHours: row.downtime_hours,
     failureCause: row.failure_cause || '',
     actionTaken: row.action_taken || '',
@@ -566,6 +599,8 @@ function machineBreakdownLogToCloudRow(record) {
     machine_name: record.machineName,
     plant_section: record.plantSection,
     date: record.date,
+    start_time: record.startTime || null,
+    end_time: record.endTime || null,
     downtime_hours: record.downtimeHours || 0,
     failure_cause: record.failureCause,
     action_taken: record.actionTaken,
@@ -869,6 +904,65 @@ function scheduleCloudFlush() {
     }));
 }
 
+/**
+ * Apply a single Realtime payload record directly to the in-memory state
+ * without performing a full round-trip fetch.  Falls back to a full refresh
+ * when the payload row is unavailable (e.g. DELETE events on Postgres that
+ * don't include the old record).
+ */
+function applyRealtimePayload(entity, payload) {
+  const { eventType, new: newRow, old: oldRow } = payload;
+  const config = CLOUD_ENTITY_CONFIG[entity];
+  if (!config) return;
+
+  // DELETE — remove by id
+  if (eventType === 'DELETE') {
+    const deletedId = oldRow?.id;
+    if (!deletedId) {
+      scheduleRemoteRefresh(entity);
+      return;
+    }
+    if (entity === 'machines') {
+      state = { ...state, machines: state.machines.filter((m) => m.id !== deletedId) };
+    } else {
+      state = { ...state, [entity]: state[entity].filter((r) => r.id !== deletedId) };
+    }
+    persistEntity(entity);
+    notifyStoreUpdate();
+    return;
+  }
+
+  // INSERT / UPDATE — normalize and upsert into local state
+  if (!newRow?.id) {
+    scheduleRemoteRefresh(entity);
+    return;
+  }
+
+  const normalized = config.fromRow(newRow);
+
+  if (entity === 'machines') {
+    const exists = state.machines.some((m) => m.id === normalized.id);
+    state = {
+      ...state,
+      machines: exists
+        ? state.machines.map((m) => (m.id === normalized.id ? normalized : m))
+        : [normalized, ...state.machines],
+    };
+  } else {
+    const exists = state[entity].some((r) => r.id === normalized.id);
+    state = {
+      ...state,
+      [entity]: exists
+        ? state[entity].map((r) => (r.id === normalized.id ? normalized : r))
+        : [normalized, ...state[entity]],
+    };
+  }
+
+  persistEntity(entity);
+  notifyStoreUpdate();
+  updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
+}
+
 function startRealtimeSubscriptions() {
   if (!supabase || !isSupabaseConfigured || cloudSubscriptions) return;
 
@@ -877,13 +971,25 @@ function startRealtimeSubscriptions() {
     cloudSubscriptions.on(
       'postgres_changes',
       { event: '*', schema: 'public', table: config.table },
-      () => scheduleRemoteRefresh(entity)
+      (payload) => {
+        // Optimistically apply the payload directly for instant multi-PC broadcast.
+        // If the payload row is missing or malformed, fall back to a full refresh.
+        try {
+          applyRealtimePayload(entity, payload);
+        } catch {
+          scheduleRemoteRefresh(entity);
+        }
+      }
     );
   });
 
   cloudSubscriptions.subscribe((status) => {
     if (status === 'SUBSCRIBED') {
       updateSyncState({ phase: 'synced', lastError: '' });
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+      // Channel lost — attempt a full data refresh so we don't drift
+      updateSyncState({ phase: isBrowserOnline() ? 'degraded' : 'offline', lastError: `Realtime channel: ${status}` });
+      SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
     }
   });
 }
@@ -1286,6 +1392,39 @@ export function addMachineBreakdownLog(fields, userName) {
   state = { ...state, machineBreakdownLogs: [log, ...state.machineBreakdownLogs] };
   commitAndQueue('machineBreakdownLogs', 'upsert', log);
   logActivity(userName, 'logged machine breakdown', `${log.machineName} · ${log.downtimeHours}h · ${log.failureCause}`, 'breakdown');
+
+  // ── Auto-sync into section-level breakdown summary ──────────────────────
+  // Aggregate all per-machine logs for this machine's section + period so
+  // that Dashboard, Machine Register, and Machine Profile all show identical
+  // MTTR / MTBF / downtime figures derived from the same source of truth.
+  if (log.plantSection && log.date) {
+    const period = log.date.slice(0, 7); // YYYY-MM
+    const section = log.plantSection;
+
+    const sectionLogs = state.machineBreakdownLogs.filter(
+      (l) => l.plantSection === section && l.date.slice(0, 7) === period
+    );
+
+    const totalBreakdowns = sectionLogs.length;
+    const totalDowntime   = sectionLogs.reduce((sum, l) => sum + (l.downtimeHours || 0), 0);
+
+    const existingSummary = state.breakdowns.find(
+      (b) => b.section === section && b.period === period
+    );
+
+    addBreakdown({
+      ...(existingSummary || {}),
+      period,
+      section,
+      breakdownCount: totalBreakdowns,
+      downtimeHours: Math.round(totalDowntime * 100) / 100,
+      // Preserve operating hours and manual overrides from the existing summary
+      operatingHours: existingSummary?.operatingHours,
+      availability_override: existingSummary?.availability_override ?? null,
+      id: existingSummary?.id,
+    }, userName || 'System');
+  }
+
   return log;
 }
 
@@ -1310,13 +1449,17 @@ export function deleteMachineBreakdownLog(id, userName) {
  * Matches each row against the machine store by machineCode or machineName,
  * attaches the machineId, and recalculates the section-level breakdown summary
  * (MTTR/MTBF) for every affected section automatically.
+ *
+ * Columns supported: Machine Code, Machine Name, Plant Section, Breakdown Start
+ * Time, Breakdown End Time, Downtime Hours (auto-calculated when blank),
+ * Failure Cause, Action Taken, Status, Remarks.
  */
 export function importMachineBreakdownLogsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
 
   rows.forEach((row) => {
-    // Match against machine store
+    // Match against machine store by code, name, or section-scoped name
     const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
     const log = normalizeMachineBreakdownLog({
       ...row,
@@ -1324,35 +1467,58 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
       machineCode: matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
       machineName: matched ? matched.name : row.machineName,
       plantSection: matched ? (matched.section || row.plantSection) : row.plantSection,
+      // startTime / endTime pass through from parsed row; normalization will
+      // auto-derive downtimeHours when the explicit value is blank/zero.
+      startTime: row.startTime || '',
+      endTime:   row.endTime   || '',
     });
     logs.push(log);
     if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
   });
 
-  // Merge into state — skip exact duplicates (same machine + date + cause)
-  const existing = new Set(
-    state.machineBreakdownLogs.map((r) => `${r.machineId}:${r.date}:${r.failureCause}`)
+  // Dedup on machineId + startTime (preferred) or machineId + date + cause
+  const existingKeys = new Set(
+    state.machineBreakdownLogs.map((r) =>
+      r.startTime
+        ? `${r.machineId}:st:${r.startTime}`
+        : `${r.machineId}:${r.date}:${r.failureCause}`
+    )
   );
-  const newLogs = logs.filter((l) => !existing.has(`${l.machineId}:${l.date}:${l.failureCause}`));
+
+  const newLogs = logs.filter((l) => {
+    const key = l.startTime
+      ? `${l.machineId}:st:${l.startTime}`
+      : `${l.machineId}:${l.date}:${l.failureCause}`;
+    return !existingKeys.has(key);
+  });
 
   state = { ...state, machineBreakdownLogs: [...newLogs, ...state.machineBreakdownLogs] };
   commit('machineBreakdownLogs');
   newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
   scheduleCloudFlush();
 
-  // Recalculate section-level breakdown summaries for affected sections
+  // ── Recalculate section-level breakdown summaries for affected sections ──
+  // Group all per-machine logs (old + new) by section → period and upsert the
+  // section-level summary so Dashboard, Machine Register, and Machine Profile
+  // all display identical MTTR / MTBF / downtime figures.
   const affectedSections = [...new Set(newLogs.map((l) => l.plantSection).filter(Boolean))];
   affectedSections.forEach((section) => {
-    // Aggregate all per-machine logs for this section into totals
     const sectionLogs = state.machineBreakdownLogs.filter((l) => l.plantSection === section);
-    // Group by month-year to update/create breakdown summary records
+
+    // Group by month-period (YYYY-MM)
     const byPeriod = {};
     sectionLogs.forEach((l) => {
-      const period = l.date.slice(0, 7); // YYYY-MM
-      if (!byPeriod[period]) byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
+      const period = (l.startTime || l.date || '').slice(0, 7);
+      if (!period) return;
+      if (!byPeriod[period]) {
+        byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
+      }
       byPeriod[period].breakdownCount += 1;
-      byPeriod[period].downtimeHours += l.downtimeHours || 0;
+      byPeriod[period].downtimeHours  = Math.round(
+        (byPeriod[period].downtimeHours + (l.downtimeHours || 0)) * 100
+      ) / 100;
     });
+
     Object.values(byPeriod).forEach((aggRow) => {
       const existingSummary = state.breakdowns.find(
         (b) => b.section === aggRow.section && b.period === aggRow.period
@@ -1361,7 +1527,10 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
         ...(existingSummary || {}),
         ...aggRow,
         id: existingSummary?.id,
-        // Auto-calc MTTR/MTBF will happen inside normalizeBreakdownSummary
+        // Preserve existing operating-hours and availability override
+        operatingHours: existingSummary?.operatingHours,
+        availability_override: existingSummary?.availability_override ?? null,
+        // MTTR / MTBF auto-calculated inside normalizeBreakdownSummary
         mttr: aggRow.breakdownCount > 0
           ? Math.round((aggRow.downtimeHours / aggRow.breakdownCount) * 100) / 100
           : 0,

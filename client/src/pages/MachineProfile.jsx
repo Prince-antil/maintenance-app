@@ -122,7 +122,8 @@ export default function MachineProfile() {
   // Breakdown log tab filters
   const [bdLogMonthFilter, setBdLogMonthFilter] = useState('');
   // New manual breakdown log form
-  const [bdLogForm, setBdLogForm] = useState({ date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
+  const [bdLogForm, setBdLogForm] = useState({ startTime: '', endTime: '', date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
+  const [downtimeManual, setDowntimeManual] = useState(false);
   const fileRef = useRef(null);
   const photoRef = useRef(null);
 
@@ -749,23 +750,77 @@ export default function MachineProfile() {
                       plantSection: machine.section,
                       downtimeHours: Number(bdLogForm.downtimeHours) || 0,
                     }, userName);
-                    setBdLogForm({ date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
+                    setBdLogForm({ startTime: '', endTime: '', date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
+                    setDowntimeManual(false);
                   }}
                   className="glass-card p-4 space-y-3"
                 >
                   <h4 className="text-card-title flex items-center gap-2">
                     <Plus size={14} className="text-red-400" aria-hidden="true" /> Log New Breakdown
                   </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">Date *</label>
-                      <input type="date" className="input-field" value={bdLogForm.date}
-                        onChange={(e) => setBdLogForm((f) => ({ ...f, date: e.target.value }))} required />
+                      <label className="block text-xs text-slate-400 mb-1">Breakdown Start Time *</label>
+                      <input
+                        type="datetime-local"
+                        className="input-field"
+                        value={bdLogForm.startTime}
+                        required
+                        onChange={(e) => {
+                          const startTime = e.target.value;
+                          setBdLogForm((f) => {
+                            const next = { ...f, startTime };
+                            // Auto-derive date from start time
+                            if (startTime) next.date = startTime.slice(0, 10);
+                            // Auto-calc downtime unless manually overridden
+                            if (!downtimeManual && f.endTime && startTime) {
+                              const diff = (new Date(f.endTime) - new Date(startTime)) / 3_600_000;
+                              next.downtimeHours = diff > 0 ? String(Math.round(diff * 100) / 100) : '';
+                            }
+                            return next;
+                          });
+                        }}
+                      />
                     </div>
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">Downtime (hrs)</label>
-                      <input type="number" min="0" step="0.1" className="input-field" placeholder="e.g. 4.5"
-                        value={bdLogForm.downtimeHours} onChange={(e) => setBdLogForm((f) => ({ ...f, downtimeHours: e.target.value }))} />
+                      <label className="block text-xs text-slate-400 mb-1">Breakdown End Time</label>
+                      <input
+                        type="datetime-local"
+                        className="input-field"
+                        value={bdLogForm.endTime}
+                        onChange={(e) => {
+                          const endTime = e.target.value;
+                          setBdLogForm((f) => {
+                            const next = { ...f, endTime };
+                            // Auto-calc downtime unless manually overridden
+                            if (!downtimeManual && f.startTime && endTime) {
+                              const diff = (new Date(endTime) - new Date(f.startTime)) / 3_600_000;
+                              next.downtimeHours = diff > 0 ? String(Math.round(diff * 100) / 100) : '';
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">
+                        Downtime (hrs)
+                        {!downtimeManual && bdLogForm.startTime && bdLogForm.endTime && (
+                          <span className="ml-1.5 text-cyan-400/70">(auto-calculated)</span>
+                        )}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="input-field"
+                        placeholder="e.g. 4.5"
+                        value={bdLogForm.downtimeHours}
+                        onChange={(e) => {
+                          setDowntimeManual(true);
+                          setBdLogForm((f) => ({ ...f, downtimeHours: e.target.value }));
+                        }}
+                      />
                     </div>
                     <div>
                       <label className="block text-xs text-slate-400 mb-1">Status</label>
@@ -776,7 +831,7 @@ export default function MachineProfile() {
                         <option value="pending">Pending</option>
                       </select>
                     </div>
-                    <div className="sm:col-span-3">
+                    <div className="sm:col-span-2">
                       <label className="block text-xs text-slate-400 mb-1">Failure Cause *</label>
                       <input type="text" className="input-field" placeholder="Describe the failure…"
                         value={bdLogForm.failureCause} onChange={(e) => setBdLogForm((f) => ({ ...f, failureCause: e.target.value }))} required />
@@ -786,7 +841,7 @@ export default function MachineProfile() {
                       <input type="text" className="input-field" placeholder="Corrective action / repair performed…"
                         value={bdLogForm.actionTaken} onChange={(e) => setBdLogForm((f) => ({ ...f, actionTaken: e.target.value }))} />
                     </div>
-                    <div>
+                    <div className="sm:col-span-2">
                       <label className="block text-xs text-slate-400 mb-1">Remarks</label>
                       <input type="text" className="input-field" placeholder="Optional"
                         value={bdLogForm.remarks} onChange={(e) => setBdLogForm((f) => ({ ...f, remarks: e.target.value }))} />
@@ -823,10 +878,12 @@ export default function MachineProfile() {
                 />
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="enterprise-table w-full min-w-[700px]">
+                  <table className="enterprise-table w-full min-w-[900px]">
                     <thead>
                       <tr>
                         <th>Date</th>
+                        <th>Start Time</th>
+                        <th>End Time</th>
                         <th>Downtime (hrs)</th>
                         <th>Failure Cause</th>
                         <th>Action Taken</th>
@@ -838,8 +895,21 @@ export default function MachineProfile() {
                     <tbody>
                       {bdLogs
                         .filter((l) => !bdLogMonthFilter || l.date.slice(0, 7) === bdLogMonthFilter)
-                        .sort((a, b) => b.date.localeCompare(a.date))
-                        .map((l) => (
+                        .sort((a, b) => {
+                          // Sort by startTime if available, otherwise by date
+                          const aKey = a.startTime || a.date;
+                          const bKey = b.startTime || b.date;
+                          return bKey.localeCompare(aKey);
+                        })
+                        .map((l) => {
+                          const fmtDateTime = (iso) => {
+                            if (!iso) return '—';
+                            const d = new Date(iso);
+                            return Number.isNaN(d.getTime())
+                              ? iso
+                              : `${d.toLocaleDateString('en-GB')} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+                          };
+                          return (
                           <tr key={l.id}>
                             <td className="text-white whitespace-nowrap">
                               <span className="flex items-center gap-1">
@@ -847,6 +917,8 @@ export default function MachineProfile() {
                                 {new Date(l.date).toLocaleDateString('en-GB')}
                               </span>
                             </td>
+                            <td className="text-slate-300 whitespace-nowrap text-xs">{fmtDateTime(l.startTime)}</td>
+                            <td className="text-slate-300 whitespace-nowrap text-xs">{fmtDateTime(l.endTime)}</td>
                             <td className={`font-semibold ${l.downtimeHours > 8 ? 'text-red-400' : l.downtimeHours > 4 ? 'text-amber-300' : 'text-slate-200'}`}>
                               {l.downtimeHours ? `${l.downtimeHours}h` : '—'}
                             </td>
@@ -870,7 +942,8 @@ export default function MachineProfile() {
                               </td>
                             )}
                           </tr>
-                        ))}
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

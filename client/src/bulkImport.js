@@ -102,18 +102,19 @@ export const IMPORT_MODULES = {
     shortLabel: 'BD Logs',
     templateFilename: 'Machine_Breakdown_Log_Template.xlsx',
     defaultCategory: 'Plantwise Breakdown Report',
-    required: ['date', 'machineName'],
+    required: ['machineName'],
     sampleRows: [
       {
-        'Date': new Date().toISOString().slice(0, 10),
         'Machine Code': 'MC-101',
         'Machine Name': 'Filling Machine #1',
         'Plant Section': 'Herbi EC Packaging',
-        'Downtime Hours': 4.5,
+        'Breakdown Start Time': `${new Date().toISOString().slice(0, 10)}T08:00`,
+        'Breakdown End Time': `${new Date().toISOString().slice(0, 10)}T12:30`,
+        'Downtime Hours': '',
         'Failure Cause': 'Bearing failure in main shaft',
         'Action Taken': 'Bearing replaced, shaft aligned',
         'Status': 'Closed',
-        'Remarks': '',
+        'Remarks': '(Downtime auto-calculated from Start/End if blank)',
       },
     ],
   },
@@ -178,6 +179,8 @@ const FIELD_ALIASES = {
   },
   machineBreakdownLogs: {
     date:          ['date', 'breakdowndate', 'incidentdate', 'logdate'],
+    startTime:     ['starttime', 'breakdownstarttime', 'startdatetime', 'start', 'startedat', 'breakdown start time', 'start time'],
+    endTime:       ['endtime', 'breakdownendtime', 'enddatetime', 'end', 'endedat', 'resumetime', 'breakdown end time', 'end time'],
     machineCode:   ['machinecode', 'machineid', 'equipmentid', 'assetid', 'equipmentcode'],
     machineName:   ['machinename', 'machine', 'equipment', 'equipmentname', 'assetname'],
     plantSection:  ['plantsection', 'section', 'department'],
@@ -386,13 +389,29 @@ function parseModuleRow(moduleId, row, mapping, index) {
   }
 
   if (moduleId === 'machineBreakdownLogs') {
-    const date = parseDateValue(getCell(row, mapping, 'date'));
-    if (!date) return { error: `Row ${index}: date is required.` };
+    // Prefer startTime as the primary date source; fall back to a dedicated date column
+    const rawStartTime = parseDateValue(getCell(row, mapping, 'startTime'));
+    const rawEndTime   = parseDateValue(getCell(row, mapping, 'endTime'));
+    const rawDate      = parseDateValue(getCell(row, mapping, 'date'));
+
+    // Resolve the calendar date
+    const date = (rawStartTime || rawDate || '').slice(0, 10);
+    if (!date) return { error: `Row ${index}: date or start time is required.` };
+
     const mName = String(getCell(row, mapping, 'machineName') || '').trim();
     if (!mName) return { error: `Row ${index}: machine name is required.` };
-    const downtimeHours = parseNumber(getCell(row, mapping, 'downtimeHours'));
+
+    // Downtime: auto-calculate from start/end when the cell is blank or zero
+    let downtimeHours = parseNumber(getCell(row, mapping, 'downtimeHours'));
+    if (!downtimeHours && rawStartTime && rawEndTime) {
+      const diff = (new Date(rawEndTime) - new Date(rawStartTime)) / 3_600_000;
+      if (diff > 0) downtimeHours = Math.round(diff * 100) / 100;
+    }
+
     return {
-      date: date.slice(0, 10),
+      date,
+      startTime: rawStartTime || '',
+      endTime:   rawEndTime   || '',
       machineCode: String(getCell(row, mapping, 'machineCode') || '').trim(),
       machineName: mName,
       plantSection: String(getCell(row, mapping, 'plantSection') || '').trim(),
