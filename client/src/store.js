@@ -658,6 +658,20 @@ let cloudSubscriptions = null;
 let cloudInitStarted = false;
 let cloudSyncChain = Promise.resolve();
 const refreshTimers = {};
+// Tracks reconnect attempt count for exponential back-off
+let realtimeReconnectAttempts = 0;
+
+// ── Diagnostic logger ──────────────────────────────────────────────────────
+// Set VITE_REALTIME_DEBUG=true in your .env to enable verbose Realtime logs.
+// All log calls go through this helper so they're easy to strip later.
+const RT_DEBUG = import.meta.env.VITE_REALTIME_DEBUG === 'true';
+function rtLog(level, ...args) {
+  if (!RT_DEBUG && level === 'debug') return;
+  const tag = '[Realtime]';
+  if (level === 'error') console.error(tag, ...args);
+  else if (level === 'warn') console.warn(tag, ...args);
+  else console.log(tag, ...args);
+}
 
 function loadPersistedValue(entity, fallback) {
   const primary = loadLS(KEYS[entity], undefined);
@@ -826,14 +840,23 @@ async function pushCloudOp(op) {
 
   if (op.action === 'delete') {
     const { error } = await supabase.from(config.table).delete().eq('id', op.recordId);
-    if (error) throw error;
+    if (error) {
+      rtLog('error', `DELETE failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '');
+      throw error;
+    }
+    rtLog('debug', `DELETE ok: ${config.table} id=${op.recordId}`);
     return;
   }
 
+  const row = config.toRow(op.payload);
   const { error } = await supabase
     .from(config.table)
-    .upsert(config.toRow(op.payload), { onConflict: 'id' });
-  if (error) throw error;
+    .upsert(row, { onConflict: 'id' });
+  if (error) {
+    rtLog('error', `UPSERT failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '', 'row keys:', Object.keys(row).join(', '));
+    throw error;
+  }
+  rtLog('debug', `UPSERT ok: ${config.table} id=${op.recordId}`);
 }
 
 /**
@@ -921,15 +944,27 @@ async function flushPendingCloudOps() {
 
   updateSyncState({ phase: 'syncing', pending: pending.length, lastError: '' });
 
-  let remaining = pending;
+  let remaining = [...pending];
   for (const op of pending) {
-    await pushCloudOp(op);
-    remaining = remaining.filter((item) => item.id !== op.id);
-    savePendingCloudOps(remaining);
-    updateSyncState({ pending: remaining.length, lastSyncedAt: now(), lastError: '' }, false);
+    try {
+      await pushCloudOp(op);
+      remaining = remaining.filter((item) => item.id !== op.id);
+      savePendingCloudOps(remaining);
+      updateSyncState({ pending: remaining.length, lastSyncedAt: now(), lastError: '' }, false);
+    } catch (err) {
+      // Keep this op in the queue and log — continue flushing the rest
+      rtLog('error', `Queue flush: op ${op.id} (${op.entity}/${op.action}) failed — kept in queue:`, err.message);
+      updateSyncState({ lastError: err.message || 'Flush error' }, false);
+    }
   }
 
-  updateSyncState({ phase: 'synced', pending: 0, lastSyncedAt: now(), lastError: '' });
+  const stillPending = loadPendingCloudOps().length;
+  updateSyncState({
+    phase: stillPending ? 'degraded' : 'synced',
+    pending: stillPending,
+    lastSyncedAt: now(),
+    ...(stillPending ? {} : { lastError: '' }),
+  });
 }
 
 function scheduleCloudFlush() {
@@ -959,10 +994,16 @@ function applyRealtimePayload(entity, payload) {
   const config = CLOUD_ENTITY_CONFIG[entity];
   if (!config) return;
 
+  rtLog('info',
+    `← ${eventType} on ${config.table}`,
+    `id=${newRow?.id || oldRow?.id || '?'}`,
+  );
+
   // DELETE — remove by id
   if (eventType === 'DELETE') {
     const deletedId = oldRow?.id;
     if (!deletedId) {
+      rtLog('warn', `DELETE on ${config.table} had no old.id — falling back to full refresh`);
       scheduleRemoteRefresh(entity);
       return;
     }
@@ -973,11 +1014,13 @@ function applyRealtimePayload(entity, payload) {
     }
     persistEntity(entity);
     notifyStoreUpdate();
+    rtLog('debug', `Applied DELETE ${config.table} id=${deletedId}`);
     return;
   }
 
   // INSERT / UPDATE — normalize and upsert into local state
   if (!newRow?.id) {
+    rtLog('warn', `${eventType} on ${config.table} had no new.id — falling back to full refresh`);
     scheduleRemoteRefresh(entity);
     return;
   }
@@ -1005,6 +1048,7 @@ function applyRealtimePayload(entity, payload) {
   persistEntity(entity);
   notifyStoreUpdate();
   updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
+  rtLog('debug', `Applied ${eventType} ${config.table} id=${normalized.id}`);
 }
 
 function teardownRealtimeSubscriptions() {
@@ -1020,6 +1064,8 @@ function startRealtimeSubscriptions() {
   // Tear down any stale channel before creating a fresh one
   teardownRealtimeSubscriptions();
 
+  rtLog('info', `Starting Realtime channel (attempt ${realtimeReconnectAttempts + 1})`);
+
   cloudSubscriptions = supabase.channel('ccpl-maintenance-sync', {
     config: { broadcast: { self: false } },
   });
@@ -1033,7 +1079,8 @@ function startRealtimeSubscriptions() {
         // If the payload row is missing or malformed, fall back to a full refresh.
         try {
           applyRealtimePayload(entity, payload);
-        } catch {
+        } catch (err) {
+          rtLog('error', `applyRealtimePayload threw for ${entity}:`, err);
           scheduleRemoteRefresh(entity);
         }
       }
@@ -1041,7 +1088,10 @@ function startRealtimeSubscriptions() {
   });
 
   cloudSubscriptions.subscribe((status, err) => {
+    rtLog('info', `Channel status: ${status}${err ? ' — ' + (err.message || err) : ''}`);
+
     if (status === 'SUBSCRIBED') {
+      realtimeReconnectAttempts = 0; // reset back-off counter on clean connect
       updateSyncState({ phase: 'synced', lastError: '' });
     } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
       // Channel lost — do a full refresh so we don't drift, then reconnect
@@ -1049,13 +1099,21 @@ function startRealtimeSubscriptions() {
         phase: isBrowserOnline() ? 'degraded' : 'offline',
         lastError: `Realtime: ${status}${err ? ' – ' + (err.message || err) : ''}`,
       });
+
       SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
-      // Attempt reconnection after a brief back-off
+
+      // Exponential back-off: 2s, 4s, 8s … capped at 60s, plus ±500 ms jitter
+      realtimeReconnectAttempts += 1;
+      const baseDelay = Math.min(2_000 * Math.pow(2, realtimeReconnectAttempts - 1), 60_000);
+      const jitter = Math.random() * 500;
+      const delay = Math.round(baseDelay + jitter);
+
+      rtLog('warn', `Reconnecting in ${delay} ms (attempt ${realtimeReconnectAttempts})`);
       setTimeout(() => {
         if (isBrowserOnline() && isSupabaseConfigured) {
           startRealtimeSubscriptions();
         }
-      }, 5000);
+      }, delay);
     }
   });
 }
@@ -1094,9 +1152,11 @@ async function initializeCloudSync() {
 
   if (!supabase || !isSupabaseConfigured) {
     updateSyncState({ phase: 'local-only', cloudEnabled: false, pending: loadPendingCloudOps().length });
+    rtLog('info', 'Supabase not configured — running in local-only mode');
     return;
   }
 
+  rtLog('info', 'Initializing cloud sync…');
   updateSyncState({ phase: isBrowserOnline() ? 'syncing' : 'offline', cloudEnabled: true });
 
   // Start Realtime subscriptions FIRST so we don't miss any events that arrive
@@ -1188,6 +1248,29 @@ export const getData = () => state;
 export function useStore() {
   useSyncExternalStore(subscribe, getVersion);
   return state;
+}
+
+/**
+ * Call this whenever the Supabase auth session changes (login, token refresh,
+ * logout).  It updates the Realtime WebSocket JWT so postgres_changes events
+ * continue to arrive after the access token rotates, and re-subscribes the
+ * channel if it was previously disconnected.
+ *
+ * @param {string|null} accessToken  The new JWT, or null on logout.
+ */
+export function notifyRealtimeAuthChange(accessToken) {
+  if (!supabase || !isSupabaseConfigured) return;
+  if (accessToken) {
+    // Update the JWT on the live WebSocket connection
+    supabase.realtime.setAuth(accessToken);
+    rtLog('info', 'Realtime JWT updated after auth change');
+    // Re-subscribe if the channel was torn down while we had no session
+    if (!cloudSubscriptions) startRealtimeSubscriptions();
+  } else {
+    // Logged out — tear down the authenticated channel gracefully
+    rtLog('info', 'Auth cleared — tearing down Realtime channel');
+    teardownRealtimeSubscriptions();
+  }
 }
 
 export function logActivity(userName, action, detail = '', type = 'info') {

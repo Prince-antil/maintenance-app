@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { api } from '../api.js';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
+import { notifyRealtimeAuthChange } from '../store.js';
 
 const AuthContext = createContext(null);
 
@@ -35,6 +37,31 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // ── Supabase auth state listener ────────────────────────────────────────
+  // This is the most reliable way to keep the Realtime JWT current.
+  // onAuthStateChange fires for: SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT.
+  // We forward the access_token to the Realtime WebSocket each time.
+  useEffect(() => {
+    if (!supabase || !isSupabaseConfigured) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        notifyRealtimeAuthChange(session?.access_token ?? null);
+      }
+    );
+
+    // Also grab the current session immediately in case it was already
+    // restored from localStorage before this effect ran.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.access_token) {
+        notifyRealtimeAuthChange(session.access_token);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── App-level session restore ────────────────────────────────────────────
   useEffect(() => {
     api.me()
       .then((d) => setUser(d.user))
@@ -55,6 +82,10 @@ export function AuthProvider({ children }) {
       const d = await api.login(username, password);
       sessionStorage.removeItem(OFFLINE_SESSION_KEY);
       setUser(d.user);
+      // If the backend uses its own JWT (not Supabase Auth), we still want
+      // to ensure the Realtime channel is active for this user.
+      // The supabase.auth.onAuthStateChange listener above handles the
+      // case where api.login() also calls supabase.auth.signInWithPassword.
       return d;
     } catch (err) {
       if (!isServerUnreachable(err)) throw err;
@@ -72,6 +103,9 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     sessionStorage.removeItem(OFFLINE_SESSION_KEY);
     await api.logout().catch(() => {});
+    // Tear down the Realtime channel — notifyRealtimeAuthChange(null)
+    // is also called by onAuthStateChange(SIGNED_OUT) if using Supabase Auth.
+    notifyRealtimeAuthChange(null);
     setUser(null);
   };
 

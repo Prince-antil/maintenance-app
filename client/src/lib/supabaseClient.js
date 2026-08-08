@@ -41,11 +41,20 @@ export const supabase = hasRealSupabaseConfig
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        // Detect session from URL (OAuth / magic link flows)
+        detectSessionInUrl: true,
       },
       realtime: {
         params: {
           eventsPerSecond: 40,
         },
+        // Send a heartbeat every 15 s so WebSocket connections are kept
+        // alive through corporate proxies and firewalls that aggressively
+        // close idle TCP connections (default Supabase value is 30 s).
+        heartbeatIntervalMs: 15_000,
+        // Reconnect up to 10 times before giving up and letting the store's
+        // CHANNEL_ERROR handler take over with its own back-off logic.
+        reconnectAfterMs: (tries) => Math.min(tries * 500, 10_000),
       },
     })
   : null;
