@@ -10,6 +10,8 @@ const KEYS = {
   breakdowns: 'BREAKDOWN_MONTHLY_LOGS',
   pms: 'PM_MONTHLY_LOGS',
   energy: 'ccpl_energy_v1',
+  amc: 'CCPL_AMC_RECORDS_V1',
+  machineBreakdownLogs: 'CCPL_MACHINE_BD_LOGS_V1',
   activity: 'ccpl_activity_v1',
   settings: 'ccpl_settings_v1',
 };
@@ -19,6 +21,8 @@ const LEGACY_KEYS = {
   breakdowns: ['ccpl_breakdowns_v2'],
   pms: ['ccpl_pms_v2'],
   energy: ['ccpl_energy_v1'],
+  amc: [],
+  machineBreakdownLogs: [],
   activity: ['ccpl_activity_v1'],
   settings: ['ccpl_settings_v1'],
 };
@@ -51,7 +55,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -470,6 +474,106 @@ function energyToCloudRow(record) {
   };
 }
 
+// ── AMC (Annual Maintenance Contract) records ─────────────────────────────
+function normalizeAmcRecord(fields) {
+  return {
+    id: fields.id || uid('amc'),
+    machineId: fields.machineId || '',
+    vendorName: String(fields.vendorName || '').trim(),
+    contractStartDate: fields.contractStartDate || '',
+    contractEndDate: fields.contractEndDate || '',
+    totalVisitsAgreed: toNumber(fields.totalVisitsAgreed),
+    completedVisits: toNumber(fields.completedVisits),
+    // Document references stored as array of { id, filename, storagePath, publicUrl, uploadedAt, uploadedBy, docType }
+    documents: Array.isArray(fields.documents) ? fields.documents : [],
+    remarks: fields.remarks || '',
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeAmcCloudRow(row) {
+  return normalizeAmcRecord({
+    id: row.id,
+    machineId: row.machine_id || '',
+    vendorName: row.vendor_name || '',
+    contractStartDate: row.contract_start_date || '',
+    contractEndDate: row.contract_end_date || '',
+    totalVisitsAgreed: row.total_visits_agreed,
+    completedVisits: row.completed_visits,
+    documents: row.documents || [],
+    remarks: row.remarks || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function amcToCloudRow(record) {
+  return {
+    id: record.id,
+    machine_id: record.machineId,
+    vendor_name: record.vendorName,
+    contract_start_date: record.contractStartDate,
+    contract_end_date: record.contractEndDate,
+    total_visits_agreed: record.totalVisitsAgreed || 0,
+    completed_visits: record.completedVisits || 0,
+    documents: record.documents || [],
+    remarks: record.remarks || '',
+    updated_at: now(),
+  };
+}
+
+// ── Per-machine breakdown log records ─────────────────────────────────────
+function normalizeMachineBreakdownLog(fields) {
+  return {
+    id: fields.id || uid('bdl'),
+    machineId: fields.machineId || '',
+    machineCode: fields.machineCode || '',
+    machineName: fields.machineName || '',
+    plantSection: fields.plantSection || '',
+    date: fields.date || new Date().toISOString().slice(0, 10),
+    downtimeHours: toNumber(fields.downtimeHours),
+    failureCause: String(fields.failureCause || '').trim(),
+    actionTaken: String(fields.actionTaken || '').trim(),
+    status: String(fields.status || 'closed').toLowerCase(),
+    remarks: String(fields.remarks || '').trim(),
+    createdAt: fields.createdAt || now(),
+  };
+}
+
+function normalizeMachineBreakdownLogCloudRow(row) {
+  return normalizeMachineBreakdownLog({
+    id: row.id,
+    machineId: row.machine_id || '',
+    machineCode: row.machine_code || '',
+    machineName: row.machine_name || '',
+    plantSection: row.plant_section || '',
+    date: row.date,
+    downtimeHours: row.downtime_hours,
+    failureCause: row.failure_cause || '',
+    actionTaken: row.action_taken || '',
+    status: row.status || 'closed',
+    remarks: row.remarks || '',
+    createdAt: row.created_at,
+  });
+}
+
+function machineBreakdownLogToCloudRow(record) {
+  return {
+    id: record.id,
+    machine_id: record.machineId,
+    machine_code: record.machineCode,
+    machine_name: record.machineName,
+    plant_section: record.plantSection,
+    date: record.date,
+    downtime_hours: record.downtimeHours || 0,
+    failure_cause: record.failureCause,
+    action_taken: record.actionTaken,
+    status: record.status,
+    remarks: record.remarks,
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -493,6 +597,18 @@ const CLOUD_ENTITY_CONFIG = {
     table: 'energy_logs',
     fromRow: normalizeEnergyCloudRow,
     toRow: energyToCloudRow,
+    orderBy: [{ column: 'date', ascending: false }],
+  },
+  amc: {
+    table: 'amc_records',
+    fromRow: normalizeAmcCloudRow,
+    toRow: amcToCloudRow,
+    orderBy: [{ column: 'created_at', ascending: false }],
+  },
+  machineBreakdownLogs: {
+    table: 'machine_breakdown_logs',
+    fromRow: normalizeMachineBreakdownLogCloudRow,
+    toRow: machineBreakdownLogToCloudRow,
     orderBy: [{ column: 'date', ascending: false }],
   },
 };
@@ -548,6 +664,8 @@ let state = {
   breakdowns: loadPersistedValue('breakdowns', []).map((row) => row),
   pms: loadPersistedValue('pms', []).map((row) => row),
   energy: loadPersistedValue('energy', []).map(normalizeEnergyRecord),
+  amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
+  machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   activity: loadPersistedValue('activity', []),
   settings: loadPersistedValue('settings', { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 }),
   sync: {
@@ -800,11 +918,13 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
       fetchCloudEntity('energy'),
+      fetchCloudEntity('amc'),
+      fetchCloudEntity('machineBreakdownLogs'),
     ]);
 
     const remoteSnapshots = {
@@ -812,20 +932,16 @@ async function initializeCloudSync() {
       breakdowns: remoteBreakdowns,
       pms: remotePMs,
       energy: remoteEnergy,
+      amc: remoteAmc,
+      machineBreakdownLogs: remoteBreakdownLogs,
     };
 
-    if (remoteMachines.length) {
-      replaceEntityState('machines', remoteMachines, false);
-    }
-    if (remoteBreakdowns.length) {
-      replaceEntityState('breakdowns', remoteBreakdowns, false);
-    }
-    if (remotePMs.length) {
-      replaceEntityState('pms', remotePMs, false);
-    }
-    if (remoteEnergy.length) {
-      replaceEntityState('energy', remoteEnergy, false);
-    }
+    if (remoteMachines.length) replaceEntityState('machines', remoteMachines, false);
+    if (remoteBreakdowns.length) replaceEntityState('breakdowns', remoteBreakdowns, false);
+    if (remotePMs.length) replaceEntityState('pms', remotePMs, false);
+    if (remoteEnergy.length) replaceEntityState('energy', remoteEnergy, false);
+    if (remoteAmc.length) replaceEntityState('amc', remoteAmc, false);
+    if (remoteBreakdownLogs.length) replaceEntityState('machineBreakdownLogs', remoteBreakdownLogs, false);
     notifyStoreUpdate();
 
     SYNCED_ENTITIES.forEach((entity) => {
@@ -1131,6 +1247,136 @@ export function deleteEnergyLog(id, userName) {
   logActivity(userName, 'deleted energy log', '', 'energy');
 }
 
+// ── AMC exports ───────────────────────────────────────────────────────────
+export const getAmcRecords = () => state.amc;
+export const getAmcForMachine = (machineId) => state.amc.filter((r) => r.machineId === machineId);
+
+export function addAmcRecord(fields, userName) {
+  const record = normalizeAmcRecord({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, amc: [record, ...state.amc] };
+  commitAndQueue('amc', 'upsert', record);
+  logActivity(userName, 'added AMC record', `${record.vendorName} → ${getMachine(record.machineId)?.name || record.machineId}`, 'amc');
+  return record;
+}
+
+export function updateAmcRecord(id, patch, userName) {
+  const existing = state.amc.find((r) => r.id === id);
+  if (!existing) return null;
+  const updated = normalizeAmcRecord({ ...existing, ...patch, id, updatedAt: now() });
+  state = { ...state, amc: state.amc.map((r) => (r.id === id ? updated : r)) };
+  commitAndQueue('amc', 'upsert', updated);
+  logActivity(userName, 'updated AMC record', `${updated.vendorName} → ${getMachine(updated.machineId)?.name || updated.machineId}`, 'amc');
+  return updated;
+}
+
+export function deleteAmcRecord(id, userName) {
+  const record = state.amc.find((r) => r.id === id);
+  state = { ...state, amc: state.amc.filter((r) => r.id !== id) };
+  commitAndQueue('amc', 'delete', id);
+  logActivity(userName, 'deleted AMC record', record ? `${record.vendorName}` : '', 'amc');
+}
+
+// ── Per-machine breakdown log exports ─────────────────────────────────────
+export const getMachineBreakdownLogs = () => state.machineBreakdownLogs;
+export const getMachineBreakdownLogsForMachine = (machineId) =>
+  state.machineBreakdownLogs.filter((r) => r.machineId === machineId);
+
+export function addMachineBreakdownLog(fields, userName) {
+  const log = normalizeMachineBreakdownLog({ ...fields, createdAt: now() });
+  state = { ...state, machineBreakdownLogs: [log, ...state.machineBreakdownLogs] };
+  commitAndQueue('machineBreakdownLogs', 'upsert', log);
+  logActivity(userName, 'logged machine breakdown', `${log.machineName} · ${log.downtimeHours}h · ${log.failureCause}`, 'breakdown');
+  return log;
+}
+
+export function updateMachineBreakdownLog(id, patch, userName) {
+  const existing = state.machineBreakdownLogs.find((r) => r.id === id);
+  if (!existing) return null;
+  const updated = normalizeMachineBreakdownLog({ ...existing, ...patch, id });
+  state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.map((r) => (r.id === id ? updated : r)) };
+  commitAndQueue('machineBreakdownLogs', 'upsert', updated);
+  logActivity(userName, 'updated machine breakdown log', `${updated.machineName}`, 'breakdown');
+  return updated;
+}
+
+export function deleteMachineBreakdownLog(id, userName) {
+  state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.filter((r) => r.id !== id) };
+  commitAndQueue('machineBreakdownLogs', 'delete', id);
+  logActivity(userName, 'deleted machine breakdown log', '', 'breakdown');
+}
+
+/**
+ * Bulk import per-machine breakdown logs from a parsed Excel sheet.
+ * Matches each row against the machine store by machineCode or machineName,
+ * attaches the machineId, and recalculates the section-level breakdown summary
+ * (MTTR/MTBF) for every affected section automatically.
+ */
+export function importMachineBreakdownLogsBulk(rows, userName) {
+  const logs = [];
+  const unmatchedRows = [];
+
+  rows.forEach((row) => {
+    // Match against machine store
+    const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+    const log = normalizeMachineBreakdownLog({
+      ...row,
+      machineId: matched ? matched.id : '',
+      machineCode: matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
+      machineName: matched ? matched.name : row.machineName,
+      plantSection: matched ? (matched.section || row.plantSection) : row.plantSection,
+    });
+    logs.push(log);
+    if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
+  });
+
+  // Merge into state — skip exact duplicates (same machine + date + cause)
+  const existing = new Set(
+    state.machineBreakdownLogs.map((r) => `${r.machineId}:${r.date}:${r.failureCause}`)
+  );
+  const newLogs = logs.filter((l) => !existing.has(`${l.machineId}:${l.date}:${l.failureCause}`));
+
+  state = { ...state, machineBreakdownLogs: [...newLogs, ...state.machineBreakdownLogs] };
+  commit('machineBreakdownLogs');
+  newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
+  scheduleCloudFlush();
+
+  // Recalculate section-level breakdown summaries for affected sections
+  const affectedSections = [...new Set(newLogs.map((l) => l.plantSection).filter(Boolean))];
+  affectedSections.forEach((section) => {
+    // Aggregate all per-machine logs for this section into totals
+    const sectionLogs = state.machineBreakdownLogs.filter((l) => l.plantSection === section);
+    // Group by month-year to update/create breakdown summary records
+    const byPeriod = {};
+    sectionLogs.forEach((l) => {
+      const period = l.date.slice(0, 7); // YYYY-MM
+      if (!byPeriod[period]) byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
+      byPeriod[period].breakdownCount += 1;
+      byPeriod[period].downtimeHours += l.downtimeHours || 0;
+    });
+    Object.values(byPeriod).forEach((aggRow) => {
+      const existingSummary = state.breakdowns.find(
+        (b) => b.section === aggRow.section && b.period === aggRow.period
+      );
+      addBreakdown({
+        ...(existingSummary || {}),
+        ...aggRow,
+        id: existingSummary?.id,
+        // Auto-calc MTTR/MTBF will happen inside normalizeBreakdownSummary
+        mttr: aggRow.breakdownCount > 0
+          ? Math.round((aggRow.downtimeHours / aggRow.breakdownCount) * 100) / 100
+          : 0,
+      }, userName);
+    });
+  });
+
+  const detail = unmatchedRows.length
+    ? `${newLogs.length} imported · ${unmatchedRows.length} unmatched machines: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? '...' : ''}`
+    : `${newLogs.length} breakdown logs imported`;
+
+  logActivity(userName, 'bulk imported machine breakdown logs', detail, 'breakdown');
+  return { created: newLogs.length, total: rows.length, unmatched: unmatchedRows };
+}
+
 export function exportBackup() {
   return JSON.stringify(
     {
@@ -1176,6 +1422,13 @@ export function importBackup(json) {
     commit('energy');
   }
 
+  if (Array.isArray(parsed.amc)) {
+    parsed.amc.forEach((r) => addAmcRecord(r, 'Backup Restore'));
+  }
+  if (Array.isArray(parsed.machineBreakdownLogs)) {
+    state = { ...state, machineBreakdownLogs: parsed.machineBreakdownLogs.map(normalizeMachineBreakdownLog) };
+    commit('machineBreakdownLogs');
+  }
   if (Array.isArray(parsed.activity)) {
     state = { ...state, activity: parsed.activity };
     commit('activity');

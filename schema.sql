@@ -142,3 +142,128 @@ begin
   end if;
 end
 $$;
+
+-- energy_logs: new columns for dual-unit grid, DG split, totals, section sub-meters
+-- Run these ALTER statements against your Supabase project if the table already exists.
+alter table public.energy_logs add column if not exists uhbvnl_unit1_kwh  numeric(12,2) not null default 0;
+alter table public.energy_logs add column if not exists uhbvnl_unit2_kwh  numeric(12,2) not null default 0;
+alter table public.energy_logs add column if not exists total_grid_kwh    numeric(12,2) not null default 0;
+alter table public.energy_logs add column if not exists dg_kwh            numeric(12,2) not null default 0;
+alter table public.energy_logs add column if not exists total_kwh         numeric(12,2) not null default 0;
+alter table public.energy_logs add column if not exists section_consumption jsonb not null default '{}'::jsonb;
+
+-- =============================================================================
+-- AMC Records — Annual Maintenance Contracts per machine
+-- =============================================================================
+create table if not exists public.amc_records (
+  id                  text        primary key,
+  machine_id          text        not null references public.machines (id) on delete cascade,
+  vendor_name         text        not null default '',
+  contract_start_date date,
+  contract_end_date   date,
+  total_visits_agreed integer     not null default 0,
+  completed_visits    integer     not null default 0,
+  documents           jsonb       not null default '[]'::jsonb,
+  remarks             text        not null default '',
+  created_at          timestamptz not null default timezone('utc', now()),
+  updated_at          timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_amc_records_machine on public.amc_records (machine_id);
+create index if not exists idx_amc_records_end_date on public.amc_records (contract_end_date);
+
+alter table public.amc_records enable row level security;
+
+drop policy if exists "public amc access" on public.amc_records;
+create policy "public amc access"
+  on public.amc_records
+  for all
+  to anon, authenticated
+  using (true)
+  with check (true);
+
+-- =============================================================================
+-- Machine Breakdown Logs — individual per-machine breakdown events
+-- =============================================================================
+create table if not exists public.machine_breakdown_logs (
+  id             text        primary key,
+  machine_id     text        not null references public.machines (id) on delete cascade,
+  machine_code   text        not null default '',
+  machine_name   text        not null default '',
+  plant_section  text        not null default '',
+  date           date        not null,
+  downtime_hours numeric(8, 2) not null default 0,
+  failure_cause  text        not null default '',
+  action_taken   text        not null default '',
+  status         text        not null default 'closed'
+                             check (status in ('open', 'closed', 'pending')),
+  remarks        text        not null default '',
+  created_at     timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_machine_bd_logs_machine on public.machine_breakdown_logs (machine_id);
+create index if not exists idx_machine_bd_logs_date    on public.machine_breakdown_logs (date desc);
+create index if not exists idx_machine_bd_logs_section on public.machine_breakdown_logs (plant_section);
+
+alter table public.machine_breakdown_logs enable row level security;
+
+drop policy if exists "public machine bd logs access" on public.machine_breakdown_logs;
+create policy "public machine bd logs access"
+  on public.machine_breakdown_logs
+  for all
+  to anon, authenticated
+  using (true)
+  with check (true);
+
+-- =============================================================================
+-- Supabase Realtime — publish both new tables
+-- =============================================================================
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'amc_records'
+  ) then
+    alter publication supabase_realtime add table public.amc_records;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'machine_breakdown_logs'
+  ) then
+    alter publication supabase_realtime add table public.machine_breakdown_logs;
+  end if;
+end
+$$;
+
+-- =============================================================================
+-- Supabase Storage — create AMC documents bucket (run once)
+-- =============================================================================
+-- Insert the bucket only if it does not exist yet.
+insert into storage.buckets (id, name, public)
+  values ('amc-documents', 'amc-documents', true)
+  on conflict (id) do nothing;
+
+-- Allow authenticated and anonymous reads (public bucket)
+drop policy if exists "amc public read"   on storage.objects;
+drop policy if exists "amc admin write"   on storage.objects;
+drop policy if exists "amc admin delete"  on storage.objects;
+
+create policy "amc public read"
+  on storage.objects for select
+  to anon, authenticated
+  using (bucket_id = 'amc-documents');
+
+create policy "amc admin write"
+  on storage.objects for insert
+  to anon, authenticated
+  with check (bucket_id = 'amc-documents');
+
+create policy "amc admin delete"
+  on storage.objects for delete
+  to anon, authenticated
+  using (bucket_id = 'amc-documents');

@@ -105,13 +105,14 @@ export const EXT_META = {
   '.pdf':  { badge: 'bg-red-500/15 text-red-400 border border-red-500/30', label: 'PDF' },
 };
 
-// Machine profile document tabs
+// Machine profile document tabs (AMC tab added last)
 export const MACHINE_DOC_TABS = [
-  { id: 'sop', label: 'SOP' },
-  { id: 'mop', label: 'MOP' },
-  { id: 'wi', label: 'Work Instructions & Manuals' },
+  { id: 'sop',     label: 'SOP' },
+  { id: 'mop',     label: 'MOP' },
+  { id: 'wi',      label: 'Work Instructions & Manuals' },
   { id: 'circuit', label: 'Circuit Diagrams & Schematics' },
-  { id: 'media', label: 'Training Videos / Media' },
+  { id: 'media',   label: 'Training Videos / Media' },
+  { id: 'amc',     label: 'AMC Management' },
 ];
 
 export const APP_VERSION = '1.0';

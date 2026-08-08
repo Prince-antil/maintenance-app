@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 const FALLBACK_SUPABASE_URL = 'https://example.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY = 'supabase-anon-key-placeholder';
 const FALLBACK_DOCUMENT_BUCKET = 'maintenance-documents';
+const FALLBACK_AMC_BUCKET = 'amc-documents';
 
 const envUrl =
   import.meta.env.VITE_SUPABASE_URL ||
@@ -16,6 +17,11 @@ export const SUPABASE_DOCUMENT_BUCKET =
   import.meta.env.VITE_SUPABASE_DOCUMENT_BUCKET ||
   import.meta.env.NEXT_PUBLIC_SUPABASE_DOCUMENT_BUCKET ||
   FALLBACK_DOCUMENT_BUCKET;
+
+export const SUPABASE_AMC_BUCKET =
+  import.meta.env.VITE_SUPABASE_AMC_BUCKET ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_AMC_BUCKET ||
+  FALLBACK_AMC_BUCKET;
 
 const hasRealSupabaseConfig =
   Boolean(import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL) &&

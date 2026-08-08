@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
 
-const MODULE_ORDER = ['pm', 'breakdowns', 'energy', 'machines'];
+const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'machines'];
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -96,6 +96,27 @@ export const IMPORT_MODULES = {
       },
     ],
   },
+  machineBreakdownLogs: {
+    id: 'machineBreakdownLogs',
+    label: 'Machine Breakdown Logs (Per-Machine)',
+    shortLabel: 'BD Logs',
+    templateFilename: 'Machine_Breakdown_Log_Template.xlsx',
+    defaultCategory: 'Plantwise Breakdown Report',
+    required: ['date', 'machineName'],
+    sampleRows: [
+      {
+        'Date': new Date().toISOString().slice(0, 10),
+        'Machine Code': 'MC-101',
+        'Machine Name': 'Filling Machine #1',
+        'Plant Section': 'Herbi EC Packaging',
+        'Downtime Hours': 4.5,
+        'Failure Cause': 'Bearing failure in main shaft',
+        'Action Taken': 'Bearing replaced, shaft aligned',
+        'Status': 'Closed',
+        'Remarks': '',
+      },
+    ],
+  },
 };
 
 const FIELD_ALIASES = {
@@ -154,6 +175,17 @@ const FIELD_ALIASES = {
     status: ['status', 'machinestatus', 'equipmentstatus'],
     location: ['location', 'area', 'site'],
     criticality: ['criticality', 'priority', 'assetcriticality'],
+  },
+  machineBreakdownLogs: {
+    date:          ['date', 'breakdowndate', 'incidentdate', 'logdate'],
+    machineCode:   ['machinecode', 'machineid', 'equipmentid', 'assetid', 'equipmentcode'],
+    machineName:   ['machinename', 'machine', 'equipment', 'equipmentname', 'assetname'],
+    plantSection:  ['plantsection', 'section', 'department'],
+    downtimeHours: ['downtimehours', 'downtime', 'breakdownhours', 'durationhours', 'duration'],
+    failureCause:  ['failurecause', 'cause', 'failurereason', 'problem', 'fault', 'description'],
+    actionTaken:   ['actiontaken', 'action', 'repair', 'correctiveaction', 'resolution', 'remedy'],
+    status:        ['status', 'breakdownstatus', 'closurestatus'],
+    remarks:       ['remarks', 'notes', 'comment', 'comments'],
   },
 };
 
@@ -353,6 +385,26 @@ function parseModuleRow(moduleId, row, mapping, index) {
     };
   }
 
+  if (moduleId === 'machineBreakdownLogs') {
+    const date = parseDateValue(getCell(row, mapping, 'date'));
+    if (!date) return { error: `Row ${index}: date is required.` };
+    const mName = String(getCell(row, mapping, 'machineName') || '').trim();
+    if (!mName) return { error: `Row ${index}: machine name is required.` };
+    const downtimeHours = parseNumber(getCell(row, mapping, 'downtimeHours'));
+    return {
+      date: date.slice(0, 10),
+      machineCode: String(getCell(row, mapping, 'machineCode') || '').trim(),
+      machineName: mName,
+      plantSection: String(getCell(row, mapping, 'plantSection') || '').trim(),
+      downtimeHours,
+      failureCause: String(getCell(row, mapping, 'failureCause') || '').trim(),
+      actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
+      status: String(getCell(row, mapping, 'status') || 'closed').trim().toLowerCase() || 'closed',
+      remarks: String(getCell(row, mapping, 'remarks') || '').trim(),
+    };
+  }
+
+  // ── Machines (fallback) ───────────────────────────────────────────────────
   const machineName = String(getCell(row, mapping, 'machineName') || '').trim();
   if (!machineName) return { error: `Row ${index}: machine name is required.` };
   return {

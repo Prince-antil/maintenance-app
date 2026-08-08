@@ -6,10 +6,12 @@ import { useUI } from '../context/UIContext.jsx';
 import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
   addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
+  addMachineBreakdownLog, deleteMachineBreakdownLog,
 } from '../store.js';
 import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
+import AmcTab, { getAmcAlertCount } from '../components/AmcTab.jsx';
 import { removeStoredDocument, uploadMachineAttachment } from '../lib/documentStorage.js';
 import { getDocumentUrl, toPreviewDocument } from '../lib/documentLinks.js';
 import { MACHINE_DOC_TABS, EXT_META, ALLOWED_EXT, PLANT_SECTIONS } from '../constants.js';
@@ -17,7 +19,8 @@ import { timeAgo } from '../utils.js';
 import {
   ArrowLeft, Cog, MapPin, Upload, Eye, Download, Trash2, FileText, AlertCircle,
   QrCode, Pencil, X, Save, HeartPulse, Timer, AlertOctagon, Wrench, Package,
-  Plus, Image as ImageIcon, History, ClipboardCheck, Filter,
+  Plus, Image as ImageIcon, History, ClipboardCheck, Filter, ShieldCheck,
+  CalendarDays,
 } from 'lucide-react';
 
 const MEDIA_EXT = ['.mp4', '.webm', '.mov'];
@@ -39,9 +42,10 @@ const SPEC_FIELDS = [
 ];
 
 const EXTRA_TABS = [
-  { id: 'spares', label: 'Spare Parts' },
-  { id: 'photos', label: 'Photos' },
+  { id: 'spares',  label: 'Spare Parts' },
+  { id: 'photos',  label: 'Photos' },
   { id: 'history', label: 'Maintenance History' },
+  { id: 'bdLogs',  label: 'Breakdown Log' },
 ];
 
 const healthText = (h) => (h >= 75 ? 'text-emerald-400' : h >= 50 ? 'text-amber-400' : 'text-red-400');
@@ -115,6 +119,10 @@ export default function MachineProfile() {
   // History tab filters
   const [histMonthFilter, setHistMonthFilter] = useState('');
   const [histSectionFilter, setHistSectionFilter] = useState('');
+  // Breakdown log tab filters
+  const [bdLogMonthFilter, setBdLogMonthFilter] = useState('');
+  // New manual breakdown log form
+  const [bdLogForm, setBdLogForm] = useState({ date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
   const fileRef = useRef(null);
   const photoRef = useRef(null);
 
@@ -229,11 +237,20 @@ export default function MachineProfile() {
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
   const docs = (machine.docs || []).filter((d) => d.tab === tab);
+
+  // AMC alert count — drives the badge on the AMC tab
+  const amcAlerts = getAmcAlertCount(store.amc, machine.id);
+  // Per-machine breakdown log count
+  const bdLogs = (store.machineBreakdownLogs || []).filter((l) => l.machineId === machine.id);
+
   const tabCounts = {
     ...Object.fromEntries(MACHINE_DOC_TABS.map((t) => [t.id, (machine.docs || []).filter((d) => d.tab === t.id).length])),
-    spares: (machine.spares || []).length,
-    photos: (machine.photos || []).length,
+    // AMC tab: show alert count when > 0, otherwise contract count
+    amc: amcAlerts > 0 ? `⚠ ${amcAlerts}` : (store.amc || []).filter((r) => r.machineId === machine.id).length,
+    spares:  (machine.spares || []).length,
+    photos:  (machine.photos || []).length,
     history: (stats?.breakdownHistory?.length || 0) + (stats?.pmHistory?.length || 0),
+    bdLogs:  bdLogs.length,
   };
   const acceptExt = tab === 'media' ? [...MEDIA_EXT, ...ALLOWED_EXT] : ALLOWED_EXT;
   const qrValue = `${window.location.origin}/machines/${machine.id}`;
@@ -442,8 +459,15 @@ export default function MachineProfile() {
                 tab === t.id ? 'border-cyan-400 text-white bg-cyan-500/5' : 'border-transparent text-slate-400 hover:text-white'
               }`}
             >
+              {t.id === 'amc' && amcAlerts > 0 && <ShieldCheck size={13} className="text-amber-400" aria-hidden="true" />}
               {t.label}
-              <span className={`badge ${tab === t.id ? 'bg-cyan-500/15 text-cyan-400' : 'bg-slate-700/60 text-slate-400'}`}>
+              <span className={`badge ${
+                t.id === 'amc' && amcAlerts > 0
+                  ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                  : tab === t.id
+                    ? 'bg-cyan-500/15 text-cyan-400'
+                    : 'bg-slate-700/60 text-slate-400'
+              }`}>
                 {tabCounts[t.id]}
               </span>
             </button>
@@ -703,8 +727,159 @@ export default function MachineProfile() {
             </div>
           )}
 
+          {/* ---- AMC Management tab ---- */}
+          {tab === 'amc' && (
+            <AmcTab machineId={machine.id} machineName={machine.name} />
+          )}
+
+          {/* ---- Per-machine breakdown log tab ---- */}
+          {tab === 'bdLogs' && (
+            <div className="space-y-5">
+              {/* Add log form (admin only) */}
+              {isAdmin && (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!bdLogForm.failureCause.trim()) return;
+                    addMachineBreakdownLog({
+                      ...bdLogForm,
+                      machineId: machine.id,
+                      machineCode: machine.machineCode || machine.id,
+                      machineName: machine.name,
+                      plantSection: machine.section,
+                      downtimeHours: Number(bdLogForm.downtimeHours) || 0,
+                    }, userName);
+                    setBdLogForm({ date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
+                  }}
+                  className="glass-card p-4 space-y-3"
+                >
+                  <h4 className="text-card-title flex items-center gap-2">
+                    <Plus size={14} className="text-red-400" aria-hidden="true" /> Log New Breakdown
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Date *</label>
+                      <input type="date" className="input-field" value={bdLogForm.date}
+                        onChange={(e) => setBdLogForm((f) => ({ ...f, date: e.target.value }))} required />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Downtime (hrs)</label>
+                      <input type="number" min="0" step="0.1" className="input-field" placeholder="e.g. 4.5"
+                        value={bdLogForm.downtimeHours} onChange={(e) => setBdLogForm((f) => ({ ...f, downtimeHours: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Status</label>
+                      <select className="select-field" value={bdLogForm.status}
+                        onChange={(e) => setBdLogForm((f) => ({ ...f, status: e.target.value }))}>
+                        <option value="closed">Closed</option>
+                        <option value="open">Open</option>
+                        <option value="pending">Pending</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <label className="block text-xs text-slate-400 mb-1">Failure Cause *</label>
+                      <input type="text" className="input-field" placeholder="Describe the failure…"
+                        value={bdLogForm.failureCause} onChange={(e) => setBdLogForm((f) => ({ ...f, failureCause: e.target.value }))} required />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs text-slate-400 mb-1">Action Taken</label>
+                      <input type="text" className="input-field" placeholder="Corrective action / repair performed…"
+                        value={bdLogForm.actionTaken} onChange={(e) => setBdLogForm((f) => ({ ...f, actionTaken: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Remarks</label>
+                      <input type="text" className="input-field" placeholder="Optional"
+                        value={bdLogForm.remarks} onChange={(e) => setBdLogForm((f) => ({ ...f, remarks: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button type="submit" className="btn-danger text-xs inline-flex items-center gap-1.5">
+                      <AlertOctagon size={12} aria-hidden="true" /> Add Breakdown Entry
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Month filter */}
+              <div className="flex items-center gap-2">
+                <Filter size={13} className="text-slate-500" aria-hidden="true" />
+                <select className="select-field !w-auto text-xs" value={bdLogMonthFilter}
+                  onChange={(e) => setBdLogMonthFilter(e.target.value)} aria-label="Filter by month">
+                  <option value="">All Months</option>
+                  {[...new Set(bdLogs.map((l) => l.date.slice(0, 7)))].sort((a, b) => b.localeCompare(a)).map((m) => (
+                    <option key={m} value={m}>{formatPeriodKey(m, true)}</option>
+                  ))}
+                </select>
+                {bdLogMonthFilter && (
+                  <button className="btn-ghost text-xs !py-1" onClick={() => setBdLogMonthFilter('')}>Clear</button>
+                )}
+              </div>
+
+              {/* Log table */}
+              {bdLogs.length === 0 ? (
+                <EmptyState
+                  title="No breakdown logs yet"
+                  description="Log individual breakdowns for this machine. Bulk import via the Machine Breakdown Logs template also auto-punches entries here."
+                />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="enterprise-table w-full min-w-[700px]">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Downtime (hrs)</th>
+                        <th>Failure Cause</th>
+                        <th>Action Taken</th>
+                        <th>Status</th>
+                        <th>Remarks</th>
+                        {isAdmin && <th className="w-10" aria-label="Actions" />}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bdLogs
+                        .filter((l) => !bdLogMonthFilter || l.date.slice(0, 7) === bdLogMonthFilter)
+                        .sort((a, b) => b.date.localeCompare(a.date))
+                        .map((l) => (
+                          <tr key={l.id}>
+                            <td className="text-white whitespace-nowrap">
+                              <span className="flex items-center gap-1">
+                                <CalendarDays size={11} className="text-slate-500" aria-hidden="true" />
+                                {new Date(l.date).toLocaleDateString('en-GB')}
+                              </span>
+                            </td>
+                            <td className={`font-semibold ${l.downtimeHours > 8 ? 'text-red-400' : l.downtimeHours > 4 ? 'text-amber-300' : 'text-slate-200'}`}>
+                              {l.downtimeHours ? `${l.downtimeHours}h` : '—'}
+                            </td>
+                            <td className="text-slate-200 max-w-[200px] truncate" title={l.failureCause}>{l.failureCause || '—'}</td>
+                            <td className="text-slate-400 max-w-[200px] truncate" title={l.actionTaken}>{l.actionTaken || '—'}</td>
+                            <td>
+                              <span className={`badge ${l.status === 'closed' ? 'bg-emerald-500/15 text-emerald-400' : l.status === 'open' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                                {l.status}
+                              </span>
+                            </td>
+                            <td className="text-slate-500 max-w-[140px] truncate" title={l.remarks}>{l.remarks || '—'}</td>
+                            {isAdmin && (
+                              <td>
+                                <button
+                                  onClick={() => deleteMachineBreakdownLog(l.id, userName)}
+                                  className="text-slate-500 hover:text-red-400 p-1"
+                                  aria-label="Delete log entry"
+                                >
+                                  <Trash2 size={13} aria-hidden="true" />
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ---- Document tabs ---- */}
-          {MACHINE_DOC_TABS.some((t) => t.id === tab) && (
+          {MACHINE_DOC_TABS.some((t) => t.id === tab) && tab !== 'amc' && (
             <>
               {isAdmin && (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
