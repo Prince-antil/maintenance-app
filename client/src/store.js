@@ -376,6 +376,7 @@ function machineToCloudRow(machine) {
 function normalizeBreakdownCloudRow(row) {
   return normalizeBreakdownSummary({
     id: row.id,
+    period: row.period,
     month: row.month,
     year: row.year,
     section: row.section || MASTER_SECTION,
@@ -394,6 +395,7 @@ function breakdownToCloudRow(record) {
     id: record.id,
     month,
     year,
+    period: record.period,
     section: record.section || MASTER_SECTION,
     total_breakdowns: record.breakdownCount,
     downtime_hours: record.downtimeHours,
@@ -407,6 +409,7 @@ function breakdownToCloudRow(record) {
 function normalizePMCloudRow(row) {
   return normalizePMSummary({
     id: row.id,
+    period: row.period,
     month: row.month,
     year: row.year,
     section: row.section || MASTER_SECTION,
@@ -422,6 +425,7 @@ function pmToCloudRow(record) {
     id: record.id,
     month,
     year,
+    period: record.period,
     section: record.section || MASTER_SECTION,
     planned_count: record.plannedCount,
     done_count: record.doneCount,
@@ -741,9 +745,18 @@ function commit(entity) {
   notifyStoreUpdate();
 }
 
+/**
+ * Persist locally + notify UI + write directly to Supabase immediately.
+ * Direct write is critical for cross-PC / cross-device Realtime broadcast:
+ * Supabase fires a postgres_changes event the moment the DB row changes,
+ * which every subscribed client receives within ~100-300 ms.
+ */
 function commitAndQueue(entity, action, payload) {
   commit(entity);
-  queueCloudMutation(entity, action, payload);
+  // Fire-and-forget direct write — queues to localStorage only if offline/error
+  writeToCloudNow(entity, action, payload).catch(() => {
+    // Error already handled inside writeToCloudNow; retry is queued
+  });
 }
 
 function replaceEntityState(entity, records, notify = true) {
@@ -821,6 +834,37 @@ async function pushCloudOp(op) {
     .from(config.table)
     .upsert(config.toRow(op.payload), { onConflict: 'id' });
   if (error) throw error;
+}
+
+/**
+ * Write a single record directly to Supabase right now — no queue, no delay.
+ * Falls back to queueing if Supabase is offline or not configured.
+ * This is the key path for instant multi-PC propagation: the DB write fires
+ * Realtime postgres_changes immediately, which every connected client receives.
+ */
+async function writeToCloudNow(entity, action, payload) {
+  if (!supabase || !isSupabaseConfigured || !isBrowserOnline()) {
+    // Offline or not configured — queue for later
+    queueCloudMutation(entity, action, payload);
+    return;
+  }
+
+  const op = buildPendingOp(entity, action, payload);
+  if (!op) return;
+
+  try {
+    await pushCloudOp(op);
+    // Success — remove from queue in case it was previously queued
+    dropPendingCloudOpsForRecord(entity, op.recordId);
+    updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
+  } catch (err) {
+    // Write failed — queue it for retry
+    queueCloudMutation(entity, action, payload);
+    updateSyncState({
+      phase: isBrowserOnline() ? 'degraded' : 'offline',
+      lastError: err.message || 'Write failed',
+    }, false);
+  }
 }
 
 async function fetchCloudEntity(entity) {
@@ -963,10 +1007,23 @@ function applyRealtimePayload(entity, payload) {
   updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
 }
 
-function startRealtimeSubscriptions() {
-  if (!supabase || !isSupabaseConfigured || cloudSubscriptions) return;
+function teardownRealtimeSubscriptions() {
+  if (cloudSubscriptions && supabase) {
+    try { supabase.removeChannel(cloudSubscriptions); } catch { /* ignore */ }
+    cloudSubscriptions = null;
+  }
+}
 
-  cloudSubscriptions = supabase.channel('ccpl-maintenance-sync');
+function startRealtimeSubscriptions() {
+  if (!supabase || !isSupabaseConfigured) return;
+
+  // Tear down any stale channel before creating a fresh one
+  teardownRealtimeSubscriptions();
+
+  cloudSubscriptions = supabase.channel('ccpl-maintenance-sync', {
+    config: { broadcast: { self: false } },
+  });
+
   Object.entries(CLOUD_ENTITY_CONFIG).forEach(([entity, config]) => {
     cloudSubscriptions.on(
       'postgres_changes',
@@ -983,13 +1040,22 @@ function startRealtimeSubscriptions() {
     );
   });
 
-  cloudSubscriptions.subscribe((status) => {
+  cloudSubscriptions.subscribe((status, err) => {
     if (status === 'SUBSCRIBED') {
       updateSyncState({ phase: 'synced', lastError: '' });
-    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-      // Channel lost — attempt a full data refresh so we don't drift
-      updateSyncState({ phase: isBrowserOnline() ? 'degraded' : 'offline', lastError: `Realtime channel: ${status}` });
+    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      // Channel lost — do a full refresh so we don't drift, then reconnect
+      updateSyncState({
+        phase: isBrowserOnline() ? 'degraded' : 'offline',
+        lastError: `Realtime: ${status}${err ? ' – ' + (err.message || err) : ''}`,
+      });
       SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
+      // Attempt reconnection after a brief back-off
+      setTimeout(() => {
+        if (isBrowserOnline() && isSupabaseConfigured) {
+          startRealtimeSubscriptions();
+        }
+      }, 5000);
     }
   });
 }
@@ -1002,10 +1068,22 @@ function startOnlineListener() {
     updateSyncState({ phase: 'syncing', lastError: '' });
     scheduleCloudFlush();
     SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
+    // Re-establish Realtime channel after coming back online
+    if (!cloudSubscriptions) startRealtimeSubscriptions();
   });
 
   window.addEventListener('offline', () => {
     updateSyncState({ phase: 'offline' });
+  });
+
+  // Re-subscribe when app returns from background (critical for mobile)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && isBrowserOnline() && isSupabaseConfigured) {
+      // Refresh all entities to catch up on missed events
+      SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
+      // Re-subscribe if the channel was lost while in background
+      if (!cloudSubscriptions) startRealtimeSubscriptions();
+    }
   });
 }
 
@@ -1020,6 +1098,10 @@ async function initializeCloudSync() {
   }
 
   updateSyncState({ phase: isBrowserOnline() ? 'syncing' : 'offline', cloudEnabled: true });
+
+  // Start Realtime subscriptions FIRST so we don't miss any events that arrive
+  // while the initial data fetch is in-flight.
+  startRealtimeSubscriptions();
 
   try {
     await flushPendingCloudOps();
@@ -1050,6 +1132,7 @@ async function initializeCloudSync() {
     if (remoteBreakdownLogs.length) replaceEntityState('machineBreakdownLogs', remoteBreakdownLogs, false);
     notifyStoreUpdate();
 
+    // Push any local-only records that aren't in Supabase yet
     SYNCED_ENTITIES.forEach((entity) => {
       if (!remoteSnapshots[entity].length && state[entity].length) {
         state[entity].forEach((record) => queueCloudMutation(entity, 'upsert', record, { schedule: false }));
@@ -1062,7 +1145,6 @@ async function initializeCloudSync() {
       notifyStoreUpdate();
     }
 
-    startRealtimeSubscriptions();
     updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '', pending: loadPendingCloudOps().length });
   } catch (error) {
     updateSyncState({
@@ -1439,9 +1521,29 @@ export function updateMachineBreakdownLog(id, patch, userName) {
 }
 
 export function deleteMachineBreakdownLog(id, userName) {
+  const log = state.machineBreakdownLogs.find((r) => r.id === id);
   state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.filter((r) => r.id !== id) };
   commitAndQueue('machineBreakdownLogs', 'delete', id);
   logActivity(userName, 'deleted machine breakdown log', '', 'breakdown');
+
+  // Recalculate the section-level summary for the affected period after deletion
+  if (log?.plantSection && log?.date) {
+    const period = log.date.slice(0, 7);
+    const section = log.plantSection;
+    const sectionLogs = state.machineBreakdownLogs.filter(
+      (l) => l.plantSection === section && l.date.slice(0, 7) === period
+    );
+    const existingSummary = state.breakdowns.find((b) => b.section === section && b.period === period);
+    if (existingSummary) {
+      const totalBreakdowns = sectionLogs.length;
+      const totalDowntime = sectionLogs.reduce((sum, l) => sum + (l.downtimeHours || 0), 0);
+      addBreakdown({
+        ...existingSummary,
+        breakdownCount: totalBreakdowns,
+        downtimeHours: Math.round(totalDowntime * 100) / 100,
+      }, userName || 'System');
+    }
+  }
 }
 
 /**

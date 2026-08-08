@@ -44,7 +44,7 @@ export const supabase = hasRealSupabaseConfig
       },
       realtime: {
         params: {
-          eventsPerSecond: 10,
+          eventsPerSecond: 40,
         },
       },
     })
