@@ -19,6 +19,8 @@ create table if not exists public.breakdown_logs (
   operating_hours numeric(10, 1) not null default 0,
   mttr numeric(10, 1) not null default 0,
   mtbf numeric(10, 1) not null default 0,
+  -- Explicit availability override (0–100 %). NULL = use auto-formula.
+  availability_override numeric(5, 1) default null,
   remarks text not null default '',
   payload jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
@@ -192,6 +194,8 @@ create table if not exists public.machine_breakdown_logs (
   machine_name   text        not null default '',
   plant_section  text        not null default '',
   date           date        not null,
+  start_time     timestamptz,
+  end_time       timestamptz,
   downtime_hours numeric(8, 2) not null default 0,
   failure_cause  text        not null default '',
   action_taken   text        not null default '',
@@ -267,3 +271,14 @@ create policy "amc admin delete"
   on storage.objects for delete
   to anon, authenticated
   using (bucket_id = 'amc-documents');
+
+-- =============================================================================
+-- REPLICA IDENTITY FULL — required so DELETE events carry the full old row
+-- (including `id`) for all six Realtime-synced tables.
+-- =============================================================================
+alter table public.machines                replica identity full;
+alter table public.breakdown_logs          replica identity full;
+alter table public.pm_logs                 replica identity full;
+alter table public.energy_logs             replica identity full;
+alter table public.amc_records             replica identity full;
+alter table public.machine_breakdown_logs  replica identity full;
