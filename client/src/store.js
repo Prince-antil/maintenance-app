@@ -420,12 +420,12 @@ function normalizePMCloudRow(row) {
 }
 
 function pmToCloudRow(record) {
-  const { year, month } = resolvePeriod(record);
+  const { year, month, period } = resolvePeriod(record);
   return {
     id: record.id,
     month,
     year,
-    period: record.period,
+    period,
     section: record.section || MASTER_SECTION,
     planned_count: record.plannedCount,
     done_count: record.doneCount,
@@ -791,6 +791,12 @@ function summaryIdentity(record) {
   return `${record.section}::${record.period}`;
 }
 
+// Maximum age of a queued operation before it is considered stale and dropped.
+// 72 hours covers any realistic offline window while preventing indefinite
+// accumulation of orphaned mutations (e.g. ops for records that were later
+// deleted or whose IDs no longer exist in the store).
+const QUEUE_OP_MAX_AGE_MS = 72 * 60 * 60 * 1000;
+
 function buildPendingOp(entity, action, payload) {
   const recordId = typeof payload === 'string' ? payload : payload?.id;
   if (!recordId) return null;
@@ -810,9 +816,23 @@ function queueCloudMutation(entity, action, payload, options = {}) {
   const op = buildPendingOp(entity, action, payload);
   if (!op) return;
 
+  const now_ms = Date.now();
   const queue = loadPendingCloudOps();
-  const withoutSameRecord = queue.filter((item) => !(item.entity === op.entity && item.recordId === op.recordId));
-  const nextQueue = [...withoutSameRecord, op];
+
+  // ── Purge stale operations ───────────────────────────────────────────────
+  // Remove any op that:
+  //   a) targets the same entity+recordId (superseded by this new op), OR
+  //   b) is older than QUEUE_OP_MAX_AGE_MS (stale/orphaned)
+  // This prevents indefinite accumulation of mutations for records that
+  // were deleted, re-imported with new IDs, or processed long ago.
+  const withoutObsolete = queue.filter((item) => {
+    const sameRecord = item.entity === op.entity && item.recordId === op.recordId;
+    const age = now_ms - new Date(item.queuedAt || 0).getTime();
+    const stale = age > QUEUE_OP_MAX_AGE_MS;
+    return !sameRecord && !stale;
+  });
+
+  const nextQueue = [...withoutObsolete, op];
   savePendingCloudOps(nextQueue);
   updateSyncState({ pending: nextQueue.length, phase: isSupabaseConfigured ? state.sync.phase : 'local-only' });
 
@@ -942,10 +962,25 @@ async function flushPendingCloudOps() {
     return;
   }
 
-  updateSyncState({ phase: 'syncing', pending: pending.length, lastError: '' });
+  // Drop stale ops before attempting to flush
+  const now_ms = Date.now();
+  const fresh = pending.filter((item) => {
+    const age = now_ms - new Date(item.queuedAt || 0).getTime();
+    return age <= QUEUE_OP_MAX_AGE_MS;
+  });
+  if (fresh.length !== pending.length) {
+    savePendingCloudOps(fresh);
+    rtLog('info', `Dropped ${pending.length - fresh.length} stale queued op(s)`);
+    if (!fresh.length) {
+      updateSyncState({ pending: 0, phase: 'synced', lastError: '' }, false);
+      return;
+    }
+  }
 
-  let remaining = [...pending];
-  for (const op of pending) {
+  updateSyncState({ phase: 'syncing', pending: fresh.length, lastError: '' });
+
+  let remaining = [...fresh];
+  for (const op of fresh) {
     try {
       await pushCloudOp(op);
       remaining = remaining.filter((item) => item.id !== op.id);
@@ -1607,6 +1642,8 @@ export function deleteMachineBreakdownLog(id, userName) {
   const log = state.machineBreakdownLogs.find((r) => r.id === id);
   state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.filter((r) => r.id !== id) };
   commitAndQueue('machineBreakdownLogs', 'delete', id);
+  // Clear any pending queue operations for this record to prevent stale replay
+  dropPendingCloudOpsForRecord('machineBreakdownLogs', id);
   logActivity(userName, 'deleted machine breakdown log', '', 'breakdown');
 
   // Recalculate the section-level summary for the affected period after deletion
@@ -1630,76 +1667,157 @@ export function deleteMachineBreakdownLog(id, userName) {
 }
 
 /**
+ * Compute a stable deduplication key for a per-machine breakdown log.
+ *
+ * Key: machineId|date|startTime|endTime
+ *
+ * - machineId   — required; rows without a matched machine use their
+ *                 machineCode or machineName as a fallback so blank-id rows
+ *                 are NOT collapsed into a single "no-id" bucket.
+ * - date        — YYYY-MM-DD calendar date of the incident.
+ * - startTime   — ISO timestamp (or '' when absent).
+ * - endTime     — ISO timestamp (or '' when absent).
+ *
+ * When startTime/endTime are present they form a globally unique event window
+ * for a machine.  When they are absent, date alone is the discriminator within
+ * a machine's log — two separate incidents on the same calendar day for the
+ * same machine without timestamps are treated as one (idempotent upsert).
+ */
+function breakdownStableKey(r) {
+  const mid = (r.machineId && r.machineId !== '')
+    ? r.machineId
+    : (r.machineCode || r.machineName || 'unknown');
+  const d   = (r.date || '').slice(0, 10);
+  const st  = (r.startTime || '').slice(0, 19); // trim sub-second precision
+  const et  = (r.endTime   || '').slice(0, 19);
+  return `${mid}|${d}|${st}|${et}`;
+}
+
+/**
  * Bulk import per-machine breakdown logs from a parsed Excel sheet.
- * Matches each row against the machine store by machineCode or machineName,
- * attaches the machineId, and recalculates the section-level breakdown summary
- * (MTTR/MTBF) for every affected section automatically.
+ *
+ * IDEMPOTENT: importing the same file twice produces the same record set.
+ *
+ * Algorithm:
+ *  1. Parse & normalize all incoming Excel rows, matching against the machine
+ *     store for machineId / machineCode resolution.
+ *  2. Deduplicate rows WITHIN the uploaded Excel (e.g. a sheet with duplicate
+ *     rows) using the stable key machineId|date|startTime|endTime.
+ *  3. Build the set of stable keys already present in the local store.
+ *  4. For each deduplicated incoming row:
+ *       - if stable key NOT in store → INSERT (new log, new uid)
+ *       - if stable key IS in store  → UPSERT (reuse existing id, update fields)
+ *  5. Write to local state, queue cloud mutations, recalculate section summaries.
+ *  6. Return a detailed result: imported / updated / skippedDuplicates / rejected.
+ *
+ * This means: after delete-all + import 27 → exactly 27 records.
+ *             after import 27 again         → still 27 records (5 updated if changed).
  *
  * Columns supported: Machine Code, Machine Name, Plant Section, Breakdown Start
  * Time, Breakdown End Time, Downtime Hours (auto-calculated when blank),
  * Failure Cause, Action Taken, Status, Remarks.
  */
 export function importMachineBreakdownLogsBulk(rows, userName) {
-  const logs = [];
+  const normalizedIncoming = [];
   const unmatchedRows = [];
+  const rejectedRows = [];
 
-  rows.forEach((row) => {
-    // Match against machine store by code, name, or section-scoped name
+  // ── Step 1: normalize all rows ───────────────────────────────────────────
+  rows.forEach((row, idx) => {
     const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
     const log = normalizeMachineBreakdownLog({
       ...row,
-      machineId: matched ? matched.id : '',
-      machineCode: matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
-      machineName: matched ? matched.name : row.machineName,
-      plantSection: matched ? (matched.section || row.plantSection) : row.plantSection,
-      // startTime / endTime pass through from parsed row; normalization will
-      // auto-derive downtimeHours when the explicit value is blank/zero.
-      startTime: row.startTime || '',
-      endTime:   row.endTime   || '',
+      machineId:    matched ? matched.id                        : (row.machineId || ''),
+      machineCode:  matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
+      machineName:  matched ? matched.name                      : (row.machineName || ''),
+      plantSection: matched ? (matched.section || row.plantSection || '') : (row.plantSection || ''),
+      startTime:    row.startTime || '',
+      endTime:      row.endTime   || '',
     });
-    logs.push(log);
-    if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
+
+    // Reject rows that have neither a date nor a start time
+    if (!log.date) {
+      rejectedRows.push(`Row ${idx + 2}: no date or start time`);
+      return;
+    }
+
+    normalizedIncoming.push(log);
+    if (!matched) unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
   });
 
-  // Dedup on machineId + startTime (preferred) or machineId + date + cause
-  const existingKeys = new Set(
-    state.machineBreakdownLogs.map((r) =>
-      r.startTime
-        ? `${r.machineId}:st:${r.startTime}`
-        : `${r.machineId}:${r.date}:${r.failureCause}`
-    )
+  // ── Step 2: deduplicate rows WITHIN the Excel file itself ─────────────────
+  // Keep the LAST occurrence of each stable key (latest row wins for updates).
+  const seenInFile = new Map(); // stableKey → normalized log
+  normalizedIncoming.forEach((log) => {
+    seenInFile.set(breakdownStableKey(log), log);
+  });
+  const inFileSkipped = normalizedIncoming.length - seenInFile.size;
+  const deduplicatedIncoming = [...seenInFile.values()];
+
+  // ── Step 3: build existing-key map from current store ────────────────────
+  // Maps stableKey → existing record (so we can reuse its id for upserts)
+  const existingKeyMap = new Map(
+    state.machineBreakdownLogs.map((r) => [breakdownStableKey(r), r])
   );
 
-  const newLogs = logs.filter((l) => {
-    const key = l.startTime
-      ? `${l.machineId}:st:${l.startTime}`
-      : `${l.machineId}:${l.date}:${l.failureCause}`;
-    return !existingKeys.has(key);
+  // ── Step 4: classify each incoming row as insert vs upsert ───────────────
+  const toInsert = []; // genuinely new records
+  const toUpdate = []; // existing records that need field updates
+
+  deduplicatedIncoming.forEach((incoming) => {
+    const key = breakdownStableKey(incoming);
+    const existing = existingKeyMap.get(key);
+    if (existing) {
+      // Reuse the existing record's id so the upsert targets the right row
+      toUpdate.push({ ...incoming, id: existing.id });
+    } else {
+      toInsert.push(incoming);
+    }
   });
 
-  state = { ...state, machineBreakdownLogs: [...newLogs, ...state.machineBreakdownLogs] };
+  // ── Step 5: apply to local state atomically ───────────────────────────────
+  // Build the new full list: existing records updated in place, new ones appended.
+  const updateIdSet = new Set(toUpdate.map((r) => r.id));
+  const updateMap   = new Map(toUpdate.map((r) => [r.id, r]));
+
+  const nextLogs = [
+    // Existing records: replace updated ones, keep untouched ones
+    ...state.machineBreakdownLogs.map((r) =>
+      updateIdSet.has(r.id) ? updateMap.get(r.id) : r
+    ),
+    // Genuinely new records
+    ...toInsert,
+  ];
+
+  state = { ...state, machineBreakdownLogs: nextLogs };
   commit('machineBreakdownLogs');
-  newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
+
+  // Queue cloud mutations: upsert for inserts + updates (both use upsert)
+  [...toInsert, ...toUpdate].forEach((l) =>
+    queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false })
+  );
   scheduleCloudFlush();
 
-  // ── Recalculate section-level breakdown summaries for affected sections ──
-  // Group all per-machine logs (old + new) by section → period and upsert the
-  // section-level summary so Dashboard, Machine Register, and Machine Profile
-  // all display identical MTTR / MTBF / downtime figures.
-  const affectedSections = [...new Set(newLogs.map((l) => l.plantSection).filter(Boolean))];
+  // ── Step 6: recalculate section-level breakdown summaries ─────────────────
+  // Use ALL affected sections (from inserts AND updates) so the Dashboard
+  // totals stay accurate.
+  const affectedSections = [
+    ...new Set([...toInsert, ...toUpdate].map((l) => l.plantSection).filter(Boolean)),
+  ];
+
   affectedSections.forEach((section) => {
     const sectionLogs = state.machineBreakdownLogs.filter((l) => l.plantSection === section);
 
     // Group by month-period (YYYY-MM)
     const byPeriod = {};
     sectionLogs.forEach((l) => {
-      const period = (l.startTime || l.date || '').slice(0, 7);
+      const period = (l.date || l.startTime || '').slice(0, 7);
       if (!period) return;
       if (!byPeriod[period]) {
         byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
       }
       byPeriod[period].breakdownCount += 1;
-      byPeriod[period].downtimeHours  = Math.round(
+      byPeriod[period].downtimeHours   = Math.round(
         (byPeriod[period].downtimeHours + (l.downtimeHours || 0)) * 100
       ) / 100;
     });
@@ -1713,22 +1831,44 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
         ...aggRow,
         id: existingSummary?.id,
         // Preserve existing operating-hours and availability override
-        operatingHours: existingSummary?.operatingHours,
+        operatingHours:       existingSummary?.operatingHours,
         availability_override: existingSummary?.availability_override ?? null,
-        // MTTR / MTBF auto-calculated inside normalizeBreakdownSummary
-        mttr: aggRow.breakdownCount > 0
-          ? Math.round((aggRow.downtimeHours / aggRow.breakdownCount) * 100) / 100
-          : 0,
-      }, userName);
+      }, userName || 'System');
     });
   });
 
-  const detail = unmatchedRows.length
-    ? `${newLogs.length} imported · ${unmatchedRows.length} unmatched machines: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? '...' : ''}`
-    : `${newLogs.length} breakdown logs imported`;
+  // ── Step 7: log activity & return detailed result ─────────────────────────
+  const importedCount  = toInsert.length;
+  const updatedCount   = toUpdate.length;
+  const skippedCount   = inFileSkipped;
+  const rejectedCount  = rejectedRows.length;
+  const finalUnique    = state.machineBreakdownLogs.length;
+
+  const detail = [
+    `Imported: ${importedCount}`,
+    `Updated: ${updatedCount}`,
+    `Skipped duplicates: ${skippedCount}`,
+    `Rejected: ${rejectedCount}`,
+    `Final unique records: ${finalUnique}`,
+    unmatchedRows.length
+      ? `Unmatched machines: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? `… +${unmatchedRows.length - 3}` : ''}`
+      : '',
+  ].filter(Boolean).join(' · ');
 
   logActivity(userName, 'bulk imported machine breakdown logs', detail, 'breakdown');
-  return { created: newLogs.length, total: rows.length, unmatched: unmatchedRows };
+
+  return {
+    imported:          importedCount,
+    updated:           updatedCount,
+    skippedDuplicates: skippedCount,
+    rejected:          rejectedCount,
+    rejectedReasons:   rejectedRows,
+    finalUnique,
+    unmatched:         unmatchedRows,
+    // legacy compat
+    created: importedCount,
+    total:   rows.length,
+  };
 }
 
 export function exportBackup() {
@@ -1951,7 +2091,26 @@ export async function syncCloudDataNow() {
   }
 }
 
-export async function syncMachineRecordNow(machineId) {
+/**
+ * Clear obsolete queue operations older than QUEUE_OP_MAX_AGE_MS.
+ * Can be called manually or periodically to prevent queue bloat.
+ * @returns {number} count of stale operations removed
+ */
+export function clearObsoleteQueuedMutations() {
+  const now_ms = Date.now();
+  const queue = loadPendingCloudOps();
+  const fresh = queue.filter((item) => {
+    const age = now_ms - new Date(item.queuedAt || 0).getTime();
+    return age <= QUEUE_OP_MAX_AGE_MS;
+  });
+  const removed = queue.length - fresh.length;
+  if (removed > 0) {
+    savePendingCloudOps(fresh);
+    updateSyncState({ pending: fresh.length });
+    rtLog('info', `Cleared ${removed} stale queued operation(s)`);
+  }
+  return removed;
+}
   const machine = getMachine(machineId);
   if (!machine) {
     throw new Error('Machine not found');

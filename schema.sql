@@ -202,7 +202,13 @@ create table if not exists public.machine_breakdown_logs (
   status         text        not null default 'closed'
                              check (status in ('open', 'closed', 'pending')),
   remarks        text        not null default '',
-  created_at     timestamptz not null default timezone('utc', now())
+  created_at     timestamptz not null default timezone('utc', now()),
+  constraint uq_machine_bd_logs_date_times unique (
+    machine_id,
+    date,
+    coalesce(start_time::text, ''),
+    coalesce(end_time::text, '')
+  )
 );
 
 create index if not exists idx_machine_bd_logs_machine on public.machine_breakdown_logs (machine_id);
