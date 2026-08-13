@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "install:client": "cd client && npm install",
+    "build": "cd client && npm install && npm run build",
+    "start": "node api/index.js"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",
     "bcryptjs": "^2.4.3",
