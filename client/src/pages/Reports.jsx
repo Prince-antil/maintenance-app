@@ -16,6 +16,7 @@ import {
   mtbfTrend,
   mttrTrend,
   paretoTop10,
+  paretoTop10Machines,
   pmStats,
   summaryMonthKey,
 } from '../analytics.js';
@@ -536,6 +537,19 @@ export default function Reports() {
           { label: 'Cumulative %', value: (row) => `${row.cumulative}%` },
         ],
         rows: paretoTop10(breakdowns),
+      },
+      {
+        id: 'top10-machines',
+        label: 'Top 10 Machine Breakdowns',
+        icon: AlertOctagon,
+        desc: 'Pareto ranking of individual machines by breakdown count',
+        columns: [
+          { key: 'label', label: 'Machine' },
+          { key: 'count', label: 'Breakdowns' },
+          { key: 'downtime', label: 'Downtime (hrs)' },
+          { label: 'Cumulative %', value: (row) => `${row.cumulative}%` },
+        ],
+        rows: paretoTop10Machines(store.machineBreakdownLogs),
       },
       {
         id: 'section-split',

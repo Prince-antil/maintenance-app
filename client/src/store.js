@@ -306,6 +306,7 @@ function normalizePMSummary(fields) {
     month: monthName,
     year,
     section,
+    machineId: fields.machineId || '',
     plannedCount,
     doneCount,
     pendingCount,

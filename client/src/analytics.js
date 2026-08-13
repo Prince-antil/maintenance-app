@@ -256,6 +256,29 @@ export function paretoTop10(breakdowns) {
   });
 }
 
+export function machineWiseBreakdown(machineBreakdownLogs) {
+  const counts = {};
+  (machineBreakdownLogs || []).forEach((row) => {
+    const key = row.machineName || row.machineCode || row.machineId || 'Unknown';
+    if (!counts[key]) counts[key] = { label: key, count: 0, downtime: 0 };
+    counts[key].count += 1;
+    counts[key].downtime += row.downtimeHours || 0;
+  });
+  return Object.values(counts)
+    .map((row) => ({ ...row, downtime: round1(row.downtime) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function paretoTop10Machines(machineBreakdownLogs) {
+  const rows = machineWiseBreakdown(machineBreakdownLogs).slice(0, 10);
+  const total = rows.reduce((sum, row) => sum + row.count, 0) || 1;
+  let cumulative = 0;
+  return rows.map((row) => {
+    cumulative += row.count;
+    return { ...row, cumulative: Math.round((cumulative / total) * 100) };
+  });
+}
+
 export function breakdownByDepartment(breakdowns) {
   return equipmentWiseBreakdown(breakdowns).map((row) => ({ label: row.label, value: row.count }));
 }

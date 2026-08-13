@@ -152,34 +152,17 @@ export default function MachineProfile() {
   const stats = useMemo(() => {
     if (!machine) return null;
 
-    // Section to use for filtering — allow override via histSectionFilter
-    const effectiveSection = histSectionFilter || machine.section;
-
-    // Filter breakdown and PM summaries by section + optional month
-    const sectionBreakdowns = store.breakdowns.filter((r) =>
-      r.section === effectiveSection &&
-      (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
-    );
-    const sectionPMs = store.pms.filter((r) =>
-      r.section === effectiveSection &&
-      (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
-    );
-
-    const bdSummary = aggregateBreakdownRecords(sectionBreakdowns);
-    const pmSummary = aggregatePMRecords(sectionPMs);
-
     // Health uses unfiltered 90-day window (spec: health is always live)
     const health = machineHealth(machine, store.breakdowns, store.pms);
 
-    // Breakdown history rows — sorted newest first
-    const breakdownHistory = [...store.breakdowns]
-      .filter((r) =>
-        r.section === effectiveSection &&
-        (!histMonthFilter || summaryMonthKey(r) === histMonthFilter)
-      )
-      .sort((a, b) => (b.period || '').localeCompare(a.period || ''));
+    // Per-machine breakdown logs — filtered by this machine, sorted newest first
+    const machineLogs = (store.machineBreakdownLogs || []).filter((l) => l.machineId === machine.id);
+    const breakdownHistory = [...machineLogs]
+      .filter((l) => !histMonthFilter || (l.date || '').slice(0, 7) === histMonthFilter)
+      .sort((a, b) => (b.date || b.startTime || '').localeCompare(a.date || a.startTime || ''));
 
-    // PM history rows — sorted newest first
+    // Section PM history — still section-level (PMs are logged per section)
+    const effectiveSection = histSectionFilter || machine.section;
     const pmHistory = [...store.pms]
       .filter((r) =>
         r.section === effectiveSection &&
@@ -187,27 +170,31 @@ export default function MachineProfile() {
       )
       .sort((a, b) => (b.period || '').localeCompare(a.period || ''));
 
+    // KPIs derived from actual per-machine breakdown logs
+    const bdCount = breakdownHistory.length;
+    const totalDowntime = breakdownHistory.reduce((sum, l) => sum + (l.downtimeHours || 0), 0);
+    const avgMttr = bdCount > 0 ? Math.round((totalDowntime / bdCount) * 100) / 100 : 0;
+
     return {
       health,
-      breakdownCount: bdSummary.breakdownCount,
-      downtimeHours: bdSummary.downtimeHours,
-      mttr: bdSummary.mttr,
-      mtbf: bdSummary.mtbf,
-      pmDone: pmSummary.doneCount,
-      pmPlanned: pmSummary.plannedCount,
-      pmCompliance: pmSummary.compliance,
+      breakdownCount: bdCount,
+      downtimeHours: Math.round(totalDowntime * 100) / 100,
+      mttr: avgMttr,
+      mtbf: 0,
+      pmDone: 0,
+      pmPlanned: 0,
+      pmCompliance: 0,
       breakdownHistory,
       pmHistory,
-      // Keep legacy combined timeline for the "all history" view
       history: [
         ...breakdownHistory.map((r) => ({
           id: r.id,
           kind: 'breakdown',
           ts: r.createdAt,
-          period: r.period,
-          title: `Breakdown Summary — ${formatPeriodKey(r.period, true)}`,
-          detail: `${r.breakdownCount} breakdown${r.breakdownCount !== 1 ? 's' : ''} · ${r.downtimeHours}h downtime · MTTR ${r.mttr}h · MTBF ${r.mtbf}h${r.remarks ? ' · ' + r.remarks : ''}`,
-          status: 'closed',
+          period: r.date || (r.startTime || '').slice(0, 10),
+          title: `Breakdown — ${r.date || (r.startTime || '').slice(0, 10)}`,
+          detail: `${r.failureCause || 'No cause recorded'} · ${r.downtimeHours || 0}h downtime${r.actionTaken ? ' · ' + r.actionTaken : ''}${r.remarks ? ' · ' + r.remarks : ''}`,
+          status: r.status || 'closed',
         })),
         ...pmHistory.map((r) => ({
           id: r.id,
@@ -220,7 +207,7 @@ export default function MachineProfile() {
         })),
       ].sort((a, b) => (b.period || '').localeCompare(a.period || '')),
     };
-  }, [machine, store.breakdowns, store.pms, histMonthFilter, histSectionFilter]);
+  }, [machine, store.machineBreakdownLogs, store.breakdowns, store.pms, histMonthFilter, histSectionFilter]);
 
   if (!machine) {
     return (
@@ -578,21 +565,10 @@ export default function MachineProfile() {
                     <option key={m} value={m}>{formatPeriodKey(m, true)}</option>
                   ))}
                 </select>
-                <select
-                  className="select-field !py-1 text-xs flex-1"
-                  value={histSectionFilter}
-                  onChange={(e) => setHistSectionFilter(e.target.value)}
-                  aria-label="Filter by plant section"
-                >
-                  <option value="">Section: {machine.section}</option>
-                  {historySectionOptions.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                {(histMonthFilter || histSectionFilter) && (
+                {(histMonthFilter) && (
                   <button
                     className="btn-ghost text-xs !py-1 shrink-0"
-                    onClick={() => { setHistMonthFilter(''); setHistSectionFilter(''); }}
+                    onClick={() => { setHistMonthFilter(''); }}
                   >
                     Clear
                   </button>
@@ -614,45 +590,47 @@ export default function MachineProfile() {
                 ))}
               </div>
 
-              {/* ── Breakdown History & Duration ── */}
+              {/* ── Breakdown History ── */}
               <section>
                 <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mb-2.5">
                   <AlertOctagon size={13} className="text-red-400" aria-hidden="true" />
-                  Breakdown History &amp; Duration
+                  Breakdown History
                   <span className="badge bg-red-500/15 text-red-400">{stats.breakdownHistory.length}</span>
                 </h4>
                 {stats.breakdownHistory.length === 0 ? (
-                  <p className="text-slate-500 text-xs py-3 pl-1">No breakdown records for this filter.</p>
+                  <p className="text-slate-500 text-xs py-3 pl-1">No breakdown logs for this machine.</p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="enterprise-table w-full min-w-[640px]">
+                    <table className="enterprise-table w-full min-w-[700px]">
                       <thead>
                         <tr>
-                          <th>Period</th>
-                          <th>Plant Section</th>
-                          <th>Breakdowns</th>
+                          <th>Date</th>
+                          <th>Start Time</th>
+                          <th>End Time</th>
                           <th>Downtime (hrs)</th>
-                          <th>MTTR (hrs)</th>
-                          <th>MTBF (hrs)</th>
-                          <th>Operating Hrs</th>
+                          <th>Failure Cause</th>
+                          <th>Action Taken</th>
+                          <th>Status</th>
                           <th>Remarks</th>
                         </tr>
                       </thead>
                       <tbody>
                         {stats.breakdownHistory.map((r) => (
                           <tr key={r.id}>
-                            <td className="text-white font-medium whitespace-nowrap">{formatPeriodKey(r.period, true)}</td>
-                            <td className="text-slate-300 max-w-[180px] truncate" title={r.section}>{r.section}</td>
+                            <td className="text-white font-medium whitespace-nowrap">{r.date || '—'}</td>
+                            <td className="text-slate-300 whitespace-nowrap">{r.startTime ? new Date(r.startTime).toLocaleString() : '—'}</td>
+                            <td className="text-slate-300 whitespace-nowrap">{r.endTime ? new Date(r.endTime).toLocaleString() : '—'}</td>
+                            <td className="text-amber-300 font-semibold">{r.downtimeHours || 0}</td>
+                            <td className="text-slate-300 max-w-[180px] truncate" title={r.failureCause}>{r.failureCause || '—'}</td>
+                            <td className="text-slate-300 max-w-[180px] truncate" title={r.actionTaken}>{r.actionTaken || '—'}</td>
                             <td>
-                              <span className={`font-semibold ${r.breakdownCount > 5 ? 'text-red-400' : r.breakdownCount > 2 ? 'text-amber-400' : 'text-slate-200'}`}>
-                                {r.breakdownCount}
-                              </span>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                r.status === 'closed' ? 'bg-emerald-500/15 text-emerald-400' :
+                                r.status === 'open' ? 'bg-red-500/15 text-red-400' :
+                                'bg-amber-500/15 text-amber-400'
+                              }`}>{r.status || 'closed'}</span>
                             </td>
-                            <td className="text-amber-300">{r.downtimeHours}</td>
-                            <td className="text-cyan-300">{r.mttr}</td>
-                            <td className="text-violet-300">{r.mtbf}</td>
-                            <td className="text-slate-400">{r.operatingHours || '—'}</td>
-                            <td className="text-slate-400 max-w-[200px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
                           </tr>
                         ))}
                       </tbody>
