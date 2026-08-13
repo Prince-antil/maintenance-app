@@ -2269,3 +2269,4 @@ export function stopMasterSheetPolling() {
     clearInterval(masterSheetPollingTimer);
     masterSheetPollingTimer = null;
   }
+}
