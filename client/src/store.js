@@ -2111,6 +2111,13 @@ export function clearObsoleteQueuedMutations() {
   }
   return removed;
 }
+
+/**
+ * Sync a specific machine record to the cloud.
+ * @param {string} machineId - The machine ID to sync
+ * @returns {Promise<object>} The updated machine record
+ */
+export async function syncMachineToCloud(machineId) {
   const machine = getMachine(machineId);
   if (!machine) {
     throw new Error('Machine not found');
