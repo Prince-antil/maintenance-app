@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
-  addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineToCloud,
+  addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
   addMachineBreakdownLog, deleteMachineBreakdownLog,
 } from '../store.js';
 import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
@@ -273,7 +273,7 @@ export default function MachineProfile() {
         uploadedBy: userName,
       });
       addMachineDoc(machine.id, uploadedDoc, userName);
-      await syncMachineToCloud(machine.id);
+      await syncMachineRecordNow(machine.id);
       pushToast({
         type: 'success',
         title: 'Document uploaded',
