@@ -7,6 +7,7 @@ import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
   addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
   addMachineBreakdownLog, deleteMachineBreakdownLog,
+  addMachinePmRecord, deleteMachinePmRecord, importMachinePmRecordsBulk,
 } from '../store.js';
 import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -20,7 +21,7 @@ import {
   ArrowLeft, Cog, MapPin, Upload, Eye, Download, Trash2, FileText, AlertCircle,
   QrCode, Pencil, X, Save, HeartPulse, Timer, AlertOctagon, Wrench, Package,
   Plus, Image as ImageIcon, History, ClipboardCheck, Filter, ShieldCheck,
-  CalendarDays,
+  CalendarDays, FileSpreadsheet,
 } from 'lucide-react';
 
 const MEDIA_EXT = ['.mp4', '.webm', '.mov'];
@@ -124,6 +125,10 @@ export default function MachineProfile() {
   // New manual breakdown log form
   const [bdLogForm, setBdLogForm] = useState({ startTime: '', endTime: '', date: new Date().toISOString().slice(0, 10), downtimeHours: '', failureCause: '', actionTaken: '', status: 'closed', remarks: '' });
   const [downtimeManual, setDowntimeManual] = useState(false);
+  // Per-machine PM record form
+  const [pmForm, setPmForm] = useState({ pmDate: new Date().toISOString().slice(0, 10), pmType: 'Preventive', task: '', status: 'completed', action: '', technician: '', remarks: '' });
+  const [showPmForm, setShowPmForm] = useState(false);
+  const pmFileRef = useRef(null);
   const fileRef = useRef(null);
   const photoRef = useRef(null);
 
@@ -161,17 +166,20 @@ export default function MachineProfile() {
       .filter((l) => !histMonthFilter || (l.date || '').slice(0, 7) === histMonthFilter)
       .sort((a, b) => (b.date || b.startTime || '').localeCompare(a.date || a.startTime || ''));
 
-    // PM history — prefer machine-level records when available, fall back to section-level
+    // Per-machine PM records — individual PM activities for this machine
+    const machinePmRecords = (store.machinePmRecords || [])
+      .filter((r) => r.machineId === machine.id)
+      .filter((r) => !histMonthFilter || (r.pmDate || '').slice(0, 7) === histMonthFilter)
+      .sort((a, b) => (b.pmDate || '').localeCompare(a.pmDate || ''));
+
+    // PM history — section-level summaries (legacy, for compliance display)
     const effectiveSection = histSectionFilter || machine.section;
     const pmHistory = [...store.pms]
       .filter((r) => {
-        // If PM record has a machineId matching this machine, show it
         if (r.machineId && r.machineId === machine.id) {
           return !histMonthFilter || summaryMonthKey(r) === histMonthFilter;
         }
-        // If PM record has a machineId but it doesn't match, exclude it
         if (r.machineId) return false;
-        // Fall back to section-level filtering for PMs without machineId
         return r.section === effectiveSection &&
           (!histMonthFilter || summaryMonthKey(r) === histMonthFilter);
       })
@@ -182,15 +190,21 @@ export default function MachineProfile() {
     const totalDowntime = breakdownHistory.reduce((sum, l) => sum + (l.downtimeHours || 0), 0);
     const avgMttr = bdCount > 0 ? Math.round((totalDowntime / bdCount) * 100) / 100 : 0;
 
+    // PM KPIs from per-machine PM records
+    const pmDone = machinePmRecords.filter((r) => r.completed || r.status === 'completed').length;
+    const pmTotal = machinePmRecords.length;
+    const pmCompliance = pmTotal > 0 ? Math.round((pmDone / pmTotal) * 100) : 0;
+
     return {
       health,
       breakdownCount: bdCount,
       downtimeHours: Math.round(totalDowntime * 100) / 100,
       mttr: avgMttr,
       mtbf: 0,
-      pmDone: 0,
-      pmPlanned: 0,
-      pmCompliance: 0,
+      pmDone,
+      pmPlanned: pmTotal,
+      pmCompliance,
+      machinePmRecords,
       breakdownHistory,
       pmHistory,
       history: [
@@ -203,18 +217,18 @@ export default function MachineProfile() {
           detail: `${r.failureCause || 'No cause recorded'} · ${r.downtimeHours || 0}h downtime${r.actionTaken ? ' · ' + r.actionTaken : ''}${r.remarks ? ' · ' + r.remarks : ''}`,
           status: r.status || 'closed',
         })),
-        ...pmHistory.map((r) => ({
+        ...machinePmRecords.map((r) => ({
           id: r.id,
           kind: 'pm',
           ts: r.createdAt,
-          period: r.period,
-          title: `PM Summary — ${formatPeriodKey(r.period, true)}`,
-          detail: `Planned ${r.plannedCount} · Done ${r.doneCount} · Pending ${r.pendingCount} · Compliance ${r.compliancePct}%${r.remarks ? ' · ' + r.remarks : ''}`,
-          status: r.doneCount >= r.plannedCount ? 'completed' : 'pending',
+          period: r.pmDate,
+          title: `PM — ${r.pmDate} · ${r.task || r.pmType}`,
+          detail: `${r.pmType} · ${r.action || 'No action'} · ${r.technician || 'No technician'}${r.remarks ? ' · ' + r.remarks : ''}`,
+          status: r.completed ? 'completed' : r.status || 'pending',
         })),
       ].sort((a, b) => (b.period || '').localeCompare(a.period || '')),
     };
-  }, [machine, store.machineBreakdownLogs, store.breakdowns, store.pms, histMonthFilter, histSectionFilter]);
+  }, [machine, store.machineBreakdownLogs, store.machinePmRecords, store.breakdowns, store.pms, histMonthFilter, histSectionFilter]);
 
   if (!machine) {
     return (
@@ -244,8 +258,9 @@ export default function MachineProfile() {
     amc: amcAlerts > 0 ? `⚠ ${amcAlerts}` : (store.amc || []).filter((r) => r.machineId === machine.id).length,
     spares:  (machine.spares || []).length,
     photos:  (machine.photos || []).length,
-    history: (stats?.breakdownHistory?.length || 0) + (stats?.pmHistory?.length || 0),
+    history: (stats?.breakdownHistory?.length || 0) + (stats?.machinePmRecords?.length || 0),
     bdLogs:  bdLogs.length,
+    pmLogs:  (stats?.machinePmRecords?.length || 0),
   };
   const acceptExt = tab === 'media' ? [...MEDIA_EXT, ...ALLOWED_EXT] : ALLOWED_EXT;
   const qrValue = `${window.location.origin}/machines/${machine.id}`;
@@ -646,65 +661,181 @@ export default function MachineProfile() {
                 )}
               </section>
 
-              {/* ── PM History ── */}
+              {/* ── Per-Machine PM Records ── */}
               <section>
-                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2 mb-2.5">
-                  <ClipboardCheck size={13} className="text-emerald-400" aria-hidden="true" />
-                  PM History
-                  <span className="badge bg-emerald-500/15 text-emerald-400">{stats.pmHistory.length}</span>
-                </h4>
-                {stats.pmHistory.length === 0 ? (
-                  <p className="text-slate-500 text-xs py-3 pl-1">No PM records for this filter.</p>
+                <div className="flex items-center justify-between mb-2.5">
+                  <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <ClipboardCheck size={13} className="text-emerald-400" aria-hidden="true" />
+                    PM Records
+                    <span className="badge bg-emerald-500/15 text-emerald-400">{(stats.machinePmRecords || []).length}</span>
+                  </h4>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setShowPmForm(!showPmForm)} className="btn-ghost text-[11px] inline-flex items-center gap-1">
+                      <Plus size={12} /> Log PM
+                    </button>
+                    <button onClick={() => pmFileRef.current?.click()} className="btn-ghost text-[11px] inline-flex items-center gap-1">
+                      <FileSpreadsheet size={12} /> Bulk Import
+                    </button>
+                    <button
+                      onClick={() => {
+                        const records = stats.machinePmRecords || [];
+                        if (!records.length) return;
+                        const header = 'PM Date,PM Type,Task,Status,Completed,Action,Technician,Remarks\n';
+                        const csv = header + records.map((r) =>
+                          [r.pmDate, r.pmType, r.task, r.status, r.completed, r.action, r.technician, r.remarks].map((v) => `"${String(v || '').replace(/"/g, '""')}"`).join(',')
+                        ).join('\n');
+                        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `pm-records-${machine.machineCode || machine.id}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="btn-ghost text-[11px] inline-flex items-center gap-1"
+                    >
+                      <Download size={12} /> Export
+                    </button>
+                    <input ref={pmFileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const XLSX = await import('xlsx');
+                        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const rows = XLSX.utils.sheet_to_json(ws);
+                        const result = importMachinePmRecordsBulk(rows.map((r) => ({
+                          machineCode: r['Machine Code'] || r['Machine ID'] || r.machineCode || '',
+                          machineName: r['Machine Name'] || r.machineName || '',
+                          plantSection: r['Plant Section'] || r.Section || r.plantSection || '',
+                          pmDate: r['PM Date'] || r.pmDate || r.Date || r.date || '',
+                          pmType: r['PM Type'] || r.pmType || r.Type || r.type || 'Preventive',
+                          task: r['Task'] || r.task || r.Description || r.description || '',
+                          status: r['Status'] || r.status || 'completed',
+                          completed: r['Completed'] || r.completed || 'true',
+                          action: r['Action'] || r.action || r['Action Taken'] || '',
+                          technician: r['Technician'] || r.technician || '',
+                          remarks: r['Remarks'] || r.remarks || '',
+                        })), userName);
+                        pushToast({ type: result.unmatched?.length ? 'warning' : 'success', text: `${result.created} PM records imported${result.unmatched?.length ? ` · ${result.unmatched.length} unmatched` : ''}` });
+                      } catch (err) {
+                        pushToast({ type: 'error', text: `Import failed: ${err.message}` });
+                      }
+                      e.target.value = '';
+                    }} />
+                  </div>
+                </div>
+
+                {/* Add PM form */}
+                {showPmForm && (
+                  <div className="glass-card p-4 mb-3 border border-emerald-400/20">
+                    <h5 className="text-xs font-semibold text-emerald-400 mb-3">Log New PM Activity</h5>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                      <div>
+                        <label className="text-meta block mb-1">PM Date *</label>
+                        <input type="date" className="input-field text-xs w-full" value={pmForm.pmDate} onChange={(e) => setPmForm((f) => ({ ...f, pmDate: e.target.value }))} />
+                      </div>
+                      <div>
+                        <label className="text-meta block mb-1">PM Type</label>
+                        <select className="input-field text-xs w-full" value={pmForm.pmType} onChange={(e) => setPmForm((f) => ({ ...f, pmType: e.target.value }))}>
+                          <option>Preventive</option>
+                          <option>Corrective</option>
+                          <option>Predictive</option>
+                          <option>Condition-Based</option>
+                          <option>Lubrication</option>
+                          <option>Calibration</option>
+                          <option>Inspection</option>
+                          <option>Other</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-meta block mb-1">Status</label>
+                        <select className="input-field text-xs w-full" value={pmForm.status} onChange={(e) => setPmForm((f) => ({ ...f, status: e.target.value, completed: e.target.value === 'completed' }))}>
+                          <option value="completed">Completed</option>
+                          <option value="pending">Pending</option>
+                          <option value="overdue">Overdue</option>
+                          <option value="skipped">Skipped</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-meta block mb-1">Technician</label>
+                        <input type="text" className="input-field text-xs w-full" value={pmForm.technician} onChange={(e) => setPmForm((f) => ({ ...f, technician: e.target.value }))} placeholder="Technician name" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                      <div>
+                        <label className="text-meta block mb-1">Task / Description *</label>
+                        <input type="text" className="input-field text-xs w-full" value={pmForm.task} onChange={(e) => setPmForm((f) => ({ ...f, task: e.target.value }))} placeholder="e.g. Bearing replacement, Oil change" />
+                      </div>
+                      <div>
+                        <label className="text-meta block mb-1">Action Taken</label>
+                        <input type="text" className="input-field text-xs w-full" value={pmForm.action} onChange={(e) => setPmForm((f) => ({ ...f, action: e.target.value }))} placeholder="Action performed" />
+                      </div>
+                    </div>
+                    <div className="mb-3">
+                      <label className="text-meta block mb-1">Remarks</label>
+                      <input type="text" className="input-field text-xs w-full" value={pmForm.remarks} onChange={(e) => setPmForm((f) => ({ ...f, remarks: e.target.value }))} placeholder="Optional remarks" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => {
+                        if (!pmForm.task.trim()) { pushToast({ type: 'error', text: 'Task description is required' }); return; }
+                        addMachinePmRecord({
+                          machineId: machine.id,
+                          machineCode: machine.machineCode || machine.id,
+                          machineName: machine.name,
+                          plantSection: machine.section,
+                          ...pmForm,
+                        }, userName);
+                        setPmForm({ pmDate: new Date().toISOString().slice(0, 10), pmType: 'Preventive', task: '', status: 'completed', action: '', technician: '', remarks: '' });
+                        setShowPmForm(false);
+                        pushToast({ type: 'success', text: 'PM record logged' });
+                      }} className="btn-primary text-xs">Save PM Record</button>
+                      <button onClick={() => setShowPmForm(false)} className="btn-ghost text-xs">Cancel</button>
+                    </div>
+                  </div>
+                )}
+
+                {(stats.machinePmRecords || []).length === 0 ? (
+                  <p className="text-slate-500 text-xs py-3 pl-1">No PM records for this machine. Click "Log PM" to add one or "Bulk Import" to import from Excel.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="enterprise-table w-full min-w-[620px]">
-                      <thead>
+                  <div className="overflow-x-auto max-h-[400px]">
+                    <table className="enterprise-table w-full min-w-[750px]">
+                      <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
                         <tr>
-                          <th>Period</th>
-                          <th>Plant Section</th>
-                          <th>Planned</th>
-                          <th>Done</th>
-                          <th>Pending</th>
-                          <th>Compliance %</th>
-                          <th>Schedule Adherence</th>
+                          <th>PM Date</th>
+                          <th>PM Type</th>
+                          <th>Task</th>
+                          <th>Status</th>
+                          <th>Action</th>
+                          <th>Technician</th>
                           <th>Remarks</th>
+                          <th className="w-10"></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {stats.pmHistory.map((r) => {
-                          const adherence = r.plannedCount > 0
-                            ? Math.round((r.doneCount / r.plannedCount) * 100)
-                            : 0;
-                          const adherenceColor = adherence >= 90
-                            ? 'text-emerald-400'
-                            : adherence >= 75
-                              ? 'text-amber-400'
-                              : 'text-red-400';
-                          return (
-                            <tr key={r.id}>
-                              <td className="text-white font-medium whitespace-nowrap">{formatPeriodKey(r.period, true)}</td>
-                              <td className="text-slate-300 max-w-[180px] truncate" title={r.section}>{r.section}</td>
-                              <td className="text-slate-200">{r.plannedCount}</td>
-                              <td className="text-emerald-300 font-semibold">{r.doneCount}</td>
-                              <td className={r.pendingCount > 0 ? 'text-amber-400' : 'text-slate-400'}>{r.pendingCount}</td>
-                              <td>
-                                <span className={`font-semibold ${adherenceColor}`}>{r.compliancePct}%</span>
-                              </td>
-                              <td>
-                                <div className="flex items-center gap-2">
-                                  <div className="w-16 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                                    <div
-                                      className={`h-full rounded-full ${adherence >= 90 ? 'bg-emerald-400' : adherence >= 75 ? 'bg-amber-400' : 'bg-red-400'}`}
-                                      style={{ width: `${Math.min(adherence, 100)}%` }}
-                                    />
-                                  </div>
-                                  <span className={`text-[11px] ${adherenceColor}`}>{adherence}%</span>
-                                </div>
-                              </td>
-                              <td className="text-slate-400 max-w-[180px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
-                            </tr>
-                          );
-                        })}
+                        {(stats.machinePmRecords || []).map((r) => (
+                          <tr key={r.id}>
+                            <td className="text-white font-medium whitespace-nowrap">{r.pmDate || '—'}</td>
+                            <td className="text-slate-300">{r.pmType}</td>
+                            <td className="text-slate-200 max-w-[200px] truncate" title={r.task}>{r.task || '—'}</td>
+                            <td>
+                              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                r.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' :
+                                r.status === 'overdue' ? 'bg-red-500/15 text-red-400' :
+                                r.status === 'pending' ? 'bg-amber-500/15 text-amber-400' :
+                                'bg-slate-500/15 text-slate-400'
+                              }`}>{r.status}</span>
+                            </td>
+                            <td className="text-slate-300 max-w-[150px] truncate" title={r.action}>{r.action || '—'}</td>
+                            <td className="text-slate-300">{r.technician || '—'}</td>
+                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                            <td>
+                              <button onClick={() => { if (window.confirm('Delete this PM record?')) { deleteMachinePmRecord(r.id, userName); pushToast({ type: 'success', text: 'PM record deleted' }); } }} className="text-slate-500 hover:text-red-400 p-1" title="Delete">
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

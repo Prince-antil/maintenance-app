@@ -12,6 +12,7 @@ const KEYS = {
   energy: 'ccpl_energy_v1',
   amc: 'CCPL_AMC_RECORDS_V1',
   machineBreakdownLogs: 'CCPL_MACHINE_BD_LOGS_V1',
+  machinePmRecords: 'CCPL_MACHINE_PM_RECORDS_V1',
   activity: 'ccpl_activity_v1',
   settings: 'ccpl_settings_v1',
 };
@@ -23,6 +24,7 @@ const LEGACY_KEYS = {
   energy: ['ccpl_energy_v1'],
   amc: [],
   machineBreakdownLogs: [],
+  machinePmRecords: [],
   activity: ['ccpl_activity_v1'],
   settings: ['ccpl_settings_v1'],
 };
@@ -55,7 +57,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -614,6 +616,66 @@ function machineBreakdownLogToCloudRow(record) {
   };
 }
 
+// ── Per-machine PM records ──────────────────────────────────────────────────
+function normalizeMachinePmRecord(fields) {
+  const pmDate = fields.pmDate || fields.pm_date || new Date().toISOString().slice(0, 10);
+  return {
+    id: fields.id || uid('mpm'),
+    machineId: fields.machineId || '',
+    machineCode: fields.machineCode || '',
+    machineName: fields.machineName || '',
+    plantSection: fields.plantSection || '',
+    pmDate,
+    pmType: String(fields.pmType || fields.pm_type || 'Preventive').trim(),
+    task: String(fields.task || '').trim(),
+    status: String(fields.status || 'completed').toLowerCase(),
+    completed: fields.completed !== false && fields.completed !== 'false',
+    action: String(fields.action || '').trim(),
+    technician: String(fields.technician || '').trim(),
+    remarks: String(fields.remarks || '').trim(),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeMachinePmCloudRow(row) {
+  return normalizeMachinePmRecord({
+    id: row.id,
+    machineId: row.machine_id || '',
+    machineCode: row.machine_code || '',
+    machineName: row.machine_name || '',
+    plantSection: row.plant_section || '',
+    pmDate: row.pm_date,
+    pmType: row.pm_type || '',
+    task: row.task || '',
+    status: row.status || 'completed',
+    completed: row.completed,
+    action: row.action || '',
+    technician: row.technician || '',
+    remarks: row.remarks || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function machinePmRecordToCloudRow(record) {
+  return {
+    id: record.id,
+    machine_id: record.machineId,
+    machine_code: record.machineCode,
+    machine_name: record.machineName,
+    plant_section: record.plantSection,
+    pm_date: record.pmDate,
+    pm_type: record.pmType,
+    task: record.task,
+    status: record.status,
+    completed: record.completed,
+    action: record.action,
+    technician: record.technician,
+    remarks: record.remarks,
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -650,6 +712,12 @@ const CLOUD_ENTITY_CONFIG = {
     fromRow: normalizeMachineBreakdownLogCloudRow,
     toRow: machineBreakdownLogToCloudRow,
     orderBy: [{ column: 'date', ascending: false }],
+  },
+  machinePmRecords: {
+    table: 'machine_pm_records',
+    fromRow: normalizeMachinePmCloudRow,
+    toRow: machinePmRecordToCloudRow,
+    orderBy: [{ column: 'pm_date', ascending: false }],
   },
 };
 
@@ -720,6 +788,7 @@ let state = {
   energy: loadPersistedValue('energy', []).map(normalizeEnergyRecord),
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
+  machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
   activity: loadPersistedValue('activity', []),
   settings: loadPersistedValue('settings', { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 }),
   sync: {
@@ -1548,6 +1617,75 @@ export function deleteAmcRecord(id, userName) {
   logActivity(userName, 'deleted AMC record', record ? `${record.vendorName}` : '', 'amc');
 }
 
+// ── Per-machine PM record exports ──────────────────────────────────────────
+export const getMachinePmRecords = () => state.machinePmRecords;
+export const getMachinePmRecordsForMachine = (machineId) =>
+  state.machinePmRecords.filter((r) => r.machineId === machineId);
+
+export function addMachinePmRecord(fields, userName) {
+  const record = normalizeMachinePmRecord({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, machinePmRecords: [record, ...state.machinePmRecords] };
+  commitAndQueue('machinePmRecords', 'upsert', record);
+  logActivity(userName, 'logged machine PM', `${record.machineName} · ${record.pmDate} · ${record.task || record.pmType}`, 'pm');
+  return record;
+}
+
+export function deleteMachinePmRecord(id, userName) {
+  state = { ...state, machinePmRecords: state.machinePmRecords.filter((r) => r.id !== id) };
+  commitAndQueue('machinePmRecords', 'delete', id);
+  logActivity(userName, 'deleted machine PM record', '', 'pm');
+}
+
+export function importMachinePmRecordsBulk(rows, userName) {
+  const logs = [];
+  const unmatchedRows = [];
+
+  rows.forEach((row, idx) => {
+    const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+    const record = normalizeMachinePmRecord({
+      ...row,
+      machineId: matched ? matched.id : (row.machineId || ''),
+      machineCode: matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
+      machineName: matched ? matched.name : (row.machineName || ''),
+      plantSection: matched ? (matched.section || row.plantSection || '') : (row.plantSection || ''),
+      pmDate: row.pmDate || row.pm_date || row.date || new Date().toISOString().slice(0, 10),
+      pmType: row.pmType || row.pm_type || 'Preventive',
+      task: row.task || row.description || '',
+      status: row.status || 'completed',
+      completed: row.completed !== false && row.completed !== 'false' && row.status !== 'pending',
+      action: row.action || row.actionTaken || '',
+      technician: row.technician || '',
+      remarks: row.remarks || '',
+    });
+
+    if (!record.machineId) {
+      unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
+      return;
+    }
+    logs.push(record);
+    if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
+  });
+
+  // Dedup on machineId + pmDate + task within Excel
+  const seenInFile = new Map();
+  logs.forEach((r) => {
+    const key = `${r.machineId}:${r.pmDate}:${r.task}`;
+    seenInFile.set(key, r);
+  });
+  const deduped = [...seenInFile.values()];
+
+  state = { ...state, machinePmRecords: [...deduped, ...state.machinePmRecords] };
+  commit('machinePmRecords');
+  deduped.forEach((r) => queueCloudMutation('machinePmRecords', 'upsert', r, { schedule: false }));
+  scheduleCloudFlush();
+
+  const detail = unmatchedRows.length
+    ? `${deduped.length} imported · ${unmatchedRows.length} unmatched: ${unmatchedRows.slice(0, 3).join(', ')}`
+    : `${deduped.length} PM records imported`;
+  logActivity(userName, 'bulk imported machine PM records', detail, 'pm');
+  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows };
+}
+
 // ── Per-machine breakdown log exports ─────────────────────────────────────
 export const getMachineBreakdownLogs = () => state.machineBreakdownLogs;
 export const getMachineBreakdownLogsForMachine = (machineId) =>
@@ -1754,6 +1892,7 @@ export function exportBackup() {
       breakdowns: state.breakdowns,
       pms: state.pms,
       energy: state.energy,
+      machinePmRecords: state.machinePmRecords,
       activity: state.activity,
       settings: state.settings,
     },
@@ -1797,6 +1936,10 @@ export function importBackup(json) {
   if (Array.isArray(parsed.machineBreakdownLogs)) {
     state = { ...state, machineBreakdownLogs: parsed.machineBreakdownLogs.map(normalizeMachineBreakdownLog) };
     commit('machineBreakdownLogs');
+  }
+  if (Array.isArray(parsed.machinePmRecords)) {
+    state = { ...state, machinePmRecords: parsed.machinePmRecords.map(normalizeMachinePmRecord) };
+    commit('machinePmRecords');
   }
   if (Array.isArray(parsed.activity)) {
     state = { ...state, activity: parsed.activity };
