@@ -1,4 +1,11 @@
 {
+  "buildCommand": "cd client && npm run build",
+  "outputDirectory": "client/dist",
+  "installCommand": "npm install && cd client && npm install --include=dev",
+  "env": {
+    "VITE_SUPABASE_URL": "@supabase_url",
+    "VITE_SUPABASE_ANON_KEY": "@supabase_anon_key"
+  },
   "functions": {
     "api/index.js": {
       "includeFiles": "node_modules/sql.js/dist/sql-wasm.wasm"
@@ -6,7 +13,7 @@
   },
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
-    { "source": "/assets/(.*)", "destination": "/client/dist/assets/$1" },
-    { "source": "/(.*)", "destination": "/client/dist/index.html" }
+    { "source": "/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
