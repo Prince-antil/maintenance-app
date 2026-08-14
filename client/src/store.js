@@ -306,6 +306,7 @@ function normalizePMSummary(fields) {
     month: monthName,
     year,
     section,
+    machineId: fields.machineId || '',
     plannedCount,
     doneCount,
     pendingCount,
@@ -1670,23 +1671,25 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
     )
   );
 
-  const newLogs = logs.filter((l) => {
+  // Reject rows with empty machineId to prevent identity collapse
+  const validLogs = logs.filter((l) => {
+    if (!l.machineId) return false;
     const key = l.startTime
       ? `${l.machineId}:st:${l.startTime}`
       : `${l.machineId}:${l.date}:${l.failureCause}`;
     return !existingKeys.has(key);
   });
 
-  state = { ...state, machineBreakdownLogs: [...newLogs, ...state.machineBreakdownLogs] };
+  state = { ...state, machineBreakdownLogs: [...validLogs, ...state.machineBreakdownLogs] };
   commit('machineBreakdownLogs');
-  newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
+  validLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
   scheduleCloudFlush();
 
   // ── Recalculate section-level breakdown summaries for affected sections ──
   // Group all per-machine logs (old + new) by section → period and upsert the
   // section-level summary so Dashboard, Machine Register, and Machine Profile
   // all display identical MTTR / MTBF / downtime figures.
-  const affectedSections = [...new Set(newLogs.map((l) => l.plantSection).filter(Boolean))];
+  const affectedSections = [...new Set(validLogs.map((l) => l.plantSection).filter(Boolean))];
   affectedSections.forEach((section) => {
     const sectionLogs = state.machineBreakdownLogs.filter((l) => l.plantSection === section);
 
@@ -1724,11 +1727,11 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
   });
 
   const detail = unmatchedRows.length
-    ? `${newLogs.length} imported · ${unmatchedRows.length} unmatched machines: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? '...' : ''}`
-    : `${newLogs.length} breakdown logs imported`;
+    ? `${validLogs.length} imported · ${unmatchedRows.length} unmatched machines rejected: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? '...' : ''}`
+    : `${validLogs.length} breakdown logs imported`;
 
   logActivity(userName, 'bulk imported machine breakdown logs', detail, 'breakdown');
-  return { created: newLogs.length, total: rows.length, unmatched: unmatchedRows };
+  return { created: validLogs.length, total: rows.length, unmatched: unmatchedRows };
 }
 
 export function exportBackup() {

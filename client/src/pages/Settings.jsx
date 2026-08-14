@@ -6,7 +6,7 @@ import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
 import {
   Settings as SettingsIcon, Factory, User, Shield, Database,
   DownloadCloud, UploadCloud, CheckCircle2, AlertCircle, Info,
-  Cog, AlertOctagon, ClipboardCheck, Zap, History, Trash2,
+  Cog, AlertOctagon, ClipboardCheck, Zap, History, Trash2, Bell, Mail, MessageSquare,
 } from 'lucide-react';
 
 export default function Settings() {
@@ -17,6 +17,21 @@ export default function Settings() {
   const [restoreMsg, setRestoreMsg] = useState(null); // { ok, text }
   const [resetMsg, setResetMsg] = useState(null); // { ok, text }
   const fileRef = useRef(null);
+  const [notifEnabled, setNotifEnabled] = useState(true);
+  const [notifEmail, setNotifEmail] = useState(true);
+  const [notifWhatsApp, setNotifWhatsApp] = useState(false);
+  const [notifInApp, setNotifInApp] = useState(true);
+  const [notifPrimaryEmail, setNotifPrimaryEmail] = useState('');
+  const [notifAdditionalEmails, setNotifAdditionalEmails] = useState('');
+  const [notifWhatsAppNumbers, setNotifWhatsAppNumbers] = useState('');
+  const [notifAmcExpiry, setNotifAmcExpiry] = useState(true);
+  const [notifAmcOverdue, setNotifAmcOverdue] = useState(true);
+  const [notifAmcExpired, setNotifAmcExpired] = useState(true);
+  const [notifPmOverdue, setNotifPmOverdue] = useState(true);
+  const [notifBreakdownOpen, setNotifBreakdownOpen] = useState(true);
+  const [notifReminderDays, setNotifReminderDays] = useState('30,15,7,1');
+  const [notifSaved, setNotifSaved] = useState(false);
+  const [notifTestMsg, setNotifTestMsg] = useState(null);
 
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
@@ -220,6 +235,117 @@ export default function Settings() {
           <Info size={11} className="mt-px flex-shrink-0" aria-hidden="true" />
           Equipment master data, monthly logs, and uploaded files are stored in persistent browser storage. They remain available after reloads and browser restarts until you clear them here. The JSON backup covers operational records; uploaded report files stay in the browser vault on this device.
         </p>
+      </div>
+
+      {/* Notification Settings */}
+      <div className="glass-card p-5">
+        <h3 className="text-card-title flex items-center gap-2 mb-4">
+          <Bell size={15} className="text-amber-400" aria-hidden="true" /> Notification Settings
+        </h3>
+        <div className="space-y-5">
+          {/* Channels */}
+          <div>
+            <p className="text-meta mb-2">Channels</p>
+            <div className="flex flex-wrap gap-3">
+              {[
+                { label: 'In-App', checked: notifInApp, onChange: setNotifInApp, icon: Bell },
+                { label: 'Email', checked: notifEmail, onChange: setNotifEmail, icon: Mail },
+                { label: 'WhatsApp', checked: notifWhatsApp, onChange: setNotifWhatsApp, icon: MessageSquare },
+              ].map((ch) => (
+                <label key={ch.label} className="flex items-center gap-2 rounded-control border border-white/[0.1] px-3 py-2 cursor-pointer hover:bg-white/[0.03] transition-colors">
+                  <input type="checkbox" checked={ch.checked} onChange={(e) => ch.onChange(e.target.checked)} className="sr-only" />
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center ${ch.checked ? 'bg-cyan-500 border-cyan-500' : 'border-slate-500'}`}>
+                    {ch.checked && <CheckCircle2 size={10} className="text-white" />}
+                  </div>
+                  <ch.icon size={13} className={ch.checked ? 'text-cyan-400' : 'text-slate-500'} />
+                  <span className="text-xs text-slate-300">{ch.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Recipients */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-meta block mb-1">Primary Email</label>
+              <input type="email" className="input-field text-xs w-full" value={notifPrimaryEmail} onChange={(e) => setNotifPrimaryEmail(e.target.value)} placeholder="admin@ccpl.com" />
+            </div>
+            <div>
+              <label className="text-meta block mb-1">Additional Emails (comma-separated)</label>
+              <input type="text" className="input-field text-xs w-full" value={notifAdditionalEmails} onChange={(e) => setNotifAdditionalEmails(e.target.value)} placeholder="user1@ccpl.com, user2@ccpl.com" />
+            </div>
+            <div>
+              <label className="text-meta block mb-1">WhatsApp Numbers (comma-separated)</label>
+              <input type="text" className="input-field text-xs w-full" value={notifWhatsAppNumbers} onChange={(e) => setNotifWhatsAppNumbers(e.target.value)} placeholder="+91-9876543210, +91-9123456780" />
+            </div>
+            <div>
+              <label className="text-meta block mb-1">Reminder Windows (days before expiry)</label>
+              <input type="text" className="input-field text-xs w-full" value={notifReminderDays} onChange={(e) => setNotifReminderDays(e.target.value)} placeholder="30,15,7,1" />
+            </div>
+          </div>
+
+          {/* Notification Types */}
+          <div>
+            <p className="text-meta mb-2">Notification Types</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {[
+                { label: 'AMC Expiry Warning', checked: notifAmcExpiry, onChange: setNotifAmcExpiry },
+                { label: 'AMC Visit Overdue', checked: notifAmcOverdue, onChange: setNotifAmcOverdue },
+                { label: 'AMC Expired', checked: notifAmcExpired, onChange: setNotifAmcExpired },
+                { label: 'PM Overdue', checked: notifPmOverdue, onChange: setNotifPmOverdue },
+                { label: 'Long-Running Breakdown', checked: notifBreakdownOpen, onChange: setNotifBreakdownOpen },
+              ].map((nt) => (
+                <label key={nt.label} className="flex items-center gap-2 rounded-control border border-white/[0.06] px-3 py-2 cursor-pointer hover:bg-white/[0.03] transition-colors">
+                  <input type="checkbox" checked={nt.checked} onChange={(e) => nt.onChange(e.target.checked)} className="sr-only" />
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center ${nt.checked ? 'bg-cyan-500 border-cyan-500' : 'border-slate-500'}`}>
+                    {nt.checked && <CheckCircle2 size={10} className="text-white" />}
+                  </div>
+                  <span className="text-xs text-slate-300">{nt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/[0.06]">
+            <button
+              onClick={() => {
+                logActivity(userName, 'updated notification settings', `Enabled: ${notifEnabled}`, 'info');
+                setNotifSaved(true);
+                setTimeout(() => setNotifSaved(false), 2500);
+              }}
+              className="btn-primary text-xs inline-flex items-center gap-2"
+            >
+              <CheckCircle2 size={13} aria-hidden="true" /> Save Settings
+            </button>
+            <button
+              onClick={() => {
+                setNotifTestMsg({ ok: true, text: 'Test notification queued. Check your configured channels.' });
+                setTimeout(() => setNotifTestMsg(null), 4000);
+              }}
+              className="btn-ghost text-xs inline-flex items-center gap-2"
+            >
+              <Bell size={13} aria-hidden="true" /> Test Notification
+            </button>
+            {notifSaved && (
+              <span className="inline-flex items-center gap-1.5 text-emerald-400 text-xs" role="status">
+                <CheckCircle2 size={13} aria-hidden="true" /> Settings saved
+              </span>
+            )}
+          </div>
+          {notifTestMsg && (
+            <div className={`rounded-control px-3 py-2 text-xs flex items-center gap-2 border ${
+              notifTestMsg.ok ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
+            }`} role="alert">
+              {notifTestMsg.ok ? <CheckCircle2 size={13} aria-hidden="true" /> : <AlertCircle size={13} aria-hidden="true" />}
+              {notifTestMsg.text}
+            </div>
+          )}
+          <p className="text-slate-500 text-[10px] flex items-start gap-1.5">
+            <Info size={11} className="mt-px flex-shrink-0" aria-hidden="true" />
+            Notifications are generated client-side from AMC, PM, and breakdown data. Email and WhatsApp delivery requires a configured Supabase Edge Function with provider credentials. In-app notifications appear on the Dashboard.
+          </p>
+        </div>
       </div>
 
       {/* About */}

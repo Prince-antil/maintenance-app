@@ -14,6 +14,7 @@ import {
   computeKPIs, monthlyBreakdownTrend, equipmentWiseBreakdown,
   paretoTop10, breakdownByDepartment, monthlyEnergy, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution, monthlyEnergyOverview,
+  machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -21,7 +22,7 @@ import {
   Factory, Activity, Wrench, AlertOctagon, ClipboardCheck, ClipboardList,
   FolderArchive, Timer, TimerReset, Gauge, ListChecks, Clock, ChevronRight,
   FileText, User, Zap, BrainCircuit, AlertTriangle, Info, CalendarDays,
-  Sparkles, ArrowRight, Upload, FileSpreadsheet,
+  Sparkles, ArrowRight, Upload, FileSpreadsheet, ShieldCheck, AlertCircle,
 } from 'lucide-react';
 import { ProgressGauge } from '../components/charts.jsx';
 
@@ -36,6 +37,8 @@ const SEVERITY_META = {
   medium: { icon: AlertTriangle, cls: 'text-amber-400 bg-amber-400/10 border-amber-400/25' },
   info: { icon: Info, cls: 'text-cyan-400 bg-cyan-400/10 border-cyan-400/25' },
 };
+
+const round1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
 
 const ACTIVITY_COLORS = {
   breakdown: 'from-red-400/80 to-rose-500/80',
@@ -96,6 +99,11 @@ export default function Dashboard() {
     avail: availabilityTrend(store.breakdowns, store.machines.length),
     mttr: mttrTrend(store.breakdowns),
     mtbf: mtbfTrend(store.breakdowns, store.machines.length),
+    topMachines: machineWiseBreakdown(store.machineBreakdownLogs).slice(0, 10),
+    failureCausePareto: failureCausePareto(store.machineBreakdownLogs),
+    monthlyRegister: machineBreakdownRegister(store.machineBreakdownLogs),
+    activeBreakdowns: currentlyUnderBreakdown(store.machineBreakdownLogs),
+    amcNotifications: buildAMCNotifications(store.amc, store.machines),
   }), [store]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
@@ -357,7 +365,145 @@ export default function Dashboard() {
         <ChartCard title="MTBF Trend" subtitle="Mean time between failures (hrs)" empty={noBDs}>
           <TrendChart data={charts.mtbf} color="#06B6D4" unit=" hrs" />
         </ChartCard>
+        <ChartCard title="Top 10 Machines by Breakdown" subtitle="Machine-level breakdown ranking" empty={!store.machineBreakdownLogs.length}>
+          <ParetoChart data={charts.topMachines} />
+        </ChartCard>
+        <ChartCard title="Failure Cause Pareto" subtitle="Breakdown causes ranked by frequency" empty={!store.machineBreakdownLogs.length}>
+          <ParetoChart data={charts.failureCausePareto} />
+        </ChartCard>
       </section>
+
+      {/* Currently Under Breakdown — real-time active incidents */}
+      {charts.activeBreakdowns.length > 0 && (
+        <section aria-label="Currently under breakdown">
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-control bg-red-400/10 border border-red-400/25 flex items-center justify-center">
+                <AlertOctagon size={17} className="text-red-400" aria-hidden="true" />
+              </div>
+              <div>
+                <h3 className="text-card-title">Currently Under Breakdown</h3>
+                <p className="text-meta">Active breakdown incidents without CLOSED status</p>
+              </div>
+              <span className="badge bg-red-500/15 text-red-400 border border-red-500/30 ml-2">{charts.activeBreakdowns.length}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="enterprise-table w-full min-w-[800px]">
+                <thead>
+                  <tr>
+                    <th>Machine ID</th><th>Machine</th><th>Section</th><th>Start</th><th>Duration</th><th>Failure Cause</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {charts.activeBreakdowns.slice(0, 10).map((log) => {
+                    const startD = log.startTime ? new Date(log.startTime) : null;
+                    const durationHrs = log.startTime && !log.endTime
+                      ? round1((Date.now() - new Date(log.startTime).getTime()) / 3_600_000)
+                      : log.downtimeHours || 0;
+                    return (
+                      <tr key={log.id}
+                        className="cursor-pointer hover:bg-white/[0.03]"
+                        onClick={() => navigate(`/machines/${log.machineId}`)}
+                      >
+                        <td className="text-cyan-400 font-mono text-xs">{log.machineCode || log.machineId}</td>
+                        <td className="text-white font-medium">{log.machineName}</td>
+                        <td className="text-slate-300">{log.plantSection}</td>
+                        <td className="text-slate-300 text-xs whitespace-nowrap">{startD ? startD.toLocaleString('en-GB') : '—'}</td>
+                        <td className="text-amber-300 font-semibold">{durationHrs}h</td>
+                        <td className="text-slate-300 max-w-[200px] truncate" title={log.failureCause}>{log.failureCause || '—'}</td>
+                        <td><span className="badge bg-red-500/15 text-red-400">{log.status}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Monthly Machine Breakdown Register */}
+      {charts.monthlyRegister.length > 0 && (
+        <section aria-label="Monthly machine breakdown register">
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-control bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">
+                <CalendarDays size={17} className="text-amber-400" aria-hidden="true" />
+              </div>
+              <div>
+                <h3 className="text-card-title">Monthly Machine Breakdown Register</h3>
+                <p className="text-meta">Machine-wise breakdown summary by month</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto max-h-[400px]">
+              <table className="enterprise-table w-full min-w-[900px]">
+                <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
+                  <tr>
+                    <th>Month</th><th>Machine ID</th><th>Machine</th><th>Section</th><th>Breakdowns</th><th>Downtime (hrs)</th><th>Main Failure Cause</th><th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {charts.monthlyRegister.slice(0, 30).map((row, i) => {
+                    const [year, month] = row.period.split('-').map(Number);
+                    const monthName = new Date(year, month - 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+                    return (
+                      <tr key={`${row.period}-${row.machineId}-${i}`}
+                        className="cursor-pointer hover:bg-white/[0.03]"
+                        onClick={() => row.machineId && navigate(`/machines/${row.machineId}`)}
+                      >
+                        <td className="text-slate-300 whitespace-nowrap">{monthName}</td>
+                        <td className="text-cyan-400 font-mono text-xs">{row.machineCode || row.machineId}</td>
+                        <td className="text-white font-medium">{row.machineName}</td>
+                        <td className="text-slate-300">{row.plantSection}</td>
+                        <td className="text-slate-200 font-semibold">{row.breakdownCount}</td>
+                        <td className="text-amber-300">{row.downtimeHours}h</td>
+                        <td className="text-slate-300 max-w-[180px] truncate" title={row.mainFailureCause}>{row.mainFailureCause || '—'}</td>
+                        <td>
+                          <span className={`badge ${row.status === 'ACTIVE' ? 'bg-red-500/15 text-red-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
+                            {row.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* AMC Alerts */}
+      {charts.amcNotifications.length > 0 && (
+        <section aria-label="AMC alerts">
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-control bg-violet-400/10 border border-violet-400/25 flex items-center justify-center">
+                <ShieldCheck size={17} className="text-violet-400" aria-hidden="true" />
+              </div>
+              <div>
+                <h3 className="text-card-title">AMC Alerts</h3>
+                <p className="text-meta">Upcoming AMC expiries and service visit overdue alerts</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {charts.amcNotifications.slice(0, 8).map((n) => (
+                <div key={n.id} className={`flex items-center gap-3 rounded-control border px-4 py-2.5 ${
+                  n.type === 'danger' ? 'bg-red-500/10 border-red-500/25 text-red-300' :
+                  n.type === 'warning' ? 'bg-amber-500/10 border-amber-500/25 text-amber-300' :
+                  'bg-cyan-500/10 border-cyan-500/25 text-cyan-300'
+                }`}>
+                  <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold">{n.title}</p>
+                    <p className="text-[11px] opacity-80">{n.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Document modules */}
       <section aria-label="Report modules">

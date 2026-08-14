@@ -15,10 +15,11 @@ import {
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
 
-function SummaryModal({ userName, onClose, sections }) {
+function SummaryModal({ userName, onClose, sections, machines }) {
   const [form, setForm] = useState({
     period: currentPeriod(),
     section: '',
+    machineId: '',
     plannedCount: '',
     doneCount: '',
     pendingCount: '',
@@ -28,13 +29,18 @@ function SummaryModal({ userName, onClose, sections }) {
   const [error, setError] = useState('');
   const set = (key) => (event) => setForm((prev) => ({ ...prev, [key]: event.target.value }));
 
+  const filteredMachines = useMemo(() => {
+    if (!form.section) return machines || [];
+    return (machines || []).filter((m) => m.section === form.section);
+  }, [form.section, machines]);
+
   const handleSubmit = (event) => {
     event.preventDefault();
     if (!form.period || !form.section) {
       setError('Reporting month and plant section are required.');
       return;
     }
-    addPM(form, userName);
+    addPM({ ...form, machineId: form.machineId || '' }, userName);
     onClose();
   };
 
@@ -59,6 +65,13 @@ function SummaryModal({ userName, onClose, sections }) {
             <select id="pm-section" className="select-field" value={form.section} onChange={set('section')}>
               <option value="">Select section...</option>
               {sections.map((section) => <option key={section} value={section}>{section}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-machine">Machine (optional)</label>
+            <select id="pm-machine" className="select-field" value={form.machineId} onChange={set('machineId')}>
+              <option value="">All machines in section</option>
+              {filteredMachines.map((m) => <option key={m.id} value={m.id}>{m.name || m.machineCode || m.id}</option>)}
             </select>
           </div>
           <div>
@@ -393,7 +406,7 @@ export default function PreventiveMaintenance() {
         </div>
       )}
 
-      {showNew && <SummaryModal userName={userName} sections={sections} onClose={() => setShowNew(false)} />}
+      {showNew && <SummaryModal userName={userName} sections={sections} machines={machines} onClose={() => setShowNew(false)} />}
       {viewing && <DetailModal row={viewing} onClose={() => setViewing(null)} />}
       {editing && isAdmin && (
         <EditPMModal row={editing} userName={userName} onClose={() => setEditing(null)} />

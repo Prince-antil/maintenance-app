@@ -16,18 +16,25 @@ import {
   mtbfTrend,
   mttrTrend,
   paretoTop10,
+  paretoTop10Machines,
   pmStats,
   summaryMonthKey,
+  failureCausePareto,
+  machineBreakdownRegister,
+  amcOverallStats,
+  currentlyUnderBreakdown,
 } from '../analytics.js';
 import { api } from '../api.js';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import { COMPANY_NAME } from '../constants.js';
 import {
-  AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
+  AlertCircle, AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
   Factory, FileBarChart2, FileSpreadsheet, FileText, Gauge, Lightbulb,
   Pencil, Printer, ShieldCheck, Timer, TimerReset, Trash2, TrendingUp, X, Zap,
+  ChevronDown,
 } from 'lucide-react';
+import { PieDonutChart, ChartCard } from '../components/AnalyticsCharts.jsx';
 
 const cellValue = (col, row) => String(col.value ? col.value(row) : row[col.key] ?? '');
 
@@ -348,6 +355,9 @@ export default function Reports() {
   const [active, setActive] = useState('equipment');
   const [serverDocs, setServerDocs] = useState([]);
   const [editRow, setEditRow] = useState(null); // { reportId, row }
+  const [amcSectionFilter, setAmcSectionFilter] = useState('');
+  const [amcVendorFilter, setAmcVendorFilter] = useState('');
+  const [amcStatusFilter, setAmcStatusFilter] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const userName = user?.full_name || user?.username || 'Admin';
@@ -538,6 +548,19 @@ export default function Reports() {
         rows: paretoTop10(breakdowns),
       },
       {
+        id: 'top10-machines',
+        label: 'Top 10 Machine Breakdowns',
+        icon: AlertOctagon,
+        desc: 'Pareto ranking of individual machines by breakdown count',
+        columns: [
+          { key: 'label', label: 'Machine' },
+          { key: 'count', label: 'Breakdowns' },
+          { key: 'downtime', label: 'Downtime (hrs)' },
+          { label: 'Cumulative %', value: (row) => `${row.cumulative}%` },
+        ],
+        rows: paretoTop10Machines(store.machineBreakdownLogs),
+      },
+      {
         id: 'section-split',
         label: 'Breakdown by Section',
         icon: AlertOctagon,
@@ -659,8 +682,79 @@ export default function Reports() {
         ],
         rows: monthlyEnergy(energy, 12),
       },
+      {
+        id: 'failure-cause-pareto',
+        label: 'Failure Cause Pareto',
+        icon: AlertOctagon,
+        desc: 'Breakdown causes ranked by frequency',
+        columns: [
+          { key: 'label', label: 'Failure Cause' },
+          { key: 'count', label: 'Breakdowns' },
+          { key: 'downtime', label: 'Downtime (hrs)' },
+          { label: '% of Total', value: (row) => `${row.percent || 0}%` },
+          { label: 'Cumulative %', value: (row) => `${row.cumulative}%` },
+        ],
+        rows: failureCausePareto(store.machineBreakdownLogs),
+      },
+      {
+        id: 'monthly-machine-register',
+        label: 'Monthly Machine Breakdown Register',
+        icon: CalendarDays,
+        desc: 'Machine-wise breakdown register by month',
+        columns: [
+          { key: 'period', label: 'Month' },
+          { key: 'machineCode', label: 'Machine ID' },
+          { key: 'machineName', label: 'Machine' },
+          { key: 'plantSection', label: 'Section' },
+          { key: 'breakdownCount', label: 'Breakdowns' },
+          { key: 'downtimeHours', label: 'Downtime (hrs)' },
+          { key: 'mainFailureCause', label: 'Main Failure Cause' },
+          { key: 'status', label: 'Status' },
+        ],
+        rows: machineBreakdownRegister(store.machineBreakdownLogs),
+      },
+      {
+        id: 'active-breakdowns',
+        label: 'Currently Under Breakdown',
+        icon: AlertCircle,
+        desc: 'Active breakdown incidents without CLOSED status',
+        columns: [
+          { key: 'machineCode', label: 'Machine ID' },
+          { key: 'machineName', label: 'Machine' },
+          { key: 'plantSection', label: 'Section' },
+          { key: 'date', label: 'Date' },
+          { key: 'downtimeHours', label: 'Downtime (hrs)' },
+          { key: 'failureCause', label: 'Failure Cause' },
+          { key: 'status', label: 'Status' },
+        ],
+        rows: currentlyUnderBreakdown(store.machineBreakdownLogs),
+      },
+      {
+        id: 'amc-overview',
+        label: 'AMC Overview',
+        icon: ShieldCheck,
+        desc: 'Annual maintenance contract management overview',
+        columns: [
+          { key: 'machineCode', label: 'Machine ID' },
+          { key: 'machineName', label: 'Machine' },
+          { key: 'machineSection', label: 'Section' },
+          { key: 'vendorName', label: 'Vendor' },
+          { key: 'contractStartDate', label: 'AMC Start' },
+          { key: 'contractEndDate', label: 'AMC End' },
+          { label: 'Days Remaining', value: (row) => row.daysRemaining != null ? String(row.daysRemaining) : '—' },
+          { key: 'totalVisitsAgreed', label: 'Total Visits' },
+          { key: 'completedVisits', label: 'Completed Visits' },
+          { label: 'Expected Visits', value: (row) => String(row.expectedVisits || 0) },
+          { label: 'Status', value: (row) => row.calculatedStatus || 'ACTIVE' },
+        ],
+        rows: amcOverallStats(store.amc, store.machines).records.filter((r) =>
+          (!amcSectionFilter || r.machineSection === amcSectionFilter) &&
+          (!amcVendorFilter || r.vendorName === amcVendorFilter) &&
+          (!amcStatusFilter || r.calculatedStatus === amcStatusFilter)
+        ),
+      },
     ];
-  }, [store, serverDocs, machines, breakdowns, pms, energy]);
+  }, [store, serverDocs, machines, breakdowns, pms, energy, amcSectionFilter, amcVendorFilter, amcStatusFilter]);
 
   const report = REPORTS.find((item) => item.id === active) || REPORTS[0];
   const filename = report.label.toLowerCase().replace(/\s+/g, '-');
@@ -694,6 +788,124 @@ export default function Reports() {
           );
         })}
       </div>
+
+      {/* ── AMC Overview KPIs, Charts & Filters ── */}
+      {active === 'amc-overview' && (() => {
+        const { records: amcRecords, stats: amcStats } = amcOverallStats(store.amc, store.machines);
+        const totalCompletedVisits = amcRecords.reduce((s, r) => s + (r.completedVisits || 0), 0);
+        const totalExpectedVisits = amcRecords.reduce((s, r) => s + (r.expectedVisits || 0), 0);
+        const totalPendingVisits = Math.max(0, totalExpectedVisits - totalCompletedVisits);
+        const vendors = [...new Set(amcRecords.map((r) => r.vendorName).filter(Boolean))];
+        const sections = [...new Set(amcRecords.map((r) => r.machineSection).filter(Boolean))];
+        const statusData = [
+          { label: 'Active', value: amcStats.active, color: '#10B981' },
+          { label: 'Expiring Soon', value: amcStats.expiringSoon, color: '#F59E0B' },
+          { label: 'Expired', value: amcStats.expired, color: '#EF4444' },
+          { label: 'Visit Overdue', value: amcStats.visitOverdue, color: '#8B5CF6' },
+        ].filter((d) => d.value > 0);
+
+        const filteredAmcRecords = amcRecords.filter((r) =>
+          (!amcSectionFilter || r.machineSection === amcSectionFilter) &&
+          (!amcVendorFilter || r.vendorName === amcVendorFilter) &&
+          (!amcStatusFilter || r.calculatedStatus === amcStatusFilter)
+        );
+
+        const AMC_KPI = [
+          { label: 'Total Contracts', value: amcStats.total, color: 'text-cyan-400', bg: 'bg-cyan-400/10 border-cyan-400/25' },
+          { label: 'Active', value: amcStats.active, color: 'text-emerald-400', bg: 'bg-emerald-400/10 border-emerald-400/25' },
+          { label: 'Expiring Soon', value: amcStats.expiringSoon, color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/25' },
+          { label: 'Expired', value: amcStats.expired, color: 'text-red-400', bg: 'bg-red-400/10 border-red-400/25' },
+          { label: 'Visit Overdue', value: amcStats.visitOverdue, color: 'text-violet-400', bg: 'bg-violet-400/10 border-violet-400/25' },
+          { label: 'Visits Completed', value: totalCompletedVisits, color: 'text-emerald-400', bg: 'bg-emerald-400/10 border-emerald-400/25' },
+          { label: 'Visits Pending', value: totalPendingVisits, color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/25' },
+        ];
+
+        return (
+          <div className="space-y-4">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+              {AMC_KPI.map((kpi) => (
+                <div key={kpi.label} className={`rounded-control border p-3 text-center ${kpi.bg}`}>
+                  <p className={`text-xl font-bold leading-none ${kpi.color}`}>{kpi.value}</p>
+                  <p className="text-slate-400 text-[10px] mt-1.5 leading-tight">{kpi.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Charts + Filters row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <ChartCard title="AMC Status Distribution" subtitle="Contract status breakdown" height={220} empty={statusData.length === 0}>
+                <PieDonutChart data={statusData} donut centerLabel={amcStats.total} centerSub="Contracts" />
+              </ChartCard>
+
+              {/* Filters */}
+              <div className="glass-card p-5 flex flex-col justify-center">
+                <h4 className="text-card-title mb-3">Filters</h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-meta block mb-1">Section</label>
+                    <select value={amcSectionFilter} onChange={(e) => setAmcSectionFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All Sections</option>
+                      {sections.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-meta block mb-1">Vendor</label>
+                    <select value={amcVendorFilter} onChange={(e) => setAmcVendorFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All Vendors</option>
+                      {vendors.map((v) => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-meta block mb-1">Status</label>
+                    <select value={amcStatusFilter} onChange={(e) => setAmcStatusFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All Statuses</option>
+                      <option value="ACTIVE">Active</option>
+                      <option value="EXPIRING SOON">Expiring Soon</option>
+                      <option value="EXPIRED">Expired</option>
+                      <option value="VISIT OVERDUE">Visit Overdue</option>
+                    </select>
+                  </div>
+                  {(amcSectionFilter || amcVendorFilter || amcStatusFilter) && (
+                    <button onClick={() => { setAmcSectionFilter(''); setAmcVendorFilter(''); setAmcStatusFilter(''); }} className="btn-ghost text-xs w-full">Clear Filters</button>
+                  )}
+                </div>
+                <p className="text-slate-500 text-[10px] mt-3">{filteredAmcRecords.length} of {amcRecords.length} contracts shown</p>
+              </div>
+
+              {/* Expiry Timeline summary */}
+              <div className="glass-card p-5 flex flex-col">
+                <h4 className="text-card-title mb-3">Expiry Timeline</h4>
+                <div className="space-y-2 flex-1">
+                  {amcRecords
+                    .filter((r) => r.daysRemaining != null)
+                    .sort((a, b) => a.daysRemaining - b.daysRemaining)
+                    .slice(0, 6)
+                    .map((r) => {
+                      const pct = r.totalVisitsAgreed > 0 ? Math.round((r.completedVisits / r.totalVisitsAgreed) * 100) : 0;
+                      const daysCls = r.daysRemaining < 0 ? 'text-red-400' : r.daysRemaining <= 30 ? 'text-amber-400' : 'text-emerald-400';
+                      return (
+                        <div key={r.id} className="flex items-center gap-2 text-xs">
+                          <span className={`font-semibold w-16 text-right ${daysCls}`}>{r.daysRemaining}d</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white truncate">{r.machineName}</p>
+                            <div className="w-full bg-white/10 rounded-full h-1.5 mt-0.5">
+                              <div className="bg-cyan-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                          <span className="text-slate-500 w-10 text-right">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  {amcRecords.filter((r) => r.daysRemaining != null).length === 0 && (
+                    <p className="text-slate-500 text-xs">No contracts with expiry dates</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="glass-card overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-white/[0.06]">

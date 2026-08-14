@@ -256,6 +256,29 @@ export function paretoTop10(breakdowns) {
   });
 }
 
+export function machineWiseBreakdown(machineBreakdownLogs) {
+  const counts = {};
+  (machineBreakdownLogs || []).forEach((row) => {
+    const key = row.machineName || row.machineCode || row.machineId || 'Unknown';
+    if (!counts[key]) counts[key] = { label: key, count: 0, downtime: 0 };
+    counts[key].count += 1;
+    counts[key].downtime += row.downtimeHours || 0;
+  });
+  return Object.values(counts)
+    .map((row) => ({ ...row, downtime: round1(row.downtime) }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function paretoTop10Machines(machineBreakdownLogs) {
+  const rows = machineWiseBreakdown(machineBreakdownLogs).slice(0, 10);
+  const total = rows.reduce((sum, row) => sum + row.count, 0) || 1;
+  let cumulative = 0;
+  return rows.map((row) => {
+    cumulative += row.count;
+    return { ...row, cumulative: Math.round((cumulative / total) * 100) };
+  });
+}
+
 export function breakdownByDepartment(breakdowns) {
   return equipmentWiseBreakdown(breakdowns).map((row) => ({ label: row.label, value: row.count }));
 }
@@ -447,4 +470,253 @@ export function buildInsights(state) {
   });
 
   return insights;
+}
+
+export function failureCausePareto(machineBreakdownLogs, monthFilter = null) {
+  const causeCounts = {};
+  const logs = monthFilter
+    ? (machineBreakdownLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthFilter)
+    : (machineBreakdownLogs || []);
+
+  logs.forEach((log) => {
+    const raw = String(log.failureCause || '').trim();
+    if (!raw) return;
+    const normalized = normalizeCauseCategory(raw);
+    if (!causeCounts[normalized]) {
+      causeCounts[normalized] = { label: normalized, count: 0, downtime: 0 };
+    }
+    causeCounts[normalized].count += 1;
+    causeCounts[normalized].downtime += log.downtimeHours || 0;
+  });
+
+  const rows = Object.values(causeCounts)
+    .map((r) => ({ ...r, downtime: round1(r.downtime) }))
+    .sort((a, b) => b.count - a.count);
+
+  const total = rows.reduce((sum, r) => sum + r.count, 0) || 1;
+  let cumulative = 0;
+  return rows.map((r) => {
+    cumulative += r.count;
+    return {
+      ...r,
+      percent: round1((r.count / total) * 100),
+      cumulative: Math.round((cumulative / total) * 100),
+    };
+  });
+}
+
+const CAUSE_CATEGORY_MAP = {
+  mechanical: 'Mechanical',
+  electrical: 'Electrical',
+  instrumentation: 'Instrumentation',
+  pneumatic: 'Pneumatic',
+  process: 'Process',
+  utility: 'Utility',
+  other: 'Other',
+};
+
+const CAUSE_KEYWORDS = [
+  { keywords: ['bearing', 'gear', 'shaft', 'coupling', 'alignment', 'vibration', 'lubrication', 'seal', 'gasket', 'valve', 'pump', 'impeller', 'spring', 'mechanical', 'wear', 'breakage', 'crack', 'bolt', 'nut', 'weld', 'hydraulic', 'filter', 'belt', 'chain', 'sprocket', 'roller', 'motor mount', 'structural'], category: 'Mechanical' },
+  { keywords: ['electrical', 'wire', 'cable', 'relay', 'contactor', 'fuse', 'circuit', 'switch', 'panel', 'motor', 'inverter', 'vfd', 'plc', 'sensor', 'thermocouple', 'thermostat', 'overload', 'short circuit', 'earth fault', 'power supply', 'transformer', 'capacitor', 'breaker', 'mccb', 'mcb'], category: 'Electrical' },
+  { keywords: ['instrument', 'transmitter', 'controller', 'indicator', 'calibration', 'drift', 'display', 'hmi', 'scada', 'signal', 'communication', 'profibus', 'modbus', 'analog', 'digital'], category: 'Instrumentation' },
+  { keywords: ['pneumatic', 'air', 'compressor', 'solenoid', 'cylinder', 'air valve', 'air filter', 'regulator', 'fRL', 'actuator'], category: 'Pneumatic' },
+  { keywords: ['process', 'temperature', 'pressure', 'flow', 'level', 'viscosity', 'concentration', 'ph', 'reaction', 'batch', 'recipe', 'mixing', 'heating', 'cooling', 'drying', 'screening'], category: 'Process' },
+  { keywords: ['utility', 'water', 'steam', 'chilled', 'cooling tower', 'boiler', 'compressor air', 'plant air', 'vacuum', 'drain', 'sewage'], category: 'Utility' },
+];
+
+function normalizeCauseCategory(raw) {
+  const lower = raw.toLowerCase().trim();
+  if (!lower) return 'Other';
+  for (const rule of CAUSE_KEYWORDS) {
+    if (rule.keywords.some((kw) => lower.includes(kw))) return rule.category;
+  }
+  const direct = CAUSE_CATEGORY_MAP[lower];
+  if (direct) return direct;
+  for (const [, canonical] of Object.entries(CAUSE_CATEGORY_MAP)) {
+    if (lower.startsWith(canonical.toLowerCase())) return canonical;
+  }
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+export function machineBreakdownRegister(machineBreakdownLogs, monthFilter = null) {
+  const logs = monthFilter
+    ? (machineBreakdownLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthFilter)
+    : (machineBreakdownLogs || []);
+
+  const grouped = {};
+  logs.forEach((log) => {
+    const period = (log.date || '').slice(0, 7);
+    if (!period) return;
+    const machineKey = log.machineId || log.machineCode || log.machineName || 'Unknown';
+    const key = `${period}::${machineKey}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        period,
+        machineId: log.machineId || '',
+        machineCode: log.machineCode || '',
+        machineName: log.machineName || '',
+        plantSection: log.plantSection || '',
+        breakdownCount: 0,
+        downtimeHours: 0,
+        mainFailureCause: '',
+        causes: {},
+        hasOpen: false,
+      };
+    }
+    grouped[key].breakdownCount += 1;
+    grouped[key].downtimeHours += log.downtimeHours || 0;
+    const cause = String(log.failureCause || '').trim();
+    if (cause) {
+      grouped[key].causes[cause] = (grouped[key].causes[cause] || 0) + 1;
+    }
+    if (log.status !== 'closed') grouped[key].hasOpen = true;
+  });
+
+  return Object.values(grouped)
+    .map((g) => {
+      const mainCause = Object.entries(g.causes).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      return {
+        ...g,
+        downtimeHours: round1(g.downtimeHours),
+        mainFailureCause: mainCause,
+        status: g.hasOpen ? 'ACTIVE' : 'CLOSED',
+      };
+    })
+    .sort((a, b) => b.period.localeCompare(a.period) || b.breakdownCount - a.breakdownCount);
+}
+
+export function currentlyUnderBreakdown(machineBreakdownLogs) {
+  return (machineBreakdownLogs || [])
+    .filter((log) => log.status && log.status !== 'closed')
+    .sort((a, b) => (b.startTime || b.date || '').localeCompare(a.startTime || a.date || ''));
+}
+
+export function amcOverallStats(amcRecords, machines) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const records = (amcRecords || []).map((r) => {
+    const endDate = r.contractEndDate ? new Date(r.contractEndDate) : null;
+    const startDate = r.contractStartDate ? new Date(r.contractStartDate) : null;
+    const daysRemaining = endDate
+      ? Math.ceil((endDate.setHours(0,0,0,0) - today.getTime()) / (1000*60*60*24))
+      : null;
+    const exp = r.totalVisitsAgreed > 0
+      ? Math.round(((elapsedPct(r.contractStartDate, r.contractEndDate)) / 100) * r.totalVisitsAgreed)
+      : 0;
+    const visitOverdue = r.totalVisitsAgreed > 0 && r.completedVisits < exp;
+    let status = 'ACTIVE';
+    if (daysRemaining !== null) {
+      if (daysRemaining < 0) status = 'EXPIRED';
+      else if (daysRemaining <= 30) status = 'EXPIRING SOON';
+    }
+    if (visitOverdue) status = 'VISIT OVERDUE';
+
+    const machine = (machines || []).find((m) => m.id === r.machineId);
+    return {
+      ...r,
+      machineName: machine?.name || r.machineId,
+      machineCode: machine?.machineCode || r.machineId,
+      machineSection: machine?.section || '',
+      daysRemaining,
+      expectedVisits: exp,
+      visitOverdue,
+      calculatedStatus: status,
+    };
+  });
+
+  const stats = {
+    total: records.length,
+    active: records.filter((r) => r.calculatedStatus === 'ACTIVE').length,
+    expiringSoon: records.filter((r) => r.calculatedStatus === 'EXPIRING SOON').length,
+    expired: records.filter((r) => r.calculatedStatus === 'EXPIRED').length,
+    visitOverdue: records.filter((r) => r.calculatedStatus === 'VISIT OVERDUE').length,
+  };
+
+  return { records, stats };
+}
+
+function elapsedPct(startStr, endStr) {
+  if (!startStr || !endStr) return 0;
+  const start = new Date(startStr).getTime();
+  const end = new Date(endStr).getTime();
+  const now = Date.now();
+  if (end <= start) return 0;
+  return Math.min(100, Math.max(0, ((now - start) / (end - start)) * 100));
+}
+
+export function buildAMCNotifications(amcRecords, machines) {
+  const notifications = [];
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  (amcRecords || []).forEach((r) => {
+    const machine = (machines || []).find((m) => m.id === r.machineId);
+    const machineName = machine?.name || r.machineId;
+    const endDate = r.contractEndDate ? new Date(r.contractEndDate) : null;
+    const daysRemaining = endDate
+      ? Math.ceil((new Date(endDate).setHours(0,0,0,0) - today.getTime()) / (1000*60*60*24))
+      : null;
+    const exp = r.totalVisitsAgreed > 0
+      ? Math.round((elapsedPct(r.contractStartDate, r.contractEndDate) / 100) * r.totalVisitsAgreed)
+      : 0;
+
+    if (daysRemaining !== null) {
+      if (daysRemaining < 0) {
+        notifications.push({
+          id: `amc-expired-${r.id}`,
+          type: 'danger',
+          title: 'AMC Expired',
+          detail: `AMC for ${machineName} expired ${Math.abs(daysRemaining)} days ago`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      } else if (daysRemaining === 0) {
+        notifications.push({
+          id: `amc-today-${r.id}`,
+          type: 'danger',
+          title: 'AMC Expires Today',
+          detail: `AMC for ${machineName} expires today`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      } else if (daysRemaining <= 7) {
+        notifications.push({
+          id: `amc-7d-${r.id}`,
+          type: 'warning',
+          title: 'AMC Due in 7 Days',
+          detail: `AMC for ${machineName} expires in ${daysRemaining} days`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      } else if (daysRemaining <= 15) {
+        notifications.push({
+          id: `amc-15d-${r.id}`,
+          type: 'warning',
+          title: 'AMC Due in 15 Days',
+          detail: `AMC for ${machineName} expires in ${daysRemaining} days`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      } else if (daysRemaining <= 30) {
+        notifications.push({
+          id: `amc-30d-${r.id}`,
+          type: 'info',
+          title: 'AMC Due in 30 Days',
+          detail: `AMC for ${machineName} expires in ${daysRemaining} days`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      }
+    }
+
+    if (r.totalVisitsAgreed > 0) {
+      const expected = exp;
+      if (r.completedVisits < expected) {
+        notifications.push({
+          id: `amc-visit-overdue-${r.id}`,
+          type: 'warning',
+          title: 'Service Visit Overdue',
+          detail: `AMC for ${machineName}: ${r.completedVisits}/${expected} visits completed`,
+          ts: r.updatedAt || r.createdAt,
+        });
+      }
+    }
+  });
+
+  return notifications.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
