@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
 
-const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'machines'];
+const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'machines', 'machinePmRecords'];
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -118,6 +118,28 @@ export const IMPORT_MODULES = {
       },
     ],
   },
+  machinePmRecords: {
+    id: 'machinePmRecords',
+    label: 'Machine-wise PM Records (Per-Machine)',
+    shortLabel: 'PM Records',
+    templateFilename: 'Machine_PM_Records_Template.xlsx',
+    defaultCategory: 'Monthly PM Report',
+    required: ['machineName'],
+    sampleRows: [
+      {
+        'Machine Code': 'MC-101',
+        'Machine Name': 'Filling Machine #1',
+        'Plant Section': 'Herbi EC Packaging',
+        'PM Date': new Date().toISOString().slice(0, 10),
+        'PM Type': 'Preventive',
+        'Task': 'Lubrication and filter replacement',
+        'Status': 'Completed',
+        'Action Taken': 'Grease applied, filter replaced',
+        'Technician': 'Ravi Kumar',
+        'Remarks': '',
+      },
+    ],
+  },
 };
 
 const FIELD_ALIASES = {
@@ -188,6 +210,19 @@ const FIELD_ALIASES = {
     failureCause:  ['failurecause', 'cause', 'failurereason', 'problem', 'fault', 'description'],
     actionTaken:   ['actiontaken', 'action', 'repair', 'correctiveaction', 'resolution', 'remedy'],
     status:        ['status', 'breakdownstatus', 'closurestatus'],
+    remarks:       ['remarks', 'notes', 'comment', 'comments'],
+  },
+  machinePmRecords: {
+    machineCode:   ['machinecode', 'machineid', 'equipmentid', 'assetid', 'equipmentcode'],
+    machineName:   ['machinename', 'machine', 'equipment', 'equipmentname', 'assetname'],
+    plantSection:  ['plantsection', 'section', 'department'],
+    pmDate:        ['pmdate', 'date', 'completiondate', 'donedate', 'pm date'],
+    pmType:        ['pmtype', 'type', 'maintenance type', 'pm type'],
+    task:          ['task', 'description', 'work', 'job', 'activity', 'jobdescription'],
+    status:        ['status', 'pmstatus', 'completionstatus'],
+    completed:     ['completed', 'iscompleted', 'done'],
+    actionTaken:   ['actiontaken', 'action', 'correctiveaction', 'resolution'],
+    technician:    ['technician', 'assignedto', 'doneby', 'engineer'],
     remarks:       ['remarks', 'notes', 'comment', 'comments'],
   },
 };
@@ -419,6 +454,28 @@ function parseModuleRow(moduleId, row, mapping, index) {
       failureCause: String(getCell(row, mapping, 'failureCause') || '').trim(),
       actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
       status: String(getCell(row, mapping, 'status') || 'closed').trim().toLowerCase() || 'closed',
+      remarks: String(getCell(row, mapping, 'remarks') || '').trim(),
+    };
+  }
+
+  if (moduleId === 'machinePmRecords') {
+    const mName = String(getCell(row, mapping, 'machineName') || '').trim();
+    if (!mName) return { error: `Row ${index}: machine name is required.` };
+
+    const pmDateRaw = parseDateValue(getCell(row, mapping, 'pmDate'));
+    const pmDate = pmDateRaw ? pmDateRaw.slice(0, 10) : new Date().toISOString().slice(0, 10);
+
+    return {
+      machineCode: String(getCell(row, mapping, 'machineCode') || '').trim(),
+      machineName: mName,
+      plantSection: String(getCell(row, mapping, 'plantSection') || '').trim(),
+      pmDate,
+      pmType: String(getCell(row, mapping, 'pmType') || 'Preventive').trim() || 'Preventive',
+      task: String(getCell(row, mapping, 'task') || '').trim(),
+      status: String(getCell(row, mapping, 'status') || 'completed').trim().toLowerCase() || 'completed',
+      completed: String(getCell(row, mapping, 'completed') || '').toLowerCase() !== 'false',
+      actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
+      technician: String(getCell(row, mapping, 'technician') || '').trim(),
       remarks: String(getCell(row, mapping, 'remarks') || '').trim(),
     };
   }

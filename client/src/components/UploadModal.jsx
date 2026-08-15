@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { CATEGORIES, PLANT_SECTIONS, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
 import { IMPORT_MODULES, downloadTemplate, inferUploadMeta, parseImportFile } from '../bulkImport.js';
-import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk } from '../store.js';
+import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk } from '../store.js';
 
 const BULK_ALLOWED_EXT = ['.xlsx', '.xls', '.csv'];
 const MODULE_OPTIONS = [
@@ -19,6 +19,7 @@ const importers = {
   energy: importEnergyBulk,
   machines: importMachinesBulk,
   machineBreakdownLogs: importMachineBreakdownLogsBulk,
+  machinePmRecords: importMachinePmRecordsBulk,
 };
 
 function ProgressBar({ value, label }) {

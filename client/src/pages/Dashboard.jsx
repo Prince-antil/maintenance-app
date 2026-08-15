@@ -15,6 +15,7 @@ import {
   paretoTop10, breakdownByDepartment, monthlyEnergy, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution, monthlyEnergyOverview,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
+  lastNMonths, monthKey,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -23,6 +24,7 @@ import {
   FolderArchive, Timer, TimerReset, Gauge, ListChecks, Clock, ChevronRight,
   FileText, User, Zap, BrainCircuit, AlertTriangle, Info, CalendarDays,
   Sparkles, ArrowRight, Upload, FileSpreadsheet, ShieldCheck, AlertCircle,
+  Filter,
 } from 'lucide-react';
 import { ProgressGauge } from '../components/charts.jsx';
 
@@ -67,6 +69,7 @@ export default function Dashboard() {
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [periodFilter, setPeriodFilter] = useState('all');
 
   useEffect(() => {
     (async () => {
@@ -87,24 +90,56 @@ export default function Dashboard() {
 
   // ---- everything below auto-recomputes when store data changes ----
   const kpi = useMemo(() => computeKPIs(store, totalFiles), [store, totalFiles]);
+
+  // Period filter for charts
+  const availablePeriods = useMemo(() => {
+    const allPeriods = new Set();
+    store.breakdowns.forEach((r) => r.period && allPeriods.add(r.period));
+    store.pms.forEach((r) => r.period && allPeriods.add(r.period));
+    store.machineBreakdownLogs.forEach((r) => {
+      if (r.date) allPeriods.add(String(r.date).slice(0, 7));
+    });
+    store.energy.forEach((r) => {
+      if (r.date) allPeriods.add(String(r.date).slice(0, 7));
+    });
+    return [...allPeriods].sort().reverse();
+  }, [store]);
+
+  const filteredBreakdowns = useMemo(() =>
+    periodFilter === 'all' ? store.breakdowns : store.breakdowns.filter((r) => r.period === periodFilter),
+    [store.breakdowns, periodFilter]
+  );
+  const filteredPMs = useMemo(() =>
+    periodFilter === 'all' ? store.pms : store.pms.filter((r) => r.period === periodFilter),
+    [store.pms, periodFilter]
+  );
+  const filteredEnergy = useMemo(() =>
+    periodFilter === 'all' ? store.energy : store.energy.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [store.energy, periodFilter]
+  );
+  const filteredMachineBDLogs = useMemo(() =>
+    periodFilter === 'all' ? store.machineBreakdownLogs : store.machineBreakdownLogs.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [store.machineBreakdownLogs, periodFilter]
+  );
+
   const charts = useMemo(() => ({
-    bdTrend: monthlyBreakdownTrend(store.breakdowns),
-    equipment: equipmentWiseBreakdown(store.breakdowns).slice(0, 8),
-    pareto: paretoTop10(store.breakdowns),
-    dept: breakdownByDepartment(store.breakdowns),
-    energy: monthlyEnergy(store.energy),
-    energyOverview: monthlyEnergyOverview(store.energy),
-    health: healthDistribution(store.machines, store.breakdowns, store.pms),
+    bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
+    equipment: equipmentWiseBreakdown(filteredBreakdowns).slice(0, 8),
+    pareto: paretoTop10(filteredBreakdowns),
+    dept: breakdownByDepartment(filteredBreakdowns),
+    energy: monthlyEnergy(filteredEnergy),
+    energyOverview: monthlyEnergyOverview(filteredEnergy),
+    health: healthDistribution(store.machines, filteredBreakdowns, filteredPMs),
     machineStatus: machineStatusDistribution(store.machines),
-    avail: availabilityTrend(store.breakdowns, store.machines.length),
-    mttr: mttrTrend(store.breakdowns),
-    mtbf: mtbfTrend(store.breakdowns, store.machines.length),
-    topMachines: machineWiseBreakdown(store.machineBreakdownLogs).slice(0, 10),
-    failureCausePareto: failureCausePareto(store.machineBreakdownLogs),
-    monthlyRegister: machineBreakdownRegister(store.machineBreakdownLogs),
+    avail: availabilityTrend(filteredBreakdowns, store.machines.length),
+    mttr: mttrTrend(filteredBreakdowns),
+    mtbf: mtbfTrend(filteredBreakdowns, store.machines.length),
+    topMachines: machineWiseBreakdown(filteredMachineBDLogs).slice(0, 10),
+    failureCausePareto: failureCausePareto(filteredMachineBDLogs),
+    monthlyRegister: machineBreakdownRegister(filteredMachineBDLogs),
     activeBreakdowns: currentlyUnderBreakdown(store.machineBreakdownLogs),
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
-  }), [store]);
+  }), [filteredBreakdowns, filteredPMs, filteredEnergy, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
@@ -188,6 +223,43 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      {/* Period filter bar */}
+      {availablePeriods.length > 1 && (
+        <section aria-label="Period filter" className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <Filter size={13} aria-hidden="true" />
+            <span>Filter Period:</span>
+          </div>
+          <button
+            onClick={() => setPeriodFilter('all')}
+            className={`text-xs px-3 py-1.5 rounded-control border transition-all ${
+              periodFilter === 'all'
+                ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                : 'bg-white/[0.03] text-slate-400 border-white/[0.08] hover:border-white/[0.15]'
+            }`}
+          >
+            All Time
+          </button>
+          {availablePeriods.slice(0, 12).map((p) => {
+            const [y, m] = p.split('-').map(Number);
+            const label = new Date(y, m - 1).toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+            return (
+              <button
+                key={p}
+                onClick={() => setPeriodFilter(p)}
+                className={`text-xs px-3 py-1.5 rounded-control border transition-all ${
+                  periodFilter === p
+                    ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30'
+                    : 'bg-white/[0.03] text-slate-400 border-white/[0.08] hover:border-white/[0.15]'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </section>
+      )}
 
       {/* 13 live KPI cards — all values computed from stored data */}
       <section aria-label="Key performance indicators">
