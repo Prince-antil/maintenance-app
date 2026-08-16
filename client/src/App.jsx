@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from './context/AuthContext.jsx';
 import { useUI } from './context/UIContext.jsx';
@@ -26,11 +26,13 @@ const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
 
+const LOGIN_MODAL_KEY = 'ccpl_show_login_modal';
+
 function AppContent() {
   const { user, loading } = useAuth();
   const {
     uploadState, closeUpload,
-    showLogin, closeLogin,
+    showLogin, openLogin, closeLogin,
     showAddMachine, closeAddMachine,
     showMasterImport, closeMasterImport,
     previewFile, closePreview,
@@ -38,7 +40,20 @@ function AppContent() {
     toasts, dismissToast,
   } = useUI();
   const navigate = useNavigate();
+  const location = useLocation();
   const [showWelcome, setShowWelcome] = useState(false);
+
+  // ── Route guard: force login for all protected routes ───────────────────
+  const isLoginPage = location.pathname === '/login';
+  const isPublicRoute = false; // All routes require auth
+  const needsAuth = !isPublicRoute && !isLoginPage;
+
+  // When user is null after loading, force-open login modal
+  useEffect(() => {
+    if (!loading && needsAuth && !user) {
+      openLogin();
+    }
+  }, [loading, user, needsAuth, openLogin]);
 
   // Show welcome page right after login
   useEffect(() => {
@@ -53,6 +68,7 @@ function AppContent() {
     navigate('/');
   };
 
+  // ── Loading state ──────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -64,11 +80,42 @@ function AppContent() {
     );
   }
 
-  // Full-screen welcome experience for freshly logged-in users
+  // ── Auth guard: block all content when unauthenticated ─────────────────
+  if (needsAuth && !user) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4 text-center px-6">
+          <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/25 flex items-center justify-center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-white text-xl font-bold mb-1">Authentication Required</h2>
+            <p className="text-slate-400 text-sm max-w-sm">
+              You must be logged in to access this page. The login dialog will open automatically.
+            </p>
+          </div>
+          <button
+            onClick={openLogin}
+            className="btn-primary inline-flex items-center gap-2 text-sm mt-2"
+          >
+            Open Login
+          </button>
+        </div>
+        {showLogin && <LoginModal onClose={closeLogin} />}
+        <ToastViewport toasts={toasts} dismissToast={dismissToast} />
+      </div>
+    );
+  }
+
+  // ── Full-screen welcome experience for freshly logged-in users ─────────
   if (showWelcome && user) {
     return <WelcomePage onEnterDashboard={handleEnterDashboard} />;
   }
 
+  // ── Authenticated app shell ────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col">
       <TopNavbar />
