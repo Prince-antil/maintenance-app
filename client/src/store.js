@@ -1017,7 +1017,10 @@ async function fetchCloudEntity(entity) {
   });
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    rtLog('error', `FETCH failed on ${config.table}:`, error.message, error.details || '', error.hint || '');
+    throw error;
+  }
   return (data || []).map(config.fromRow);
 }
 
@@ -1282,13 +1285,15 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
       fetchCloudEntity('energy'),
       fetchCloudEntity('amc'),
       fetchCloudEntity('machineBreakdownLogs'),
+      fetchCloudEntity('machinePmRecords'),
+      fetchCloudEntity('plantSections'),
     ]);
 
     const remoteSnapshots = {
@@ -1298,6 +1303,8 @@ async function initializeCloudSync() {
       energy: remoteEnergy,
       amc: remoteAmc,
       machineBreakdownLogs: remoteBreakdownLogs,
+      machinePmRecords: remotePmRecords,
+      plantSections: remotePlantSections,
     };
 
     if (remoteMachines.length) replaceEntityState('machines', remoteMachines, false);
@@ -1306,6 +1313,8 @@ async function initializeCloudSync() {
     if (remoteEnergy.length) replaceEntityState('energy', remoteEnergy, false);
     if (remoteAmc.length) replaceEntityState('amc', remoteAmc, false);
     if (remoteBreakdownLogs.length) replaceEntityState('machineBreakdownLogs', remoteBreakdownLogs, false);
+    if (remotePmRecords.length) replaceEntityState('machinePmRecords', remotePmRecords, false);
+    if (remotePlantSections.length) replaceEntityState('plantSections', remotePlantSections, false);
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet
