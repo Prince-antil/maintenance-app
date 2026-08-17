@@ -3,7 +3,8 @@ import { X, Upload, FileText, AlertCircle, FileSpreadsheet, Download, Table2 } f
 import { api } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { CATEGORIES, PLANT_SECTIONS, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
+import { CATEGORIES, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
+import SectionSelect from './SectionSelect.jsx';
 import { IMPORT_MODULES, downloadTemplate, inferUploadMeta, parseImportFile } from '../bulkImport.js';
 import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk } from '../store.js';
 
@@ -255,10 +256,7 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
             </div>
             <div className="md:col-span-2">
               <label htmlFor="up-section" className="mb-1.5 block text-xs font-medium text-slate-400">Plant Section *</label>
-              <select id="up-section" className="select-field" value={form.plant_section} onChange={(e) => setForm({ ...form, plant_section: e.target.value })}>
-                <option value="">Select section...</option>
-                {PLANT_SECTIONS.map((section) => <option key={section} value={section}>{section}</option>)}
-              </select>
+              <SectionSelect id="up-section" value={form.plant_section} onChange={(v) => setForm({ ...form, plant_section: v })} />
             </div>
           </div>
 

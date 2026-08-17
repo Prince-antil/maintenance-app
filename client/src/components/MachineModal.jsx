@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Cog, Plus, AlertCircle } from 'lucide-react';
-import { PLANT_SECTIONS } from '../constants.js';
 import { addMachine } from '../store.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import SectionSelect from './SectionSelect.jsx';
 
 const EMPTY = {
   name: '', section: '', status: 'running', machineCode: '', department: '',
@@ -78,10 +78,7 @@ export default function MachineModal({ onClose }) {
               <input id="m-code" type="text" className="input-field" value={form.machineCode} onChange={set('machineCode')} placeholder="e.g. NTP-FIL-008" />
             </Field>
             <Field label="Plant Section *" id="m-section">
-              <select id="m-section" className="select-field" value={form.section} onChange={set('section')}>
-                <option value="">Select plant section...</option>
-                {PLANT_SECTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
+              <SectionSelect id="m-section" value={form.section} onChange={(v) => set('section')({ target: { value: v } })} />
             </Field>
             <Field label="Department" id="m-dept">
               <input id="m-dept" type="text" className="input-field" value={form.department} onChange={set('department')} placeholder="e.g. Packaging / Formulation / Utility" />

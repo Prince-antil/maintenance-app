@@ -15,7 +15,8 @@ import EmptyState from '../components/EmptyState.jsx';
 import AmcTab, { getAmcAlertCount } from '../components/AmcTab.jsx';
 import { removeStoredDocument, uploadMachineAttachment } from '../lib/documentStorage.js';
 import { getDocumentUrl, toPreviewDocument } from '../lib/documentLinks.js';
-import { MACHINE_DOC_TABS, EXT_META, ALLOWED_EXT, PLANT_SECTIONS } from '../constants.js';
+import { MACHINE_DOC_TABS, EXT_META, ALLOWED_EXT } from '../constants.js';
+import SectionSelect from '../components/SectionSelect.jsx';
 import { timeAgo } from '../utils.js';
 import {
   ArrowLeft, Cog, MapPin, Upload, Eye, Download, Trash2, FileText, AlertCircle,
@@ -79,9 +80,7 @@ function EditSpecsModal({ machine, userName, onClose }) {
           </div>
           <div>
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="es-section">Plant Section</label>
-            <select id="es-section" className="select-field" value={form.section} onChange={set('section')}>
-              {PLANT_SECTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <SectionSelect id="es-section" value={form.section} onChange={(v) => set('section')({ target: { value: v } })} />
           </div>
           {SPEC_FIELDS.map((f) => (
             <div key={f.key}>

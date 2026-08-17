@@ -8,6 +8,7 @@ import { ChartCard, TrendChart, PieDonutChart, GroupedBarChart } from '../compon
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import { SECTION_METERS } from '../constants.js';
+import SectionSelect from '../components/SectionSelect.jsx';
 import {
   Zap, Plus, Pencil, Trash2, Download, AlertCircle, Sun, Fuel,
   PlugZap, FolderOpen, Upload, X, BarChart3, Grid2x2,
@@ -93,7 +94,7 @@ function EditEnergyModal({ row, userName, onClose }) {
             </div>
             <div>
               <label className={labelCls}>Plant Section</label>
-              <input type="text" value={form.plantSection} onChange={set('plantSection')} className={inputCls} />
+              <SectionSelect value={form.plantSection} onChange={(v) => set('plantSection')({ target: { value: v } })} showAddNew={false} />
             </div>
           </div>
           <div>

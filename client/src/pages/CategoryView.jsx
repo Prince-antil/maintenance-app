@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { api } from '../api.js';
 import EnterpriseTable from '../components/EnterpriseTable.jsx';
-import { CATEGORY_META, PLANT_SECTIONS, MONTHS, YEARS, EXT_META, ALLOWED_EXT } from '../constants.js';
+import { CATEGORY_META, PLANT_SECTIONS, MONTHS, YEARS, EXT_META, ALLOWED_EXT, getAllSections } from '../constants.js';
+import { useStore } from '../store.js';
 import { getDocumentUrl, toPreviewDocument } from '../lib/documentLinks.js';
 import { timeAgo } from '../utils.js';
 import { deleteReportFromVault, getLocalReports, revokeReportUrls } from '../reportVault.js';
@@ -18,6 +19,8 @@ export default function CategoryView() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { openUpload, openPreview, refreshKey } = useUI();
+  const store = useStore();
+  const dynamicSections = useMemo(() => getAllSections(store.plantSections), [store.plantSections]);
 
   const [reports, setReports] = useState([]);
   const [total, setTotal] = useState(0);
@@ -211,7 +214,7 @@ export default function CategoryView() {
         filters={[
           { key: 'month', label: 'All Months', options: MONTHS, value: filters.reporting_month, onChange: (v) => setFilters({ ...filters, reporting_month: v }) },
           { key: 'year', label: 'All Years', options: YEARS.map(String), value: filters.reporting_year, onChange: (v) => setFilters({ ...filters, reporting_year: v }) },
-          { key: 'section', label: 'All Plant Sections', options: PLANT_SECTIONS, value: filters.plant_section, onChange: (v) => setFilters({ ...filters, plant_section: v }) },
+          { key: 'section', label: 'All Plant Sections', options: dynamicSections, value: filters.plant_section, onChange: (v) => setFilters({ ...filters, plant_section: v }) },
           { key: 'type', label: 'All File Types', options: ALLOWED_EXT.map((f) => ({ value: f, label: f.replace('.', '').toUpperCase() })), value: filters.file_format, onChange: (v) => setFilters({ ...filters, file_format: v }) },
         ]}
         emptyTitle="No reports uploaded yet"

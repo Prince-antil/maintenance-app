@@ -28,6 +28,7 @@ import { api } from '../api.js';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import { COMPANY_NAME } from '../constants.js';
+import SectionSelect from '../components/SectionSelect.jsx';
 import {
   AlertCircle, AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
   Factory, FileBarChart2, FileSpreadsheet, FileText, Gauge, Lightbulb,
@@ -311,7 +312,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
                 </div>
                 <div>
                   <label className={labelCls}>Plant Section</label>
-                  <input type="text" value={form.plantSection} onChange={set('plantSection')} className={inputCls} />
+                  <SectionSelect value={form.plantSection} onChange={(v) => set('plantSection')({ target: { value: v } })} showAddNew={false} />
                 </div>
               </div>
               <div>
