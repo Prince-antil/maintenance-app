@@ -13,6 +13,7 @@ const KEYS = {
   amc: 'CCPL_AMC_RECORDS_V1',
   machineBreakdownLogs: 'CCPL_MACHINE_BD_LOGS_V1',
   machinePmRecords: 'CCPL_MACHINE_PM_RECORDS_V1',
+  plantSections: 'CCPL_PLANT_SECTIONS_V1',
   activity: 'ccpl_activity_v1',
   settings: 'ccpl_settings_v1',
 };
@@ -25,6 +26,7 @@ const LEGACY_KEYS = {
   amc: [],
   machineBreakdownLogs: [],
   machinePmRecords: [],
+  plantSections: [],
   activity: ['ccpl_activity_v1'],
   settings: ['ccpl_settings_v1'],
 };
@@ -302,6 +304,15 @@ function normalizePMSummary(fields) {
   const compliancePct = isPresent(fields.compliancePct)
     ? round1(fields.compliancePct)
     : plannedCount > 0 ? round1((doneCount / plannedCount) * 100) : 0;
+
+  const startTime = fields.startTime || fields.start_time || '';
+  const endTime = fields.endTime || fields.end_time || '';
+  let durationHours = toNumber(fields.durationHours ?? fields.duration_hours);
+  if (!durationHours && startTime && endTime) {
+    const diff = (new Date(endTime) - new Date(startTime)) / 3_600_000;
+    durationHours = diff > 0 ? round1(diff) : 0;
+  }
+
   return {
     id: fields.id || uid('pmm'),
     period,
@@ -313,6 +324,9 @@ function normalizePMSummary(fields) {
     doneCount,
     pendingCount,
     compliancePct,
+    startTime,
+    endTime,
+    durationHours,
     remarks: fields.remarks || fields.notes || '',
     createdAt: fields.createdAt || now(),
     updatedAt: fields.updatedAt || now(),
@@ -419,6 +433,9 @@ function normalizePMCloudRow(row) {
     plannedCount: row.planned_count,
     doneCount: row.done_count,
     pendingCount: row.overdue_count,
+    startTime: row.start_time || '',
+    endTime: row.end_time || '',
+    durationHours: row.duration_hours || 0,
   });
 }
 
@@ -433,6 +450,9 @@ function pmToCloudRow(record) {
     planned_count: record.plannedCount,
     done_count: record.doneCount,
     overdue_count: record.pendingCount,
+    start_time: record.startTime || null,
+    end_time: record.endTime || null,
+    duration_hours: record.durationHours || 0,
   };
 }
 
@@ -789,6 +809,7 @@ let state = {
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
+  plantSections: loadPersistedValue('plantSections', []),
   activity: loadPersistedValue('activity', []),
   settings: loadPersistedValue('settings', { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 }),
   sync: {
@@ -1639,9 +1660,22 @@ export function deleteMachinePmRecord(id, userName) {
 export function importMachinePmRecordsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
+  const autoMapped = [];
 
   rows.forEach((row, idx) => {
-    const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+    // ── Smart Data Enrichment (Feature 2) ──────────────────────────────────
+    let matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+
+    // Fuzzy name match if no exact match
+    if (!matched && row.machineName) {
+      const nameLower = row.machineName.toLowerCase().trim();
+      matched = state.machines.find((m) => {
+        const mName = (m.name || '').toLowerCase().trim();
+        return mName && (mName.includes(nameLower) || nameLower.includes(mName));
+      }) || null;
+    }
+
+    const autoFilled = {};
     const record = normalizeMachinePmRecord({
       ...row,
       machineId: matched ? matched.id : (row.machineId || ''),
@@ -1656,7 +1690,18 @@ export function importMachinePmRecordsBulk(rows, userName) {
       action: row.action || row.actionTaken || '',
       technician: row.technician || '',
       remarks: row.remarks || '',
+      startTime: row.startTime || row.start_time || '',
+      endTime: row.endTime || row.end_time || '',
     });
+
+    if (matched) {
+      if (!row.machineCode && matched.machineCode) autoFilled.machineCode = matched.machineCode;
+      if (!row.machineName && matched.name) autoFilled.machineName = matched.name;
+      if (!row.plantSection && matched.section) autoFilled.plantSection = matched.section;
+      if (Object.keys(autoFilled).length > 0) {
+        autoMapped.push({ row: idx + 2, machine: matched.name || matched.machineCode, fields: autoFilled });
+      }
+    }
 
     if (!record.machineId) {
       unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
@@ -1683,7 +1728,31 @@ export function importMachinePmRecordsBulk(rows, userName) {
     ? `${deduped.length} imported · ${unmatchedRows.length} unmatched: ${unmatchedRows.slice(0, 3).join(', ')}`
     : `${deduped.length} PM records imported`;
   logActivity(userName, 'bulk imported machine PM records', detail, 'pm');
-  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows };
+  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows, autoMapped };
+}
+
+// ── Dynamic Plant Sections ──────────────────────────────────────────────────
+// User-added sections are persisted in localStorage and merged with the
+// hardcoded PLANT_SECTIONS constant from constants.js at runtime.
+export const getPlantSections = () => state.plantSections;
+
+export function addPlantSection(name, userName) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return false;
+  const exists = state.plantSections.some(
+    (s) => s.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (exists) return false;
+  state = { ...state, plantSections: [...state.plantSections, trimmed] };
+  commit('plantSections');
+  logActivity(userName, 'added plant section', trimmed, 'info');
+  return true;
+}
+
+export function removePlantSection(name, userName) {
+  state = { ...state, plantSections: state.plantSections.filter((s) => s !== name) };
+  commit('plantSections');
+  logActivity(userName, 'removed plant section', name, 'info');
 }
 
 // ── Per-machine breakdown log exports ─────────────────────────────────────
@@ -1781,39 +1850,52 @@ export function deleteMachineBreakdownLog(id, userName) {
 export function importMachineBreakdownLogsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
+  const autoMapped = [];
 
-  rows.forEach((row) => {
-    // Match against machine store by code, name, or section-scoped name
-    const matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+  rows.forEach((row, idx) => {
+    // ── Smart Data Enrichment (Feature 2) ──────────────────────────────────
+    // Try to match by code first, then by name, then by fuzzy name match
+    let matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+
+    // If no exact match by name, try case-insensitive substring match
+    if (!matched && row.machineName) {
+      const nameLower = row.machineName.toLowerCase().trim();
+      matched = state.machines.find((m) => {
+        const mName = (m.name || '').toLowerCase().trim();
+        return mName && (mName.includes(nameLower) || nameLower.includes(mName));
+      }) || null;
+    }
+
+    const autoFilled = {};
     const log = normalizeMachineBreakdownLog({
       ...row,
       machineId: matched ? matched.id : '',
       machineCode: matched ? (matched.machineCode || matched.id) : (row.machineCode || ''),
       machineName: matched ? matched.name : row.machineName,
-      plantSection: matched ? (matched.section || row.plantSection) : row.plantSection,
-      // startTime / endTime pass through from parsed row; normalization will
-      // auto-derive downtimeHours when the explicit value is blank/zero.
+      plantSection: matched ? (matched.section || row.plantSection || '') : (row.plantSection || ''),
       startTime: row.startTime || '',
       endTime:   row.endTime   || '',
     });
 
-    // Reject rows that have neither a date nor a start time
-    if (!log.date) {
-      rejectedRows.push(`Row ${idx + 2}: no date or start time`);
-      return;
+    if (matched) {
+      if (!row.machineCode && matched.machineCode) autoFilled.machineCode = matched.machineCode;
+      if (!row.machineName && matched.name) autoFilled.machineName = matched.name;
+      if (!row.plantSection && matched.section) autoFilled.plantSection = matched.section;
+      if (Object.keys(autoFilled).length > 0) {
+        autoMapped.push({ row: idx + 2, machine: matched.name || matched.machineCode, fields: autoFilled });
+      }
     }
 
-    // Reject rows with empty machineId to prevent identity collapse
+    if (!log.date) return;
     if (!log.machineId) {
-      rejectedRows.push(`Row ${idx + 2}: unmatched machine "${row.machineName || row.machineCode}"`);
+      unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
       return;
     }
-
-    normalizedIncoming.push(log);
-    if (!matched) unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
+    logs.push(log);
+    if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
   });
 
-  // Dedup on machineId + startTime (preferred) or machineId + date + cause
+  // Dedup on machineId + startTime or machineId + date + cause
   const existingKeys = new Set(
     state.machineBreakdownLogs.map((r) =>
       r.startTime
@@ -1834,54 +1916,36 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
   newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
   scheduleCloudFlush();
 
-  // ── Step 6: recalculate section-level breakdown summaries ─────────────────
-  // Use ALL affected sections (from inserts AND updates) so the Dashboard
-  // totals stay accurate.
-  const affectedSections = [
-    ...new Set([...toInsert, ...toUpdate].map((l) => l.plantSection).filter(Boolean)),
-  ];
+  // Recalculate section-level breakdown summaries for affected sections
+  const affectedSections = [...new Set(newLogs.map((l) => l.plantSection).filter(Boolean))];
   affectedSections.forEach((section) => {
     const sectionLogs = state.machineBreakdownLogs.filter((l) => l.plantSection === section);
-
-    // Group by month-period (YYYY-MM)
     const byPeriod = {};
     sectionLogs.forEach((l) => {
       const period = (l.startTime || l.date || '').slice(0, 7);
       if (!period) return;
-      if (!byPeriod[period]) {
-        byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
-      }
+      if (!byPeriod[period]) byPeriod[period] = { period, section, breakdownCount: 0, downtimeHours: 0 };
       byPeriod[period].breakdownCount += 1;
-      byPeriod[period].downtimeHours  = Math.round(
-        (byPeriod[period].downtimeHours + (l.downtimeHours || 0)) * 100
-      ) / 100;
+      byPeriod[period].downtimeHours = Math.round((byPeriod[period].downtimeHours + (l.downtimeHours || 0)) * 100) / 100;
     });
-
     Object.values(byPeriod).forEach((aggRow) => {
-      const existingSummary = state.breakdowns.find(
-        (b) => b.section === aggRow.section && b.period === aggRow.period
-      );
+      const existingSummary = state.breakdowns.find((b) => b.section === aggRow.section && b.period === aggRow.period);
       addBreakdown({
         ...(existingSummary || {}),
         ...aggRow,
         id: existingSummary?.id,
-        // Preserve existing operating-hours and availability override
         operatingHours: existingSummary?.operatingHours,
         availability_override: existingSummary?.availability_override ?? null,
-        // MTTR / MTBF auto-calculated inside normalizeBreakdownSummary
-        mttr: aggRow.breakdownCount > 0
-          ? Math.round((aggRow.downtimeHours / aggRow.breakdownCount) * 100) / 100
-          : 0,
       }, userName);
     });
   });
 
   const detail = unmatchedRows.length
-    ? `${newLogs.length} imported · ${unmatchedRows.length} unmatched machines: ${unmatchedRows.slice(0, 3).join(', ')}${unmatchedRows.length > 3 ? '...' : ''}`
+    ? `${newLogs.length} imported · ${unmatchedRows.length} unmatched machines`
     : `${newLogs.length} breakdown logs imported`;
 
   logActivity(userName, 'bulk imported machine breakdown logs', detail, 'breakdown');
-  return { created: newLogs.length, total: rows.length, unmatched: unmatchedRows };
+  return { created: newLogs.length, total: rows.length, unmatched: unmatchedRows, autoMapped };
 }
 
 export function exportBackup() {

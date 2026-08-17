@@ -3,14 +3,15 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { useStore, addPM, deletePM, updatePM } from '../store.js';
 import { aggregatePMRecords, formatPeriodKey, monthlyPMCompletion, pmStats } from '../analytics.js';
-import { MASTER_PLANT_SECTION, getOperationalSections } from '../constants.js';
+import { MASTER_PLANT_SECTION, getAllSections } from '../constants.js';
+import SectionSelect from '../components/SectionSelect.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { ChartCard, PMCompletionChart, TrendChart } from '../components/AnalyticsCharts.jsx';
 import { ProgressGauge } from '../components/charts.jsx';
 import { exportToCSV } from '../utils.js';
 import {
   AlertCircle, CalendarX2, CheckCircle2, ClipboardCheck, Download, Eye,
-  ListChecks, Pencil, Percent, Plus, Search, Trash2, Upload, X,
+  ListChecks, Pencil, Percent, Plus, Search, Trash2, Upload, X, Clock,
 } from 'lucide-react';
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
@@ -24,6 +25,8 @@ function SummaryModal({ userName, onClose, sections, machines }) {
     doneCount: '',
     pendingCount: '',
     compliancePct: '',
+    startTime: '',
+    endTime: '',
     remarks: '',
   });
   const [error, setError] = useState('');
@@ -34,13 +37,25 @@ function SummaryModal({ userName, onClose, sections, machines }) {
     return (machines || []).filter((m) => m.section === form.section);
   }, [form.section, machines]);
 
+  const durationHours = useMemo(() => {
+    if (!form.startTime || !form.endTime) return '';
+    const diff = (new Date(form.endTime) - new Date(form.startTime)) / 3_600_000;
+    return diff > 0 ? Math.round(diff * 10) / 10 : '';
+  }, [form.startTime, form.endTime]);
+
   const handleSubmit = (event) => {
     event.preventDefault();
     if (!form.period || !form.section) {
       setError('Reporting month and plant section are required.');
       return;
     }
-    addPM({ ...form, machineId: form.machineId || '' }, userName);
+    addPM({
+      ...form,
+      machineId: form.machineId || '',
+      startTime: form.startTime || '',
+      endTime: form.endTime || '',
+      durationHours: durationHours || 0,
+    }, userName);
     onClose();
   };
 
@@ -53,7 +68,7 @@ function SummaryModal({ userName, onClose, sections, machines }) {
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close"><X size={18} aria-hidden="true" /></button>
         </div>
-        <p className="text-meta mb-5">Percentage done auto-calculates from actual done and planned count when left blank.</p>
+        <p className="text-meta mb-5">Percentage done auto-calculates from actual done and planned count when left blank. Duration auto-calculates from start/end times.</p>
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -62,10 +77,7 @@ function SummaryModal({ userName, onClose, sections, machines }) {
           </div>
           <div>
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-section">Plant Section *</label>
-            <select id="pm-section" className="select-field" value={form.section} onChange={set('section')}>
-              <option value="">Select section...</option>
-              {sections.map((section) => <option key={section} value={section}>{section}</option>)}
-            </select>
+            <SectionSelect value={form.section} onChange={(v) => set('section')({ target: { value: v } })} id="pm-section" ariaLabel="Plant section" />
           </div>
           <div>
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-machine">Machine (optional)</label>
@@ -90,6 +102,26 @@ function SummaryModal({ userName, onClose, sections, machines }) {
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-pending">Overdue / Pending PM Count</label>
             <input id="pm-pending" type="number" min="0" className="input-field" value={form.pendingCount} onChange={set('pendingCount')} />
           </div>
+
+          {/* Start & End Time (Feature 3) */}
+          <div>
+            <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-start">
+              <Clock size={11} className="inline mr-1" aria-hidden="true" />Start Date & Time
+            </label>
+            <input id="pm-start" type="datetime-local" className="input-field" value={form.startTime} onChange={set('startTime')} />
+          </div>
+          <div>
+            <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-end">
+              <Clock size={11} className="inline mr-1" aria-hidden="true" />End Date & Time
+            </label>
+            <input id="pm-end" type="datetime-local" className="input-field" value={form.endTime} onChange={set('endTime')} />
+          </div>
+          {durationHours !== '' && (
+            <div className="sm:col-span-2 bg-cyan-500/8 border border-cyan-500/20 rounded-control px-3 py-2 text-xs text-cyan-300">
+              Calculated Duration: <strong>{durationHours} hours</strong>
+            </div>
+          )}
+
           <div className="sm:col-span-2">
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-remarks">Remarks</label>
             <textarea id="pm-remarks" rows={3} className="input-field resize-none" value={form.remarks} onChange={set('remarks')} placeholder="Optional notes for the monthly PM summary" />
@@ -109,6 +141,10 @@ function SummaryModal({ userName, onClose, sections, machines }) {
 }
 
 function DetailModal({ row, onClose }) {
+  const durationHours = row.durationHours || (row.startTime && row.endTime
+    ? Math.round(((new Date(row.endTime) - new Date(row.startTime)) / 3_600_000) * 10) / 10
+    : null);
+
   const details = [
     ['Period', formatPeriodKey(row.period, true)],
     ['Plant Section', row.section],
@@ -116,6 +152,9 @@ function DetailModal({ row, onClose }) {
     ['Done PM Count', row.doneCount],
     ['Pending PM Count', row.pendingCount],
     ['Compliance', `${row.compliancePct}%`],
+    ['Start Time', row.startTime ? new Date(row.startTime).toLocaleString('en-GB') : '—'],
+    ['End Time', row.endTime ? new Date(row.endTime).toLocaleString('en-GB') : '—'],
+    ['Duration', durationHours != null ? `${durationHours} hrs` : '—'],
     ['Remarks', row.remarks || '—'],
   ];
 
@@ -128,7 +167,7 @@ function DetailModal({ row, onClose }) {
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
           {details.map(([label, value]) => (
-            <div key={label} className={label === 'Remarks' ? 'sm:col-span-2' : ''}>
+            <div key={label} className={['Remarks', 'Start Time', 'End Time', 'Duration'].includes(label) ? 'sm:col-span-2' : ''}>
               <dt className="text-slate-500 text-[10px] uppercase tracking-wider">{label}</dt>
               <dd className="text-slate-200 text-[13px] mt-0.5 break-words">{value}</dd>
             </div>
@@ -146,6 +185,8 @@ function EditPMModal({ row, userName, onClose }) {
     doneCount: String(row.doneCount ?? ''),
     pendingCount: String(row.pendingCount ?? ''),
     compliancePct: String(row.compliancePct ?? ''),
+    startTime: row.startTime || '',
+    endTime: row.endTime || '',
     remarks: row.remarks || '',
   });
   const overlayRef = useRef(null);
@@ -158,9 +199,20 @@ function EditPMModal({ row, userName, onClose }) {
     return Math.round((done / planned) * 1000) / 10;
   })();
 
+  const durationHours = useMemo(() => {
+    if (!form.startTime || !form.endTime) return null;
+    const diff = (new Date(form.endTime) - new Date(form.startTime)) / 3_600_000;
+    return diff > 0 ? Math.round(diff * 10) / 10 : null;
+  }, [form.startTime, form.endTime]);
+
   const handleSave = (e) => {
     e.preventDefault();
-    updatePM(row.id, form, userName);
+    updatePM(row.id, {
+      ...form,
+      startTime: form.startTime || '',
+      endTime: form.endTime || '',
+      durationHours: durationHours || 0,
+    }, userName);
     onClose();
   };
 
@@ -212,7 +264,20 @@ function EditPMModal({ row, userName, onClose }) {
                 className={inputCls}
               />
             </div>
+            <div>
+              <label className={labelCls}><Clock size={11} className="inline mr-1" />Start Time</label>
+              <input type="datetime-local" value={form.startTime} onChange={set('startTime')} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}><Clock size={11} className="inline mr-1" />End Time</label>
+              <input type="datetime-local" value={form.endTime} onChange={set('endTime')} className={inputCls} />
+            </div>
           </div>
+          {durationHours != null && (
+            <p className="text-xs text-cyan-300 bg-cyan-500/8 border border-cyan-500/20 rounded-control px-3 py-2">
+              Calculated Duration: <strong>{durationHours} hours</strong>
+            </p>
+          )}
           <div>
             <label className={labelCls}>Remarks</label>
             <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
@@ -244,8 +309,8 @@ export default function PreventiveMaintenance() {
   const isAdmin = user?.role === 'admin';
   const currentKey = currentPeriod();
   const sections = useMemo(
-    () => [MASTER_PLANT_SECTION, ...getOperationalSections(machines)],
-    [machines]
+    () => getAllSections(store.plantSections),
+    [store.plantSections]
   );
   const trend = useMemo(() => monthlyPMCompletion(pms, 12), [pms]);
   const stats = useMemo(() => pmStats(pms), [pms]);
@@ -271,6 +336,9 @@ export default function PreventiveMaintenance() {
       { key: 'doneCount', label: 'Done PM Count' },
       { key: 'pendingCount', label: 'Pending PM Count' },
       { key: 'compliancePct', label: 'Compliance %' },
+      { label: 'Start Time', value: (row) => row.startTime ? new Date(row.startTime).toLocaleString('en-GB') : '' },
+      { label: 'End Time', value: (row) => row.endTime ? new Date(row.endTime).toLocaleString('en-GB') : '' },
+      { key: 'durationHours', label: 'Duration (hrs)' },
       { key: 'remarks', label: 'Remarks' },
     ],
     'pm-monthly-summary.csv'
@@ -348,10 +416,7 @@ export default function PreventiveMaintenance() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
           <input type="search" className="input-field pl-9" placeholder="Search section, period, remarks..." value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search PM summaries" />
         </div>
-        <select className="select-field" value={sectionF} onChange={(event) => setSectionF(event.target.value)} aria-label="Filter by section">
-          <option value="">All Plant Sections</option>
-          {sections.map((section) => <option key={section} value={section}>{section}</option>)}
-        </select>
+        <SectionSelect value={sectionF} onChange={setSectionF} id="pm-filter-section" ariaLabel="Filter by section" />
         <select className="select-field" value={yearF} onChange={(event) => setYearF(event.target.value)} aria-label="Filter by year">
           <option value="">All Years</option>
           {years.map((year) => <option key={year} value={year}>{year}</option>)}
@@ -367,40 +432,49 @@ export default function PreventiveMaintenance() {
         />
       ) : (
         <div className="glass-card overflow-x-auto">
-          <table className="enterprise-table w-full min-w-[860px]">
+          <table className="enterprise-table w-full min-w-[1000px]">
             <thead>
               <tr>
                 <th>Period</th><th>Plant Section</th><th>Planned</th><th>Done</th>
-                <th>Pending</th><th>Compliance</th><th>Remarks</th><th className="text-right">Actions</th>
+                <th>Pending</th><th>Compliance</th><th>Start Time</th><th>End Time</th>
+                <th>Duration</th><th>Remarks</th><th className="text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
-                  <td className="text-white font-medium">{row.section}</td>
-                  <td className="text-slate-300">{row.plannedCount}</td>
-                  <td className="text-slate-300">{row.doneCount}</td>
-                  <td className="text-slate-300">{row.pendingCount}</td>
-                  <td className="text-slate-300">{row.compliancePct}%</td>
-                  <td className="text-slate-400 max-w-[220px] truncate" title={row.remarks || ''}>{row.remarks || '—'}</td>
-                  <td>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label={`View ${row.section} ${row.period}`}><Eye size={13} aria-hidden="true" /></button>
-                      {isAdmin && (
-                        <>
-                          <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label={`Edit ${row.section} ${row.period}`}>
-                            <Pencil size={13} aria-hidden="true" />
-                          </button>
-                          <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
-                            <Trash2 size={13} aria-hidden="true" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((row) => {
+                const dur = row.durationHours || (row.startTime && row.endTime
+                  ? Math.round(((new Date(row.endTime) - new Date(row.startTime)) / 3_600_000) * 10) / 10
+                  : null);
+                return (
+                  <tr key={row.id}>
+                    <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
+                    <td className="text-white font-medium">{row.section}</td>
+                    <td className="text-slate-300">{row.plannedCount}</td>
+                    <td className="text-slate-300">{row.doneCount}</td>
+                    <td className="text-slate-300">{row.pendingCount}</td>
+                    <td className="text-slate-300">{row.compliancePct}%</td>
+                    <td className="text-slate-300 text-[11px] whitespace-nowrap">{row.startTime ? new Date(row.startTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    <td className="text-slate-300 text-[11px] whitespace-nowrap">{row.endTime ? new Date(row.endTime).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
+                    <td className="text-cyan-300 text-xs font-semibold">{dur != null ? `${dur}h` : '—'}</td>
+                    <td className="text-slate-400 max-w-[160px] truncate" title={row.remarks || ''}>{row.remarks || '—'}</td>
+                    <td>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label={`View ${row.section} ${row.period}`}><Eye size={13} aria-hidden="true" /></button>
+                        {isAdmin && (
+                          <>
+                            <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label={`Edit ${row.section} ${row.period}`}>
+                              <Pencil size={13} aria-hidden="true" />
+                            </button>
+                            <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label={`Delete ${row.section} ${row.period}`}>
+                              <Trash2 size={13} aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

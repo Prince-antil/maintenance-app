@@ -25,6 +25,8 @@ export const IMPORT_MODULES = {
         'Done PM Count': 21,
         'Pending PM Count': 3,
         'Compliance %': 87.5,
+        'Start Time': `${new Date().toISOString().slice(0, 10)}T08:00`,
+        'End Time': `${new Date().toISOString().slice(0, 10)}T16:00`,
       },
     ],
   },
@@ -152,6 +154,8 @@ const FIELD_ALIASES = {
     doneCount: ['donepmcount', 'donecount', 'completedpmcount', 'actualdonepmcount'],
     pendingCount: ['pendingpmcount', 'overduependingpmcount', 'overduecount', 'pendingcount'],
     compliancePct: ['compliance', 'compliancepct', 'compliancepercent', 'percentagedone', 'donepercent'],
+    startTime: ['starttime', 'start_time', 'startdate', 'start_date', 'startdatatime', 'pm start time', 'start datetime'],
+    endTime: ['endtime', 'end_time', 'enddate', 'end_date', 'enddatatime', 'pm end time', 'end datetime'],
   },
   breakdowns: {
     period: ['reportingperiod', 'period', 'monthyear', 'reportmonth', 'month'],
@@ -324,9 +328,17 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const plannedCount = parseNumber(getCell(row, mapping, 'plannedCount'));
     const doneCount    = parseNumber(getCell(row, mapping, 'doneCount'));
     const pendingCount = parseNumber(getCell(row, mapping, 'pendingCount'));
-    // Auto-calculate compliance if not supplied or zero
     const rawCompliance = parseNumber(getCell(row, mapping, 'compliancePct'));
     const compliancePct = rawCompliance || (plannedCount > 0 ? Math.round((doneCount / plannedCount) * 1000) / 10 : 0);
+
+    const startTime = parseDateValue(getCell(row, mapping, 'startTime')) || '';
+    const endTime   = parseDateValue(getCell(row, mapping, 'endTime')) || '';
+    let durationHours = 0;
+    if (startTime && endTime) {
+      const diff = (new Date(endTime) - new Date(startTime)) / 3_600_000;
+      durationHours = diff > 0 ? Math.round(diff * 100) / 100 : 0;
+    }
+
     return {
       period,
       section,
@@ -334,6 +346,9 @@ function parseModuleRow(moduleId, row, mapping, index) {
       doneCount,
       pendingCount,
       compliancePct,
+      startTime,
+      endTime,
+      durationHours,
     };
   }
 

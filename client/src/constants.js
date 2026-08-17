@@ -83,6 +83,24 @@ export function getOperationalSections(machines = []) {
   return sortPlantSections([...sectionSet].filter((section) => section !== MASTER_PLANT_SECTION));
 }
 
+/**
+ * Returns all available sections: hardcoded PLANT_SECTIONS + any
+ * user-added dynamic sections (from the store). Duplicates are removed
+ * and the master section is always first.
+ */
+export function getAllSections(dynamicSections = []) {
+  const combined = [...PLANT_SECTIONS, ...dynamicSections];
+  const unique = [...new Set(combined.filter(Boolean))];
+  return unique.sort((a, b) => {
+    const aIndex = PLANT_SECTIONS.indexOf(a);
+    const bIndex = PLANT_SECTIONS.indexOf(b);
+    if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+    if (aIndex === -1) return 1;
+    if (bIndex === -1) return -1;
+    return aIndex - bIndex;
+  });
+}
+
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',

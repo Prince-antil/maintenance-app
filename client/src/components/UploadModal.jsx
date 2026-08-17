@@ -145,10 +145,20 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
         const result = importers[parseState.moduleId](parseState.parsedRows, user?.full_name || 'Prince');
         setProgress(100);
         setProgressLabel('Import complete');
+
+        // Build success message with auto-mapping summary
+        let message = `${result.total} ${IMPORT_MODULES[parseState.moduleId].shortLabel} records synchronized.`;
+        if (result.autoMapped && result.autoMapped.length > 0) {
+          const mappedSample = result.autoMapped.slice(0, 3).map((m) => `"${m.fields.machineCode || m.fields.machineName || m.fields.plantSection}" → ${m.machine}`).join(', ');
+          message += ` Auto-filled: ${result.autoMapped.length} row(s) (${mappedSample}${result.autoMapped.length > 3 ? '...' : ''}).`;
+        }
+        if (result.unmatched && result.unmatched.length > 0) {
+          message += ` ${result.unmatched.length} row(s) could not be matched to a machine.`;
+        }
         pushToast({
           type: 'success',
           title: 'Bulk import completed',
-          message: `${result.total} ${IMPORT_MODULES[parseState.moduleId].shortLabel} records were synchronized, and ${apiRecord.filename || file.name} is available from the shared Supabase repository.`,
+          message,
         });
       } else {
         setProgress(100);
