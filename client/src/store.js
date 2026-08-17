@@ -59,7 +59,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -696,6 +696,23 @@ function machinePmRecordToCloudRow(record) {
   };
 }
 
+function normalizePlantSectionCloudRow(row) {
+  return {
+    id: row.id,
+    name: row.name || '',
+    createdBy: row.created_by || '',
+    createdAt: row.created_at || '',
+  };
+}
+
+function plantSectionToCloudRow(record) {
+  return {
+    id: record.id,
+    name: record.name,
+    created_by: record.createdBy || '',
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -738,6 +755,12 @@ const CLOUD_ENTITY_CONFIG = {
     fromRow: normalizeMachinePmCloudRow,
     toRow: machinePmRecordToCloudRow,
     orderBy: [{ column: 'pm_date', ascending: false }],
+  },
+  plantSections: {
+    table: 'plant_sections',
+    fromRow: normalizePlantSectionCloudRow,
+    toRow: plantSectionToCloudRow,
+    orderBy: [{ column: 'name', ascending: true }],
   },
 };
 
@@ -809,7 +832,9 @@ let state = {
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
-  plantSections: loadPersistedValue('plantSections', []),
+  plantSections: loadPersistedValue('plantSections', []).map((s) =>
+    typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
+  ),
   activity: loadPersistedValue('activity', []),
   settings: loadPersistedValue('settings', { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 }),
   sync: {
@@ -1740,18 +1765,24 @@ export function addPlantSection(name, userName) {
   const trimmed = String(name || '').trim();
   if (!trimmed) return false;
   const exists = state.plantSections.some(
-    (s) => s.toLowerCase() === trimmed.toLowerCase()
+    (s) => (typeof s === 'string' ? s : s.name || '').toLowerCase() === trimmed.toLowerCase()
   );
   if (exists) return false;
-  state = { ...state, plantSections: [...state.plantSections, trimmed] };
+  const record = { id: `ps_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: trimmed, createdBy: userName || '' };
+  state = { ...state, plantSections: [...state.plantSections, record] };
   commit('plantSections');
+  queueCloudMutation('plantSections', 'upsert', record);
   logActivity(userName, 'added plant section', trimmed, 'info');
   return true;
 }
 
 export function removePlantSection(name, userName) {
-  state = { ...state, plantSections: state.plantSections.filter((s) => s !== name) };
+  const record = state.plantSections.find((s) => (typeof s === 'string' ? s : s.name) === name);
+  state = { ...state, plantSections: state.plantSections.filter((s) => (typeof s === 'string' ? s : s.name) !== name) };
   commit('plantSections');
+  if (record && record.id) {
+    queueCloudMutation('plantSections', 'delete', record.id);
+  }
   logActivity(userName, 'removed plant section', name, 'info');
 }
 
@@ -2020,6 +2051,11 @@ export function resetPersistentData() {
     machines: state.machines,
     breakdowns: state.breakdowns,
     pms: state.pms,
+    energy: state.energy,
+    machineBreakdownLogs: state.machineBreakdownLogs,
+    machinePmRecords: state.machinePmRecords,
+    amc: state.amc,
+    plantSections: state.plantSections,
   };
 
   state = {
@@ -2027,6 +2063,10 @@ export function resetPersistentData() {
     breakdowns: [],
     pms: [],
     energy: [],
+    amc: [],
+    machineBreakdownLogs: [],
+    machinePmRecords: [],
+    plantSections: [],
     activity: [],
     settings: { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 },
     sync: state.sync,
@@ -2042,6 +2082,11 @@ export function resetPersistentData() {
   queueEntityReplacement('machines', state.machines, previous.machines);
   queueEntityReplacement('breakdowns', state.breakdowns, previous.breakdowns);
   queueEntityReplacement('pms', state.pms, previous.pms);
+  queueEntityReplacement('energy', state.energy, previous.energy);
+  queueEntityReplacement('machineBreakdownLogs', state.machineBreakdownLogs, previous.machineBreakdownLogs);
+  queueEntityReplacement('machinePmRecords', state.machinePmRecords, previous.machinePmRecords);
+  queueEntityReplacement('amc', state.amc, previous.amc);
+  queueEntityReplacement('plantSections', state.plantSections, previous.plantSections);
 }
 
 function findMachineByIdentity(machineCode, name, section) {

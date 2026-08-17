@@ -89,7 +89,8 @@ export function getOperationalSections(machines = []) {
  * and the master section is always first.
  */
 export function getAllSections(dynamicSections = []) {
-  const combined = [...PLANT_SECTIONS, ...dynamicSections];
+  const names = dynamicSections.map((s) => (typeof s === 'string' ? s : s.name || ''));
+  const combined = [...PLANT_SECTIONS, ...names];
   const unique = [...new Set(combined.filter(Boolean))];
   return unique.sort((a, b) => {
     const aIndex = PLANT_SECTIONS.indexOf(a);
