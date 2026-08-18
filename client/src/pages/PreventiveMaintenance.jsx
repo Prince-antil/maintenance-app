@@ -5,7 +5,7 @@ import { useStore, addPM, deletePM, updatePM } from '../store.js';
 import {
   aggregatePMRecords, formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,
-  monthlyPMComplianceTrend, monthlyPMDurationTrend,
+  monthlyPMComplianceTrend,
 } from '../analytics.js';
 import { getAllSections } from '../constants.js';
 import SectionSelect from '../components/SectionSelect.jsx';
@@ -17,8 +17,7 @@ import {
 } from 'recharts';
 import {
   AlertCircle, CalendarX2, CheckCircle2, ClipboardCheck, Download, Eye,
-  Percent, Pencil, Plus, Search, Trash2, Upload, X, Clock,
-  Timer,
+  Percent, Pencil, Plus, Search, Trash2, Upload, X,
 } from 'lucide-react';
 
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
@@ -71,8 +70,6 @@ function SummaryModal({ userName, onClose, sections, machines }) {
     doneCount: '',
     pendingCount: '',
     compliancePct: '',
-    startTime: '',
-    endTime: '',
     remarks: '',
   });
   const [error, setError] = useState('');
@@ -83,12 +80,6 @@ function SummaryModal({ userName, onClose, sections, machines }) {
     return (machines || []).filter((m) => m.section === form.section);
   }, [form.section, machines]);
 
-  const durationHours = useMemo(() => {
-    if (!form.startTime || !form.endTime) return '';
-    const diff = (new Date(form.endTime) - new Date(form.startTime)) / 3_600_000;
-    return diff > 0 ? Math.round(diff * 10) / 10 : '';
-  }, [form.startTime, form.endTime]);
-
   const handleSubmit = (event) => {
     event.preventDefault();
     if (!form.period || !form.section) {
@@ -98,9 +89,6 @@ function SummaryModal({ userName, onClose, sections, machines }) {
     addPM({
       ...form,
       machineId: form.machineId || '',
-      startTime: form.startTime || '',
-      endTime: form.endTime || '',
-      durationHours: durationHours || 0,
     }, userName);
     onClose();
   };
@@ -114,7 +102,7 @@ function SummaryModal({ userName, onClose, sections, machines }) {
           </h3>
           <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close"><X size={18} aria-hidden="true" /></button>
         </div>
-        <p className="text-meta mb-5">Percentage done auto-calculates from actual done and planned count when left blank. Duration auto-calculates from start/end times.</p>
+        <p className="text-meta mb-5">Percentage done auto-calculates from actual done and planned count when left blank.</p>
 
         <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -148,23 +136,6 @@ function SummaryModal({ userName, onClose, sections, machines }) {
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-pending">Overdue / Pending PM Count</label>
             <input id="pm-pending" type="number" min="0" className="input-field" value={form.pendingCount} onChange={set('pendingCount')} />
           </div>
-          <div>
-            <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-start">
-              <Clock size={11} className="inline mr-1" aria-hidden="true" />Start Date & Time
-            </label>
-            <input id="pm-start" type="datetime-local" className="input-field" value={form.startTime} onChange={set('startTime')} />
-          </div>
-          <div>
-            <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-end">
-              <Clock size={11} className="inline mr-1" aria-hidden="true" />End Date & Time
-            </label>
-            <input id="pm-end" type="datetime-local" className="input-field" value={form.endTime} onChange={set('endTime')} />
-          </div>
-          {durationHours !== '' && (
-            <div className="sm:col-span-2 bg-cyan-500/8 border border-cyan-500/20 rounded-control px-3 py-2 text-xs text-cyan-300">
-              Calculated Duration: <strong>{durationHours} hours</strong>
-            </div>
-          )}
           <div className="sm:col-span-2">
             <label className="block text-slate-400 text-xs font-medium mb-1.5" htmlFor="pm-remarks">Remarks</label>
             <textarea id="pm-remarks" rows={3} className="input-field resize-none" value={form.remarks} onChange={set('remarks')} placeholder="Optional notes for the monthly PM summary" />
@@ -185,9 +156,6 @@ function SummaryModal({ userName, onClose, sections, machines }) {
 
 // ── Detail Modal ────────────────────────────────────────────────────────────
 function DetailModal({ row, onClose }) {
-  const dur = row.durationHours || (row.startTime && row.endTime
-    ? Math.round(((new Date(row.endTime) - new Date(row.startTime)) / 3_600_000) * 10) / 10
-    : null);
   const details = [
     ['Period', formatPeriodKey(row.period, true)],
     ['Plant Section', row.section],
@@ -195,9 +163,6 @@ function DetailModal({ row, onClose }) {
     ['Done PM Count', row.doneCount],
     ['Pending PM Count', row.pendingCount],
     ['Compliance', `${row.compliancePct}%`],
-    ['Start Time', row.startTime ? new Date(row.startTime).toLocaleString('en-GB') : '—'],
-    ['End Time', row.endTime ? new Date(row.endTime).toLocaleString('en-GB') : '—'],
-    ['Duration', dur != null ? `${dur} hrs` : '—'],
     ['Remarks', row.remarks || '—'],
   ];
   return (
@@ -209,7 +174,7 @@ function DetailModal({ row, onClose }) {
         </div>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
           {details.map(([label, value]) => (
-            <div key={label} className={['Remarks', 'Start Time', 'End Time', 'Duration'].includes(label) ? 'sm:col-span-2' : ''}>
+            <div key={label} className={label === 'Remarks' ? 'sm:col-span-2' : ''}>
               <dt className="text-slate-500 text-[10px] uppercase tracking-wider">{label}</dt>
               <dd className="text-slate-200 text-[13px] mt-0.5 break-words">{value}</dd>
             </div>
@@ -227,8 +192,6 @@ function EditPMModal({ row, userName, onClose }) {
     doneCount: String(row.doneCount ?? ''),
     pendingCount: String(row.pendingCount ?? ''),
     compliancePct: String(row.compliancePct ?? ''),
-    startTime: row.startTime || '',
-    endTime: row.endTime || '',
     remarks: row.remarks || '',
   });
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -240,20 +203,9 @@ function EditPMModal({ row, userName, onClose }) {
     return Math.round((done / planned) * 1000) / 10;
   })();
 
-  const durationHours = useMemo(() => {
-    if (!form.startTime || !form.endTime) return null;
-    const diff = (new Date(form.endTime) - new Date(form.startTime)) / 3_600_000;
-    return diff > 0 ? Math.round(diff * 10) / 10 : null;
-  }, [form.startTime, form.endTime]);
-
   const handleSave = (e) => {
     e.preventDefault();
-    updatePM(row.id, {
-      ...form,
-      startTime: form.startTime || '',
-      endTime: form.endTime || '',
-      durationHours: durationHours || 0,
-    }, userName);
+    updatePM(row.id, { ...form }, userName);
     onClose();
   };
 
@@ -280,14 +232,7 @@ function EditPMModal({ row, userName, onClose }) {
               <label className={labelCls}>Compliance % {liveCompliance !== null && <span className="ml-2 text-cyan-400 text-[10px] font-normal">auto: {liveCompliance}%</span>}</label>
               <input type="number" min="0" max="100" step="0.1" value={form.compliancePct} onChange={set('compliancePct')} placeholder={liveCompliance !== null ? `Auto: ${liveCompliance}` : 'Leave blank to auto-calc'} className={inputCls} />
             </div>
-            <div><label className={labelCls}><Clock size={11} className="inline mr-1" />Start Time</label><input type="datetime-local" value={form.startTime} onChange={set('startTime')} className={inputCls} /></div>
-            <div><label className={labelCls}><Clock size={11} className="inline mr-1" />End Time</label><input type="datetime-local" value={form.endTime} onChange={set('endTime')} className={inputCls} /></div>
           </div>
-          {durationHours != null && (
-            <p className="text-xs text-cyan-300 bg-cyan-500/8 border border-cyan-500/20 rounded-control px-3 py-2">
-              Calculated Duration: <strong>{durationHours} hours</strong>
-            </p>
-          )}
           <div><label className={labelCls}>Remarks</label><textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} /></div>
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
@@ -322,38 +267,38 @@ export default function PreventiveMaintenance() {
   const currentKey = currentPeriod();
   const sections = useMemo(() => getAllSections(store.plantSections), [store.plantSections]);
 
-  // ── Analytics ────────────────────────────────────────────────────────────
+  // ── Analytics: KPI cards computed directly from machine_pm_records ──────
   const stats = useMemo(() => pmStats(pms), [pms]);
-  const currentSummary = useMemo(() => aggregatePMRecords(pms, currentKey), [pms, currentKey]);
 
-  // Previous month for comparison
-  const prevMonthKey = useMemo(() => {
+  const currentMonthRecords = useMemo(
+    () => machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === currentKey),
+    [machinePmRecords, currentKey]
+  );
+  const prevMonthRecords = useMemo(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
-  const prevSummary = useMemo(() => aggregatePMRecords(pms, prevMonthKey), [pms, prevMonthKey]);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === key);
+  }, [machinePmRecords]);
+
+  const totalPlanned = currentMonthRecords.length;
+  const totalCompleted = currentMonthRecords.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
+  const totalPending = totalPlanned - totalCompleted;
+  const overallCompliance = totalPlanned > 0 ? Math.round((totalCompleted / totalPlanned) * 1000) / 10 : 0;
+
+  const prevPlanned = prevMonthRecords.length;
+  const prevCompleted = prevMonthRecords.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
+  const prevPending = prevPlanned - prevCompleted;
+  const prevCompliance = prevPlanned > 0 ? Math.round((prevCompleted / prevPlanned) * 1000) / 10 : 0;
 
   const pctChange = (curr, prev) => {
     if (!prev) return curr > 0 ? 100 : 0;
     return Math.round(((curr - prev) / prev) * 100);
   };
 
-  const round1 = (v) => Math.round((Number(v) || 0) * 10) / 10;
-
-  const totalDuration = useMemo(
-    () => round1(machinePmRecords.reduce((sum, r) => sum + (r.durationHours || 0), 0)),
-    [machinePmRecords]
-  );
-  const prevTotalDuration = useMemo(() => {
-    const prevRows = machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === prevMonthKey);
-    return round1(prevRows.reduce((sum, r) => sum + (r.durationHours || 0), 0));
-  }, [machinePmRecords, prevMonthKey]);
-
   const topMachines = useMemo(() => machineWisePM(machinePmRecords).slice(0, 10), [machinePmRecords]);
   const typePareto = useMemo(() => pmTypePareto(machinePmRecords), [machinePmRecords]);
   const complianceTrend = useMemo(() => monthlyPMComplianceTrend(pms, 12), [pms]);
-  const durationTrend = useMemo(() => monthlyPMDurationTrend(machinePmRecords, 12), [machinePmRecords]);
   const monthlyRegister = useMemo(() => machinePMRegister(machinePmRecords), [machinePmRecords]);
 
   // Available months for sidebar
@@ -371,13 +316,16 @@ export default function PreventiveMaintenance() {
     }
   }, [availableMonths, registerMonth, currentKey]);
 
-  // Filtered register rows
+  // Filtered register rows — search across Machine Code, Name, Section, and Task
   const registerRows = useMemo(() => {
     const filtered = monthlyRegister.filter((r) => {
       if (registerMonth && r.period !== registerMonth) return false;
       if (regSearch) {
         const q = regSearch.toLowerCase();
-        if (!(r.machineCode || '').toLowerCase().includes(q) && !(r.machineName || '').toLowerCase().includes(q)) return false;
+        const haystack = [
+          r.machineCode, r.machineName, r.plantSection, r.mainTask, r.mainFailureCause,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
       }
       if (regSection && r.plantSection !== regSection) return false;
       if (regStatus) {
@@ -418,14 +366,9 @@ export default function PreventiveMaintenance() {
     [
       { key: 'machineCode', label: 'Machine Code' },
       { key: 'machineName', label: 'Machine Name' },
-      { key: 'plantSection', label: 'Section' },
-      { key: 'pmDate', label: 'PM Date' },
-      { key: 'pmType', label: 'PM Type' },
-      { key: 'mainTask', label: 'Task' },
-      { key: 'pmCount', label: 'PM Count' },
-      { key: 'completedCount', label: 'Completed' },
-      { key: 'pendingCount', label: 'Pending' },
-      { key: 'totalDuration', label: 'Duration (hrs)' },
+      { key: 'plantSection', label: 'Plant Section' },
+      { key: 'period', label: 'PM Date' },
+      { key: 'mainTask', label: 'PM Type & Task' },
       { key: 'status', label: 'Status' },
     ],
     'pm-machine-register.csv'
@@ -459,17 +402,16 @@ export default function PreventiveMaintenance() {
         </div>
       </div>
 
-      {/* ── KPI Cards ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <KPICard icon={ClipboardCheck} label="Total PM Planned" value={currentSummary.plannedCount} changePct={pctChange(currentSummary.plannedCount, prevSummary.plannedCount)} cls="text-cyan-400" invert={false} />
-        <KPICard icon={CheckCircle2} label="Completed PMs" value={currentSummary.doneCount} changePct={pctChange(currentSummary.doneCount, prevSummary.doneCount)} cls="text-emerald-400" invert={false} />
-        <KPICard icon={CalendarX2} label="Pending / Overdue" value={currentSummary.pendingCount} changePct={pctChange(currentSummary.pendingCount, prevSummary.pendingCount)} cls="text-red-400" invert={true} />
-        <KPICard icon={Timer} label="Total PM Hours" value={`${totalDuration}h`} changePct={pctChange(totalDuration, prevTotalDuration)} cls="text-orange-400" invert={true} />
-        <KPICard icon={Percent} label="PM Compliance" value={`${currentSummary.compliance}%`} changePct={pctChange(currentSummary.compliance, prevSummary.compliance)} cls="text-emerald-400" invert={false} />
+      {/* ── KPI Cards (computed directly from machine_pm_records) ────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <KPICard icon={ClipboardCheck} label="Total PM Planned / Logged" value={totalPlanned} changePct={pctChange(totalPlanned, prevPlanned)} cls="text-cyan-400" invert={false} />
+        <KPICard icon={CheckCircle2} label="Completed PMs" value={totalCompleted} changePct={pctChange(totalCompleted, prevCompleted)} cls="text-emerald-400" invert={false} />
+        <KPICard icon={CalendarX2} label="Pending / Overdue" value={totalPending} changePct={pctChange(totalPending, prevPending)} cls="text-red-400" invert={true} />
+        <KPICard icon={Percent} label="PM Compliance %" value={`${overallCompliance}%`} changePct={pctChange(overallCompliance, prevCompliance)} cls="text-emerald-400" invert={false} />
       </div>
 
       {/* ── Charts Section ─────────────────────────────────────────────── */}
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         {/* Top 10 Machines by PM Count */}
         <div className="glass-card p-5">
           <h3 className="text-card-title text-sm mb-1">Top Machines by PM Count</h3>
@@ -510,37 +452,14 @@ export default function PreventiveMaintenance() {
             </ResponsiveContainer>
           )}
         </div>
-
-        {/* Monthly PM Trend */}
-        <div className="glass-card p-5">
-          <h3 className="text-card-title text-sm mb-1">Monthly PM Trend</h3>
-          <p className="text-meta mb-4">Planned vs completed PM counts</p>
-          {complianceTrend.length === 0 ? (
-            <p className="text-slate-500 text-xs text-center py-8">No PM data</p>
-          ) : (
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={complianceTrend} margin={{ left: 0, right: 20, top: 5, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-                <XAxis dataKey="label" tick={AXIS} />
-                <YAxis yAxisId="left" tick={AXIS} />
-                <YAxis yAxisId="right" orientation="right" tick={AXIS} domain={[0, 100]} unit="%" />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8' }} />
-                <Bar yAxisId="left" dataKey="planned" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Planned" />
-                <Bar yAxisId="left" dataKey="done" fill="#10B981" radius={[4, 4, 0, 0]} name="Completed" />
-                <Line yAxisId="right" type="monotone" dataKey="compliance" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3, fill: '#F59E0B' }} name="Compliance %" />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </div>
       </section>
 
-      {/* ── Compliance & Duration Trend Row ────────────────────────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+      {/* ── Monthly PM Trend (Compliance) ──────────────────────────────── */}
+      <section className="grid grid-cols-1 gap-5">
         <div className="glass-card p-5">
           <h3 className="text-card-title text-sm mb-1">PM Compliance Trend</h3>
           <p className="text-meta mb-4">Monthly compliance % over 12 months</p>
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={240}>
             <ComposedChart data={complianceTrend} margin={{ left: 0, right: 20, top: 5, bottom: 5 }}>
               <defs>
                 <linearGradient id="pmComplianceGrad" x1="0" y1="0" x2="0" y2="1">
@@ -550,23 +469,13 @@ export default function PreventiveMaintenance() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
               <XAxis dataKey="label" tick={AXIS} />
-              <YAxis tick={AXIS} domain={[0, 100]} unit="%" />
+              <YAxis yAxisId="left" tick={AXIS} />
+              <YAxis yAxisId="right" orientation="right" tick={AXIS} domain={[0, 100]} unit="%" />
               <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Line type="monotone" dataKey="compliance" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: '#10B981' }} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="glass-card p-5">
-          <h3 className="text-card-title text-sm mb-1">PM Duration Trend</h3>
-          <p className="text-meta mb-4">Total maintenance hours spent on PM per month</p>
-          <ResponsiveContainer width="100%" height={220}>
-            <ComposedChart data={durationTrend} margin={{ left: 0, right: 20, top: 5, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
-              <XAxis dataKey="label" tick={AXIS} />
-              <YAxis tick={AXIS} unit="h" />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Bar dataKey="totalDuration" fill="#8B5CF6" radius={[4, 4, 0, 0]} name="Total Hours" />
-              <Line type="monotone" dataKey="avgDuration" stroke="#06B6D4" strokeWidth={2} dot={{ r: 3, fill: '#06B6D4' }} name="Avg per Record" />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8' }} />
+              <Bar yAxisId="left" dataKey="planned" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Planned" />
+              <Bar yAxisId="left" dataKey="done" fill="#10B981" radius={[4, 4, 0, 0]} name="Completed" />
+              <Line yAxisId="right" type="monotone" dataKey="compliance" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3, fill: '#F59E0B' }} name="Compliance %" />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -574,10 +483,13 @@ export default function PreventiveMaintenance() {
 
       {/* ── Month-wise Machine PM Register ─────────────────────────────── */}
       <section className="glass-card p-5">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2.5 mb-4">
+          <div className="w-9 h-9 rounded-control bg-cyan-400/10 border border-cyan-400/25 flex items-center justify-center">
+            <ClipboardCheck size={17} className="text-cyan-400" aria-hidden="true" />
+          </div>
           <div>
-            <h3 className="text-card-title text-sm">Machine-wise PM Register</h3>
-            <p className="text-meta mt-0.5">{registerRows.length} PM entries across {new Set(registerRows.map((r) => r.machineCode || r.machineId)).size} machines</p>
+            <h3 className="text-card-title">Machine-wise PM Register</h3>
+            <p className="text-meta">{registerRows.length} PM entries across {new Set(registerRows.map((r) => r.machineCode || r.machineId)).size} machines — click a month tab to filter</p>
           </div>
         </div>
 
@@ -589,14 +501,14 @@ export default function PreventiveMaintenance() {
                 <button
                   key={m.key}
                   onClick={() => { setRegisterMonth(m.key); setRegPage(1); }}
-                  className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between ${
+                  className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
                     registerMonth === m.key
                       ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
                       : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
                   }`}
                 >
-                  <span>{m.full}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${registerMonth === m.key ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                  <span className="truncate">{m.full}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${registerMonth === m.key ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
                     {monthCounts[m.key] || 0}
                   </span>
                 </button>
@@ -608,15 +520,16 @@ export default function PreventiveMaintenance() {
           </div>
 
           {/* Right Content — Filters + Table */}
-          <div className="col-span-12 lg:col-span-9 space-y-3">
+          <div className="col-span-12 lg:col-span-9">
             {/* Filters */}
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4">
               <div className="relative flex-1">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
-                <input type="search" className="input-field pl-9 text-xs" placeholder="Search machine code or name..." value={regSearch} onChange={(e) => { setRegSearch(e.target.value); setRegPage(1); }} />
+                <input type="search" className="input-field pl-9 text-xs" placeholder="Search machine, code, section, or task..."
+                  value={regSearch} onChange={(e) => { setRegSearch(e.target.value); setRegPage(1); }} aria-label="Search machine PM records" />
               </div>
               <SectionSelect value={regSection} onChange={(v) => { setRegSection(v); setRegPage(1); }} className="select-field text-xs" showAddNew={false} />
-              <select className="select-field text-xs w-full sm:w-36" value={regStatus} onChange={(e) => { setRegStatus(e.target.value); setRegPage(1); }}>
+              <select className="select-field text-xs w-full sm:w-36" value={regStatus} onChange={(e) => { setRegStatus(e.target.value); setRegPage(1); }} aria-label="Filter by status">
                 <option value="">All Statuses</option>
                 <option value="COMPLETED">Completed</option>
                 <option value="PENDING">Pending</option>
@@ -627,82 +540,68 @@ export default function PreventiveMaintenance() {
             {regPageRows.length === 0 ? (
               <EmptyState title="No PM records for this period" description="Upload a PM Excel or log a summary to populate this register." />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="enterprise-table w-full text-xs">
-                  <thead>
-                    <tr>
-                      <th>Machine Code</th>
-                      <th>Machine Name</th>
-                      <th>Section</th>
-                      <th>PM Date</th>
-                      <th>PM Type & Task</th>
-                      <th>Duration</th>
-                      <th>Count</th>
-                      <th>Status</th>
-                      <th className="text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {regPageRows.map((row) => (
-                      <tr key={`${row.machineId}-${row.period}`} className="cursor-pointer hover:bg-cyan-500/5">
-                        <td className="text-cyan-400 font-medium">{row.machineCode || '—'}</td>
-                        <td className="text-slate-300 max-w-[160px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
-                        <td className="text-slate-300">{row.plantSection || '—'}</td>
-                        <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
-                        <td className="text-slate-300 max-w-[140px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—'}</td>
-                        <td className="text-cyan-300 font-semibold">{row.totalDuration}h</td>
-                        <td className="text-slate-300">{row.pmCount}</td>
-                        <td>
-                          <span className={`status-pill text-[10px] ${
-                            row.status === 'COMPLETED'
-                              ? 'bg-emerald-500/15 text-emerald-400'
-                              : 'bg-amber-500/15 text-amber-400'
-                          }`}>
-                            {row.status}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label="View"><Eye size={12} /></button>
-                            {isAdmin && (
-                              <>
-                                <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit"><Pencil size={12} /></button>
-                                <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete"><Trash2 size={12} /></button>
-                              </>
-                            )}
-                          </div>
-                        </td>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="enterprise-table w-full min-w-[800px]">
+                    <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
+                      <tr>
+                        <th>Machine Code</th>
+                        <th>Machine Name</th>
+                        <th>Plant Section</th>
+                        <th>PM Date</th>
+                        <th>PM Type & Task</th>
+                        <th>Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {/* Pagination */}
-            {regTotalPages > 1 && (
-              <div className="flex items-center justify-between pt-2">
-                <p className="text-meta">Showing {((regPage - 1) * PAGE_SIZE) + 1}–{Math.min(regPage * PAGE_SIZE, registerRows.length)} of {registerRows.length}</p>
-                <div className="flex gap-1">
-                  {Array.from({ length: regTotalPages }, (_, i) => i + 1)
-                    .filter((p) => p === 1 || p === regTotalPages || Math.abs(p - regPage) <= 2)
-                    .map((p, idx, arr) => (
-                      <span key={p} className="flex items-center">
-                        {idx > 0 && arr[idx - 1] !== p - 1 && <span className="text-slate-600 px-1">…</span>}
-                        <button
-                          onClick={() => setRegPage(p)}
-                          className={`w-7 h-7 rounded-control text-[11px] font-medium transition-all ${
-                            regPage === p
-                              ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30'
-                              : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      </span>
-                    ))}
+                    </thead>
+                    <tbody>
+                      {regPageRows.map((row) => (
+                        <tr key={`${row.machineId}-${row.period}`} className="cursor-pointer hover:bg-white/[0.03]">
+                          <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—'}</td>
+                          <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
+                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
+                          <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—'}</td>
+                          <td>
+                            <span className={`badge text-[10px] ${
+                              row.status === 'COMPLETED'
+                                ? 'bg-emerald-500/15 text-emerald-400'
+                                : 'bg-amber-500/15 text-amber-400'
+                            }`}>
+                              {row.status === 'COMPLETED' ? 'Completed' : 'Pending'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
+
+                {/* Pagination */}
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/[0.06]">
+                  <p className="text-slate-500 text-[11px]">
+                    Showing {Math.min((regPage - 1) * PAGE_SIZE + 1, registerRows.length)}–{Math.min(regPage * PAGE_SIZE, registerRows.length)} of {registerRows.length} entries
+                  </p>
+                  <div className="flex gap-1">
+                    {Array.from({ length: regTotalPages }, (_, i) => i + 1)
+                      .filter((p) => p === 1 || p === regTotalPages || Math.abs(p - regPage) <= 2)
+                      .map((p, idx, arr) => (
+                        <span key={p} className="flex items-center">
+                          {idx > 0 && arr[idx - 1] !== p - 1 && <span className="text-slate-600 px-1">…</span>}
+                          <button
+                            onClick={() => setRegPage(p)}
+                            className={`w-7 h-7 rounded-control text-[11px] font-medium transition-all ${
+                              regPage === p
+                                ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30'
+                                : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </span>
+                      ))}
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -718,39 +617,33 @@ export default function PreventiveMaintenance() {
               <thead>
                 <tr>
                   <th>Period</th><th>Plant Section</th><th>Planned</th><th>Done</th>
-                  <th>Pending</th><th>Compliance</th><th>Duration</th><th>Remarks</th>
+                  <th>Pending</th><th>Compliance</th><th>Remarks</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {summaryRows.map((row) => {
-                  const dur = row.durationHours || (row.startTime && row.endTime
-                    ? Math.round(((new Date(row.endTime) - new Date(row.startTime)) / 3_600_000) * 10) / 10
-                    : null);
-                  return (
-                    <tr key={row.id}>
-                      <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
-                      <td className="text-white font-medium">{row.section}</td>
-                      <td className="text-slate-300">{row.plannedCount}</td>
-                      <td className="text-slate-300">{row.doneCount}</td>
-                      <td className="text-slate-300">{row.pendingCount}</td>
-                      <td className="text-slate-300">{row.compliancePct}%</td>
-                      <td className="text-cyan-300 text-xs font-semibold">{dur != null ? `${dur}h` : '—'}</td>
-                      <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—'}</td>
-                      <td>
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label="View"><Eye size={12} /></button>
-                          {isAdmin && (
-                            <>
-                              <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit"><Pencil size={12} /></button>
-                              <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete"><Trash2 size={12} /></button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {summaryRows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
+                    <td className="text-white font-medium">{row.section}</td>
+                    <td className="text-slate-300">{row.plannedCount}</td>
+                    <td className="text-slate-300">{row.doneCount}</td>
+                    <td className="text-slate-300">{row.pendingCount}</td>
+                    <td className="text-slate-300">{row.compliancePct}%</td>
+                    <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—'}</td>
+                    <td>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label="View"><Eye size={12} /></button>
+                        {isAdmin && (
+                          <>
+                            <button onClick={() => setEditing(row)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit"><Pencil size={12} /></button>
+                            <button onClick={() => setDeleting(row)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete"><Trash2 size={12} /></button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

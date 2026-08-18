@@ -188,13 +188,11 @@ function machineMatches(left, right) {
   const rightCode = normalizeText(right.machineCode || right.id);
   const leftName = normalizeText(left.name);
   const rightName = normalizeText(right.name);
-  const leftSection = normalizeText(left.section);
-  const rightSection = normalizeText(right.section);
 
   return (
     (left.id && right.id && left.id === right.id) ||
     (leftCode && rightCode && leftCode === rightCode) ||
-    (leftName && rightName && leftSection && rightSection && leftName === rightName && leftSection === rightSection)
+    (leftName && rightName && leftName === rightName)
   );
 }
 
@@ -1695,17 +1693,39 @@ export function importMachinePmRecordsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
   const autoMapped = [];
+  const autoCreated = [];
 
   rows.forEach((row, idx) => {
-    // ── Smart Data Enrichment (Feature 2) ──────────────────────────────────
-    let matched = findMachineByIdentity(row.machineCode, row.machineName, row.plantSection);
+    // ── Robust case-insensitive matching with trim + double-space cleanup ──
+    const cleanName = (str) => String(str || '').trim().replace(/\s{2,}/g, ' ').toLowerCase();
+    const cleanCode = (str) => String(str || '').trim().toLowerCase();
 
-    // Fuzzy name match if no exact match
-    if (!matched && row.machineName) {
-      const nameLower = row.machineName.toLowerCase().trim();
+    let matched = null;
+
+    // 1. Try exact match by machineCode (case-insensitive, trimmed)
+    if (row.machineCode) {
+      const codeKey = cleanCode(row.machineCode);
       matched = state.machines.find((m) => {
-        const mName = (m.name || '').toLowerCase().trim();
-        return mName && (mName.includes(nameLower) || nameLower.includes(mName));
+        const mCode = cleanCode(m.machineCode || m.id);
+        return mCode === codeKey;
+      }) || null;
+    }
+
+    // 2. Try exact match by name (case-insensitive, trimmed, double-space cleaned)
+    if (!matched && row.machineName) {
+      const nameKey = cleanName(row.machineName);
+      matched = state.machines.find((m) => {
+        const mName = cleanName(m.name);
+        return mName && mName === nameKey;
+      }) || null;
+    }
+
+    // 3. Substring/partial match as fallback
+    if (!matched && row.machineName) {
+      const nameKey = cleanName(row.machineName);
+      matched = state.machines.find((m) => {
+        const mName = cleanName(m.name);
+        return mName && (mName.includes(nameKey) || nameKey.includes(mName));
       }) || null;
     }
 
@@ -1735,14 +1755,26 @@ export function importMachinePmRecordsBulk(rows, userName) {
       if (Object.keys(autoFilled).length > 0) {
         autoMapped.push({ row: idx + 2, machine: matched.name || matched.machineCode, fields: autoFilled });
       }
+    } else {
+      // Auto-create the machine under UNASSIGNED / PENDING SECTION so 0% data loss
+      const pendingSection = 'UNASSIGNED / PENDING SECTION';
+      const newMachine = normalizeMachineRecord({
+        id: row.machineCode || uid('m'),
+        machineCode: row.machineCode || '',
+        name: row.machineName || '',
+        section: row.plantSection || pendingSection,
+        status: 'running',
+        createdAt: now(),
+      });
+      state = { ...state, machines: [...state.machines, newMachine] };
+      autoCreated.push({ name: row.machineName, code: row.machineCode });
+      record.machineId = newMachine.id;
+      record.machineCode = newMachine.machineCode || newMachine.id;
+      record.machineName = newMachine.name;
+      record.plantSection = newMachine.section;
     }
 
-    if (!record.machineId) {
-      unmatchedRows.push(row.machineName || row.machineCode || `Row ${idx + 2}`);
-      return;
-    }
     logs.push(record);
-    if (!matched) unmatchedRows.push(row.machineName || row.machineCode);
   });
 
   // Dedup on machineId + pmDate + task within Excel
@@ -1758,8 +1790,13 @@ export function importMachinePmRecordsBulk(rows, userName) {
   deduped.forEach((r) => queueCloudMutation('machinePmRecords', 'upsert', r, { schedule: false }));
   scheduleCloudFlush();
 
+  if (autoCreated.length) {
+    commit('machines');
+    autoCreated.forEach((m) => queueCloudMutation('machines', 'upsert', state.machines.find((mc) => mc.name === m.name), { schedule: false }));
+    scheduleCloudFlush();
+  }
+
   // ── Auto-aggregate section-level PM summaries ────────────────────────────
-  // Group imported records by period (YYYY-MM) + section, then upsert into pms
   const aggMap = {};
   deduped.forEach((r) => {
     const period = (r.pmDate || '').slice(0, 7);
@@ -1804,11 +1841,82 @@ export function importMachinePmRecordsBulk(rows, userName) {
     }
   });
 
-  const detail = unmatchedRows.length
-    ? `${deduped.length} imported · ${unmatchedRows.length} unmatched: ${unmatchedRows.slice(0, 3).join(', ')}`
-    : `${deduped.length} PM records imported`;
+  const detail = [
+    `${deduped.length} PM records imported`,
+    autoCreated.length ? `${autoCreated.length} new machines auto-created` : '',
+    unmatchedRows.length ? `${unmatchedRows.length} unmatched` : '',
+  ].filter(Boolean).join(' · ');
   logActivity(userName, 'bulk imported machine PM records', detail, 'pm');
-  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows, autoMapped };
+  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows, autoMapped, autoCreated };
+}
+
+export function dryRunImportMachinePmRecords(rows) {
+  const cleanName = (str) => String(str || '').trim().replace(/\s{2,}/g, ' ').toLowerCase();
+  const cleanCode = (str) => String(str || '').trim().toLowerCase();
+
+  let matched = 0;
+  let unmatched = 0;
+  const unmatchedNames = [];
+  const autoCreateNames = [];
+  let totalCompleted = 0;
+  let totalPending = 0;
+  const periodSet = new Set();
+  const sectionsDetected = new Set();
+
+  rows.forEach((row) => {
+    let machine = null;
+
+    if (row.machineCode) {
+      const codeKey = cleanCode(row.machineCode);
+      machine = state.machines.find((m) => cleanCode(m.machineCode || m.id) === codeKey) || null;
+    }
+    if (!machine && row.machineName) {
+      const nameKey = cleanName(row.machineName);
+      machine = state.machines.find((m) => cleanName(m.name) === nameKey) || null;
+    }
+    if (!machine && row.machineName) {
+      const nameKey = cleanName(row.machineName);
+      machine = state.machines.find((m) => {
+        const mName = cleanName(m.name);
+        return mName && (mName.includes(nameKey) || nameKey.includes(mName));
+      }) || null;
+    }
+
+    if (machine) {
+      matched += 1;
+    } else {
+      unmatched += 1;
+      const label = row.machineName || row.machineCode || `Row`;
+      unmatchedNames.push(label);
+      autoCreateNames.push(label);
+    }
+
+    const st = String(row.status || 'completed').toLowerCase();
+    if (st === 'completed' || row.completed === true || row.completed === 'true') {
+      totalCompleted += 1;
+    } else {
+      totalPending += 1;
+    }
+
+    const period = (row.pmDate || '').slice(0, 7);
+    if (period) periodSet.add(period);
+    if (row.plantSection) sectionsDetected.add(row.plantSection);
+  });
+
+  const totalRows = rows.length;
+  return {
+    totalRows,
+    matched,
+    unmatched,
+    unmatchedNames: unmatchedNames.slice(0, 20),
+    autoCreateCount: autoCreateNames.length,
+    totalCompleted,
+    totalPending,
+    totalPlanned: totalRows,
+    compliance: totalRows > 0 ? Math.round((totalCompleted / totalRows) * 1000) / 10 : 0,
+    targetMonths: [...periodSet].sort(),
+    sectionsDetected: [...sectionsDetected],
+  };
 }
 
 // ── Dynamic Plant Sections ──────────────────────────────────────────────────
@@ -2146,12 +2254,16 @@ export function resetPersistentData() {
 
 function findMachineByIdentity(machineCode, name, section) {
   const codeKey = normalizeText(machineCode);
-  const nameKey = normalizeText(name);
+  const nameKey = normalizeText(name).replace(/\s{2,}/g, ' ');
   const sectionKey = normalizeText(section);
-  return state.machines.find((machine) => (
-    (codeKey && (normalizeText(machine.machineCode) === codeKey || normalizeText(machine.id) === codeKey)) ||
-    (nameKey && normalizeText(machine.name) === nameKey && (!sectionKey || normalizeText(machine.section) === sectionKey))
-  )) || null;
+  return state.machines.find((machine) => {
+    const mCode = normalizeText(machine.machineCode || machine.id);
+    const mName = normalizeText(machine.name).replace(/\s{2,}/g, ' ');
+    return (
+      (codeKey && mCode === codeKey) ||
+      (nameKey && mName === nameKey && (!sectionKey || normalizeText(machine.section) === sectionKey))
+    );
+  }) || null;
 }
 
 function ensureMachine(fields) {

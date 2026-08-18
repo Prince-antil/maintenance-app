@@ -6,7 +6,7 @@ import { useUI } from '../context/UIContext.jsx';
 import { CATEGORIES, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
 import SectionSelect from './SectionSelect.jsx';
 import { IMPORT_MODULES, downloadTemplate, inferUploadMeta, parseImportFile } from '../bulkImport.js';
-import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk } from '../store.js';
+import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk, dryRunImportMachinePmRecords } from '../store.js';
 
 const BULK_ALLOWED_EXT = ['.xlsx', '.xls', '.csv'];
 const MODULE_OPTIONS = [
@@ -56,6 +56,8 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('Waiting for file');
   const [parseState, setParseState] = useState(null);
+  const [dryRun, setDryRun] = useState(null);
+  const [showDryRun, setShowDryRun] = useState(false);
   const fileRef = useRef(null);
 
   const allowedExt = isBulk ? BULK_ALLOWED_EXT : ALLOWED_EXT;
@@ -77,6 +79,15 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
           reporting_year: inferred.reporting_year,
           plant_section: inferred.plant_section,
         }));
+        // Compute dry-run preview for PM machine records
+        if (result.moduleId === 'machinePmRecords' && result.parsedRows.length > 0) {
+          const preview = dryRunImportMachinePmRecords(result.parsedRows);
+          setDryRun(preview);
+          setShowDryRun(true);
+        } else {
+          setDryRun(null);
+          setShowDryRun(false);
+        }
       }
       setProgress(28);
       setProgressLabel(result.errors.length ? 'Preview ready with validation notes' : 'Preview ready');
@@ -302,6 +313,70 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
 
           {(loading || progress > 0) && <ProgressBar value={progress} label={progressLabel} />}
 
+          {isBulk && dryRun && showDryRun && (
+            <div className="rounded-card border border-amber-500/30 bg-amber-500/5 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <FileSpreadsheet size={15} className="text-amber-400" aria-hidden="true" />
+                <h3 className="text-sm font-semibold text-amber-300">Import Validation Preview</h3>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Total Rows</p>
+                  <p className="text-white text-lg font-bold">{dryRun.totalRows}</p>
+                </div>
+                <div className="rounded-control border border-emerald-500/20 bg-emerald-500/5 px-3 py-2">
+                  <p className="text-[10px] text-emerald-400/70 uppercase tracking-wider">Matched</p>
+                  <p className="text-emerald-400 text-lg font-bold">{dryRun.matched} / {dryRun.totalRows}</p>
+                </div>
+                <div className="rounded-control border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                  <p className="text-[10px] text-amber-400/70 uppercase tracking-wider">To Auto-Create</p>
+                  <p className="text-amber-400 text-lg font-bold">{dryRun.autoCreateCount}</p>
+                </div>
+                <div className="rounded-control border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+                  <p className="text-[10px] text-cyan-400/70 uppercase tracking-wider">Compliance</p>
+                  <p className="text-cyan-400 text-lg font-bold">{dryRun.compliance}%</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Completed</p>
+                  <p className="text-emerald-400 text-sm font-semibold">{dryRun.totalCompleted}</p>
+                </div>
+                <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Pending</p>
+                  <p className="text-amber-400 text-sm font-semibold">{dryRun.totalPending}</p>
+                </div>
+                <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Target Months</p>
+                  <p className="text-white text-sm font-semibold">{dryRun.targetMonths.join(', ') || '—'}</p>
+                </div>
+                <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">Sections</p>
+                  <p className="text-white text-sm font-semibold">{dryRun.sectionsDetected.length}</p>
+                </div>
+              </div>
+              {dryRun.unmatchedNames.length > 0 && (
+                <div className="rounded-control border border-amber-500/20 bg-amber-500/5 px-3 py-2">
+                  <p className="text-[10px] text-amber-400/70 uppercase tracking-wider mb-1">Unmatched Machines (will be auto-created as UNASSIGNED)</p>
+                  <div className="flex flex-wrap gap-1">
+                    {dryRun.unmatchedNames.slice(0, 10).map((name, i) => (
+                      <span key={i} className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">{name}</span>
+                    ))}
+                    {dryRun.unmatchedNames.length > 10 && (
+                      <span className="text-[10px] text-amber-400/60">+{dryRun.unmatchedNames.length - 10} more</span>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="mt-3 flex gap-2">
+                <button type="button" onClick={() => { setShowDryRun(false); setDryRun(null); }} className="btn-ghost text-xs">Cancel Import</button>
+                <button type="button" onClick={() => setShowDryRun(false)} className="btn-success text-xs inline-flex items-center gap-1.5">
+                  Confirm & Continue Import
+                </button>
+              </div>
+            </div>
+          )}
+
           {isBulk && parseState && (
             <div className="grid gap-4 lg:grid-cols-[1fr_1.5fr]">
               <div className="rounded-card border border-white/10 bg-white/[0.03] p-4">
@@ -369,7 +444,7 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
             </div>
           )}
 
-          <button type="submit" disabled={loading} className="btn-success flex items-center justify-center gap-2">
+          <button type="submit" disabled={loading || showDryRun} className="btn-success flex items-center justify-center gap-2 disabled:opacity-40">
             <Upload size={15} aria-hidden="true" />
             {loading ? 'Processing...' : isBulk ? 'Save File & Import Rows' : 'Upload Report'}
           </button>
