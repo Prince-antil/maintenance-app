@@ -767,6 +767,7 @@ export function machinePMRegister(machinePmRecords, monthFilter = null) {
     if (!grouped[key]) {
       grouped[key] = {
         period,
+        latestPmDate: log.pmDate || '',
         machineId: log.machineId || '',
         machineCode: log.machineCode || '',
         machineName: log.machineName || '',
@@ -783,6 +784,7 @@ export function machinePMRegister(machinePmRecords, monthFilter = null) {
     }
     grouped[key].pmCount += 1;
     grouped[key].totalDuration += log.durationHours || 0;
+    if ((log.pmDate || '') > grouped[key].latestPmDate) grouped[key].latestPmDate = log.pmDate || '';
     const st = String(log.status || '').toLowerCase();
     if (st === 'completed' || log.completed === true) {
       grouped[key].completedCount += 1;

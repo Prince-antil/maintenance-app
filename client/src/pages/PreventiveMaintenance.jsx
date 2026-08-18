@@ -23,6 +23,14 @@ import {
 const currentPeriod = () => new Date().toISOString().slice(0, 7);
 const PAGE_SIZE = 15;
 
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function formatDisplayDate(iso) {
+  if (!iso) return '—';
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m) return '—';
+  return d ? `${String(d).padStart(2, '0')} ${MONTHS_SHORT[m - 1]} ${y}` : `${MONTHS_SHORT[m - 1]} ${y}`;
+}
+
 const GRID = 'rgba(148,163,184,0.08)';
 const AXIS = { fill: '#64748B', fontSize: 11 };
 const TOOLTIP_STYLE = {
@@ -405,6 +413,8 @@ export default function PreventiveMaintenance() {
     }
   };
 
+  const uniqueMachineCount = useMemo(() => new Set(registerRows.map((r) => r.machineCode || r.machineId)).size, [registerRows]);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -524,7 +534,7 @@ export default function PreventiveMaintenance() {
           <div>
             <h3 className="text-card-title">Machine-wise PM Register</h3>
             <p className="text-meta">
-              {registerRows.length} PM entries across {new Set(registerRows.map((r) => r.machineCode || r.machineId)).size} machines
+              {registerRows.length} PM entries across {uniqueMachineCount} unique machines
               {registerMonth ? ` for ${availableMonths.find((m) => m.key === registerMonth)?.full || registerMonth}` : ' — click a month tab to filter'}
             </p>
           </div>
@@ -610,7 +620,7 @@ export default function PreventiveMaintenance() {
                           <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—'}</td>
                           <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
                           <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
-                          <td className="text-slate-300 text-xs whitespace-nowrap">{formatPeriodKey(row.period, true)}</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{formatDisplayDate(row.latestPmDate) || formatPeriodKey(row.period, true)}</td>
                           <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—'}</td>
                           <td>
                             <span className={`badge text-[10px] ${

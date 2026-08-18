@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { useStore, deleteMachine } from '../store.js';
-import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, equipmentWiseBreakdown } from '../analytics.js';
+import { machineHealth, aggregateBreakdownRecords, summaryMonthKey, formatPeriodKey, lastNMonths, equipmentWiseBreakdown } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
@@ -32,7 +32,7 @@ export default function Machines() {
   const { user } = useAuth();
   const { openAddMachine, openUpload } = useUI();
   const navigate = useNavigate();
-  const { machines, breakdowns, pms } = useStore();
+  const { machines, breakdowns, pms, machinePmRecords } = useStore();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [section, setSection] = useState('');
@@ -74,14 +74,18 @@ export default function Machines() {
       (!section || r.section === section) &&
       (!month || summaryMonthKey(r) === month)
     );
-    const pmFiltered = pms.filter((r) =>
-      (!section || r.section === section) &&
-      (!month || summaryMonthKey(r) === month)
-    );
     const bdSummary = aggregateBreakdownRecords(bdFiltered);
-    const pmSummary = aggregatePMRecords(pmFiltered);
 
-    // Section-wise breakdown breakdown (for the plant-wise panel)
+    const pmFiltered = machinePmRecords.filter((r) => {
+      const recMonth = (r.pmDate || '').slice(0, 7);
+      return (!section || r.plantSection === section) && (!month || recMonth === month);
+    });
+    const pmTotal = pmFiltered.length;
+    const pmCompleted = pmFiltered.filter((r) =>
+      String(r.status || '').toLowerCase() === 'completed' || r.completed === true
+    ).length;
+    const pmCompliance = pmTotal > 0 ? Math.round((pmCompleted / pmTotal) * 1000) / 10 : 0;
+
     const sectionBreakdowns = equipmentWiseBreakdown(bdFiltered);
 
     return {
@@ -89,13 +93,13 @@ export default function Machines() {
       downtimeHours: bdSummary.downtimeHours,
       mttr: bdSummary.mttr,
       mtbf: bdSummary.mtbf,
-      pmCompliance: pmSummary.compliance,
-      pmDone: pmSummary.doneCount,
-      pmPlanned: pmSummary.plannedCount,
+      pmCompliance,
+      pmDone: pmCompleted,
+      pmPlanned: pmTotal,
       sectionBreakdowns,
       isFiltered: !!(section || month),
     };
-  }, [breakdowns, pms, section, month]);
+  }, [breakdowns, machinePmRecords, section, month]);
 
   const handleExport = () =>
     exportToCSV(
