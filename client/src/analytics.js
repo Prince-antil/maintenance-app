@@ -720,3 +720,120 @@ export function buildAMCNotifications(amcRecords, machines) {
 
   return notifications.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
+
+// ── PM Machine-Level Analytics ──────────────────────────────────────────────
+
+export function machineWisePM(machinePmRecords) {
+  const counts = {};
+  (machinePmRecords || []).forEach((row) => {
+    const key = row.machineName || row.machineCode || row.machineId || 'Unknown';
+    if (!counts[key]) counts[key] = { label: key, count: 0, duration: 0, sections: new Set() };
+    counts[key].count += 1;
+    counts[key].duration += row.durationHours || 0;
+    if (row.plantSection) counts[key].sections.add(row.plantSection);
+  });
+  return Object.values(counts)
+    .map((row) => ({ ...row, duration: round1(row.duration), sections: undefined, section: [...(row.sections || [])][0] || '' }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export function pmTypePareto(machinePmRecords) {
+  const counts = {};
+  (machinePmRecords || []).forEach((row) => {
+    const type = row.pmType || row.pm_type || 'Preventive';
+    if (!counts[type]) counts[type] = { label: type, count: 0 };
+    counts[type].count += 1;
+  });
+  const sorted = Object.values(counts).sort((a, b) => b.count - a.count);
+  const total = sorted.reduce((sum, row) => sum + row.count, 0) || 1;
+  let cumulative = 0;
+  return sorted.map((row) => {
+    cumulative += row.count;
+    return { ...row, cumulative: Math.round((cumulative / total) * 100) };
+  });
+}
+
+export function machinePMRegister(machinePmRecords, monthFilter = null) {
+  const logs = monthFilter
+    ? (machinePmRecords || []).filter((l) => (l.pmDate || '').slice(0, 7) === monthFilter)
+    : (machinePmRecords || []);
+
+  const grouped = {};
+  logs.forEach((log) => {
+    const period = (log.pmDate || '').slice(0, 7);
+    if (!period) return;
+    const machineKey = log.machineId || log.machineCode || log.machineName || 'Unknown';
+    const key = `${period}::${machineKey}`;
+    if (!grouped[key]) {
+      grouped[key] = {
+        period,
+        machineId: log.machineId || '',
+        machineCode: log.machineCode || '',
+        machineName: log.machineName || '',
+        plantSection: log.plantSection || '',
+        pmCount: 0,
+        completedCount: 0,
+        pendingCount: 0,
+        overdueCount: 0,
+        totalDuration: 0,
+        mainTask: '',
+        tasks: {},
+        hasPending: false,
+      };
+    }
+    grouped[key].pmCount += 1;
+    grouped[key].totalDuration += log.durationHours || 0;
+    const st = String(log.status || '').toLowerCase();
+    if (st === 'completed' || log.completed === true) {
+      grouped[key].completedCount += 1;
+    } else if (st === 'overdue') {
+      grouped[key].overdueCount += 1;
+      grouped[key].hasPending = true;
+    } else {
+      grouped[key].pendingCount += 1;
+      grouped[key].hasPending = true;
+    }
+    const task = String(log.task || log.pmType || '').trim();
+    if (task) grouped[key].tasks[task] = (grouped[key].tasks[task] || 0) + 1;
+  });
+
+  return Object.values(grouped)
+    .map((g) => {
+      const mainTask = Object.entries(g.tasks).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      return {
+        ...g,
+        totalDuration: round1(g.totalDuration),
+        mainTask,
+        status: g.hasPending ? 'PENDING' : 'COMPLETED',
+      };
+    })
+    .sort((a, b) => b.period.localeCompare(a.period) || b.pmCount - a.pmCount);
+}
+
+export function monthlyPMComplianceTrend(pms, n = 6) {
+  return lastNMonths(n).map((month) => {
+    const summary = aggregatePMRecords(pms, month.key);
+    return {
+      label: month.label,
+      compliance: summary.compliance,
+      planned: summary.plannedCount,
+      done: summary.doneCount,
+      pending: summary.pendingCount,
+    };
+  });
+}
+
+export function monthlyPMDurationTrend(machinePmRecords, n = 6) {
+  return lastNMonths(n).map((month) => {
+    const rows = (machinePmRecords || []).filter((r) => (r.pmDate || '').slice(0, 7) === month.key);
+    const totalDuration = rows.reduce((sum, r) => sum + (r.durationHours || 0), 0);
+    const completedRows = rows.filter((r) => r.status === 'completed' || r.completed === true);
+    const avgDuration = completedRows.length > 0 ? totalDuration / completedRows.length : 0;
+    return {
+      label: month.label,
+      totalDuration: round1(totalDuration),
+      avgDuration: round1(avgDuration),
+      recordCount: rows.length,
+    };
+  });
+}

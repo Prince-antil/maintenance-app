@@ -1758,6 +1758,52 @@ export function importMachinePmRecordsBulk(rows, userName) {
   deduped.forEach((r) => queueCloudMutation('machinePmRecords', 'upsert', r, { schedule: false }));
   scheduleCloudFlush();
 
+  // ── Auto-aggregate section-level PM summaries ────────────────────────────
+  // Group imported records by period (YYYY-MM) + section, then upsert into pms
+  const aggMap = {};
+  deduped.forEach((r) => {
+    const period = (r.pmDate || '').slice(0, 7);
+    if (!period) return;
+    const section = r.plantSection || MASTER_SECTION;
+    const key = `${period}::${section}`;
+    if (!aggMap[key]) aggMap[key] = { period, section, plannedCount: 0, doneCount: 0, pendingCount: 0 };
+    aggMap[key].plannedCount += 1;
+    const st = String(r.status || '').toLowerCase();
+    if (st === 'completed' || r.completed === true) {
+      aggMap[key].doneCount += 1;
+    } else {
+      aggMap[key].pendingCount += 1;
+    }
+  });
+
+  Object.values(aggMap).forEach((agg) => {
+    const compliancePct = agg.plannedCount > 0 ? Math.round((agg.doneCount / agg.plannedCount) * 1000) / 10 : 0;
+    const existingSummary = state.pms.find((p) => p.period === agg.period && p.section === agg.section);
+    if (existingSummary) {
+      const merged = {
+        ...existingSummary,
+        plannedCount: agg.plannedCount,
+        doneCount: agg.doneCount,
+        pendingCount: agg.pendingCount,
+        compliancePct,
+        updatedAt: now(),
+      };
+      state = { ...state, pms: state.pms.map((p) => (p.id === existingSummary.id ? merged : p)) };
+      commitAndQueue('pms', 'upsert', merged);
+    } else {
+      const newSummary = normalizePMSummary({
+        period: agg.period,
+        section: agg.section,
+        plannedCount: agg.plannedCount,
+        doneCount: agg.doneCount,
+        pendingCount: agg.pendingCount,
+        compliancePct,
+      });
+      state = { ...state, pms: [newSummary, ...state.pms] };
+      commitAndQueue('pms', 'upsert', newSummary);
+    }
+  });
+
   const detail = unmatchedRows.length
     ? `${deduped.length} imported · ${unmatchedRows.length} unmatched: ${unmatchedRows.slice(0, 3).join(', ')}`
     : `${deduped.length} PM records imported`;
