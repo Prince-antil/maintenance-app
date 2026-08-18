@@ -732,9 +732,9 @@ export default function PreventiveMaintenance() {
       {confirmPurge && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !purgeLoading && setConfirmPurge(false)} role="dialog" aria-modal="true">
           <div className="modal-content glass-card p-6 w-full max-w-sm">
-            <h3 className="text-card-title mb-2">Purge All PM Records</h3>
+            <h3 className="text-card-title mb-2">Purge All PM Data</h3>
             <p className="text-body mb-5">
-              Are you sure you want to purge all <span className="text-white font-medium">{machinePmRecords.length} PM records</span>?
+              This will delete all <span className="text-white font-medium">{machinePmRecords.length} PM records</span> and <span className="text-white font-medium">{pms.length} section summaries</span>.
               Existing <span className="text-white font-medium">{machines.length} machines</span> will remain untouched.
             </p>
             <div className="flex gap-2 justify-end">

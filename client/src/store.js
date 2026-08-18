@@ -1305,7 +1305,30 @@ async function initializeCloudSync() {
       plantSections: remotePlantSections,
     };
 
-    if (remoteMachines.length) replaceEntityState('machines', remoteMachines, false);
+    // Merge cloud machines with local state (instead of replacing)
+    // This preserves local-only machines that haven't been synced to Supabase yet
+    if (remoteMachines.length) {
+      const localMachines = state.machines || [];
+      const merged = [...remoteMachines];
+      const mergedIds = new Set(merged.map((m) => m.id));
+      const mergedCodes = new Set(merged.map((m) => normalizeText(m.machineCode || '')));
+      const mergedNames = new Set(merged.map((m) => normalizeText(m.name || '')));
+
+      localMachines.forEach((local) => {
+        const lid = local.id || '';
+        const lCode = normalizeText(local.machineCode || '');
+        const lName = normalizeText(local.name || '');
+        if (mergedIds.has(lid) || mergedCodes.has(lCode) || mergedNames.has(lName)) return;
+        merged.push(local);
+        mergedIds.add(lid);
+        if (lCode) mergedCodes.add(lCode);
+        if (lName) mergedNames.add(lName);
+      });
+
+      const finalMachines = mergeSeedMachines(merged, SEED_MACHINES);
+      state = { ...state, machines: finalMachines };
+      persistEntity('machines');
+    }
     if (remoteBreakdowns.length) replaceEntityState('breakdowns', remoteBreakdowns, false);
     if (remotePMs.length) replaceEntityState('pms', remotePMs, false);
     if (remoteEnergy.length) replaceEntityState('energy', remoteEnergy, false);
@@ -1690,32 +1713,44 @@ export function deleteMachinePmRecord(id, userName) {
 }
 
 export async function purgePmRecords(userName) {
-  const previousCount = state.machinePmRecords.length;
+  const previousPmCount = state.machinePmRecords.length;
+  const previousSummaryCount = state.pms.length;
 
   // 1. Clear local state immediately
-  state = { ...state, machinePmRecords: [] };
+  state = { ...state, machinePmRecords: [], pms: [] };
   commit('machinePmRecords');
+  commit('pms');
   notifyStoreUpdate();
 
-  // 2. Delete all rows from Supabase machine_pm_records table
+  // 2. Delete all rows from Supabase tables
   if (supabase && isSupabaseConfigured) {
-    const { error } = await supabase
+    const { error: pmErr } = await supabase
       .from('machine_pm_records')
       .delete()
       .neq('id', '00000000-0000-0000-0000-000000000000');
-    if (error) {
-      rtLog('error', 'PURGE failed on machine_pm_records:', error.message);
-      throw error;
+    if (pmErr) {
+      rtLog('error', 'PURGE failed on machine_pm_records:', pmErr.message);
+      throw pmErr;
+    }
+
+    const { error: summaryErr } = await supabase
+      .from('pm_logs')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (summaryErr) {
+      rtLog('error', 'PURGE failed on pm_logs:', summaryErr.message);
     }
   }
 
-  // 3. Clear the cloud sync queue for this entity so stale upserts don't reappear
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'machinePmRecords');
+  // 3. Clear the cloud sync queue for these entities so stale upserts don't reappear
+  const queue = loadPendingCloudOps().filter(
+    (op) => op.entity !== 'machinePmRecords' && op.entity !== 'pms'
+  );
   savePendingCloudOps(queue);
   updateSyncState({ pending: queue.length });
 
-  logActivity(userName, 'purged all PM records', `${previousCount} records removed`, 'pm');
-  return { purged: previousCount };
+  logActivity(userName, 'purged all PM records', `${previousPmCount} records + ${previousSummaryCount} summaries removed`, 'pm');
+  return { purged: previousPmCount, summariesPurged: previousSummaryCount };
 }
 
 export function importMachinePmRecordsBulk(rows, userName) {
