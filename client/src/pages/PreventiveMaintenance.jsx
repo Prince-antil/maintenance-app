@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM, updatePM } from '../store.js';
+import { useStore, addPM, deletePM, updatePM, purgePmRecords } from '../store.js';
 import {
-  aggregatePMRecords, formatPeriodKey, pmStats, lastNMonths,
+  formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,
-  monthlyPMComplianceTrend,
+  monthlyPMComplianceTrendFromRecords,
 } from '../analytics.js';
 import { getAllSections } from '../constants.js';
 import SectionSelect from '../components/SectionSelect.jsx';
@@ -254,9 +254,12 @@ export default function PreventiveMaintenance() {
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
 
   // Register filters
   const [registerMonth, setRegisterMonth] = useState('');
+  const [kpiMonth, setKpiMonth] = useState('');
   const [regSearch, setRegSearch] = useState('');
   const [regSection, setRegSection] = useState('');
   const [regStatus, setRegStatus] = useState('');
@@ -267,19 +270,43 @@ export default function PreventiveMaintenance() {
   const currentKey = currentPeriod();
   const sections = useMemo(() => getAllSections(store.plantSections), [store.plantSections]);
 
-  // ── Analytics: KPI cards computed directly from machine_pm_records ──────
+  // ── Analytics: data derivations (ordered to avoid forward references) ──
   const stats = useMemo(() => pmStats(pms), [pms]);
+  const topMachines = useMemo(() => machineWisePM(machinePmRecords).slice(0, 10), [machinePmRecords]);
+  const typePareto = useMemo(() => pmTypePareto(machinePmRecords), [machinePmRecords]);
+  const monthlyRegister = useMemo(() => machinePMRegister(machinePmRecords), [machinePmRecords]);
+
+  // Available months for sidebar — must come before KPI month resolution
+  const availableMonths = useMemo(() => {
+    const monthSet = new Set(monthlyRegister.map((r) => r.period));
+    return lastNMonths(12).filter((m) => monthSet.has(m.key));
+  }, [monthlyRegister]);
+
+  // Determine the active month for KPI calculation:
+  // - If user selected a month tab, use that
+  // - Otherwise default to the latest month containing PM data
+  const activeKpiMonth = useMemo(() => {
+    if (kpiMonth) return kpiMonth;
+    return availableMonths.length ? availableMonths[0].key : '';
+  }, [kpiMonth, availableMonths]);
 
   const currentMonthRecords = useMemo(
-    () => machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === currentKey),
-    [machinePmRecords, currentKey]
+    () => machinePmRecords.filter((r) => activeKpiMonth && (r.pmDate || '').slice(0, 7) === activeKpiMonth),
+    [machinePmRecords, activeKpiMonth]
   );
-  const prevMonthRecords = useMemo(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === key);
-  }, [machinePmRecords]);
+
+  // Previous month relative to the active KPI month
+  const prevKpiMonth = useMemo(() => {
+    if (!activeKpiMonth) return '';
+    const [y, m] = activeKpiMonth.split('-').map(Number);
+    const d = new Date(y, m - 2, 1); // month is 1-indexed, subtract 2 for prev month
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, [activeKpiMonth]);
+
+  const prevMonthRecords = useMemo(
+    () => machinePmRecords.filter((r) => prevKpiMonth && (r.pmDate || '').slice(0, 7) === prevKpiMonth),
+    [machinePmRecords, prevKpiMonth]
+  );
 
   const totalPlanned = currentMonthRecords.length;
   const totalCompleted = currentMonthRecords.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
@@ -296,23 +323,15 @@ export default function PreventiveMaintenance() {
     return Math.round(((curr - prev) / prev) * 100);
   };
 
-  const topMachines = useMemo(() => machineWisePM(machinePmRecords).slice(0, 10), [machinePmRecords]);
-  const typePareto = useMemo(() => pmTypePareto(machinePmRecords), [machinePmRecords]);
-  const complianceTrend = useMemo(() => monthlyPMComplianceTrend(pms, 12), [pms]);
-  const monthlyRegister = useMemo(() => machinePMRegister(machinePmRecords), [machinePmRecords]);
-
-  // Available months for sidebar
-  const availableMonths = useMemo(() => {
-    const monthSet = new Set(monthlyRegister.map((r) => r.period));
-    return lastNMonths(12).filter((m) => monthSet.has(m.key));
-  }, [monthlyRegister]);
+  const complianceTrend = useMemo(() => monthlyPMComplianceTrendFromRecords(machinePmRecords, 12), [machinePmRecords]);
 
   // Default to current month
   useEffect(() => {
     if (!registerMonth && availableMonths.length) {
       const currentM = availableMonths.find((m) => m.key === currentKey);
-      if (currentM) setRegisterMonth(currentM.key);
-      else if (availableMonths.length) setRegisterMonth(availableMonths[0].key);
+      const defaultMonth = currentM ? currentM.key : availableMonths[0].key;
+      setRegisterMonth(defaultMonth);
+      setKpiMonth(defaultMonth);
     }
   }, [availableMonths, registerMonth, currentKey]);
 
@@ -374,6 +393,18 @@ export default function PreventiveMaintenance() {
     'pm-machine-register.csv'
   );
 
+  const handlePurge = async () => {
+    setPurgeLoading(true);
+    try {
+      await purgePmRecords(userName);
+      setConfirmPurge(false);
+    } catch (err) {
+      // error logged inside store
+    } finally {
+      setPurgeLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -393,6 +424,9 @@ export default function PreventiveMaintenance() {
             <>
               <button onClick={() => openUpload({ kind: 'bulk', module: 'pm' })} className="btn-success inline-flex items-center gap-2 whitespace-nowrap text-xs">
                 <Upload size={13} aria-hidden="true" /> Upload Excel
+              </button>
+              <button onClick={() => setConfirmPurge(true)} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20">
+                <Trash2 size={13} aria-hidden="true" /> Purge PM Data
               </button>
               <button onClick={() => setShowNew(true)} className="btn-primary inline-flex items-center gap-2 whitespace-nowrap">
                 <Plus size={15} aria-hidden="true" /> Log Summary
@@ -489,7 +523,10 @@ export default function PreventiveMaintenance() {
           </div>
           <div>
             <h3 className="text-card-title">Machine-wise PM Register</h3>
-            <p className="text-meta">{registerRows.length} PM entries across {new Set(registerRows.map((r) => r.machineCode || r.machineId)).size} machines — click a month tab to filter</p>
+            <p className="text-meta">
+              {registerRows.length} PM entries across {new Set(registerRows.map((r) => r.machineCode || r.machineId)).size} machines
+              {registerMonth ? ` for ${availableMonths.find((m) => m.key === registerMonth)?.full || registerMonth}` : ' — click a month tab to filter'}
+            </p>
           </div>
         </div>
 
@@ -497,10 +534,24 @@ export default function PreventiveMaintenance() {
           {/* Left Sidebar — Month Tabs */}
           <div className="col-span-12 lg:col-span-3">
             <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
+              {/* All Months tab */}
+              <button
+                onClick={() => { setRegisterMonth(''); setKpiMonth(''); setRegPage(1); }}
+                className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
+                  !registerMonth
+                    ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
+                    : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
+                }`}
+              >
+                <span className="truncate">All Months</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                  {machinePmRecords.length}
+                </span>
+              </button>
               {availableMonths.map((m) => (
                 <button
                   key={m.key}
-                  onClick={() => { setRegisterMonth(m.key); setRegPage(1); }}
+                  onClick={() => { setRegisterMonth(m.key); setKpiMonth(m.key); setRegPage(1); }}
                   className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
                     registerMonth === m.key
                       ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
@@ -663,6 +714,23 @@ export default function PreventiveMaintenance() {
               <button onClick={() => setDeleting(null)} className="btn-ghost text-xs">Cancel</button>
               <button onClick={() => { deletePM(deleting.id, userName); setDeleting(null); }} className="btn-danger text-xs inline-flex items-center gap-1.5">
                 <Trash2 size={12} aria-hidden="true" /> Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {confirmPurge && (
+        <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !purgeLoading && setConfirmPurge(false)} role="dialog" aria-modal="true">
+          <div className="modal-content glass-card p-6 w-full max-w-sm">
+            <h3 className="text-card-title mb-2">Purge All PM Records</h3>
+            <p className="text-body mb-5">
+              Are you sure you want to purge all <span className="text-white font-medium">{machinePmRecords.length} PM records</span>?
+              Existing <span className="text-white font-medium">{machines.length} machines</span> will remain untouched.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
+              <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
+                <Trash2 size={12} aria-hidden="true" /> {purgeLoading ? 'Purging...' : 'Purge All'}
               </button>
             </div>
           </div>

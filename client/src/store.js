@@ -1689,6 +1689,35 @@ export function deleteMachinePmRecord(id, userName) {
   logActivity(userName, 'deleted machine PM record', '', 'pm');
 }
 
+export async function purgePmRecords(userName) {
+  const previousCount = state.machinePmRecords.length;
+
+  // 1. Clear local state immediately
+  state = { ...state, machinePmRecords: [] };
+  commit('machinePmRecords');
+  notifyStoreUpdate();
+
+  // 2. Delete all rows from Supabase machine_pm_records table
+  if (supabase && isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('machine_pm_records')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      rtLog('error', 'PURGE failed on machine_pm_records:', error.message);
+      throw error;
+    }
+  }
+
+  // 3. Clear the cloud sync queue for this entity so stale upserts don't reappear
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'machinePmRecords');
+  savePendingCloudOps(queue);
+  updateSyncState({ pending: queue.length });
+
+  logActivity(userName, 'purged all PM records', `${previousCount} records removed`, 'pm');
+  return { purged: previousCount };
+}
+
 export function importMachinePmRecordsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];

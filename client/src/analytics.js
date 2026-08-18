@@ -837,3 +837,23 @@ export function monthlyPMDurationTrend(machinePmRecords, n = 6) {
     };
   });
 }
+
+export function monthlyPMComplianceTrendFromRecords(machinePmRecords, n = 12) {
+  return lastNMonths(n).map((month) => {
+    const rows = (machinePmRecords || []).filter(
+      (r) => (r.pmDate || '').slice(0, 7) === month.key
+    );
+    const planned = rows.length;
+    const completed = rows.filter(
+      (r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true
+    ).length;
+    const compliance = planned > 0 ? Math.round((completed / planned) * 100) : 0;
+    return {
+      label: month.label,
+      compliance,
+      planned,
+      done: completed,
+      pending: planned - completed,
+    };
+  });
+}
