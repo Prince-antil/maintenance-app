@@ -188,6 +188,152 @@ create table if not exists public.plant_sections (
 
 create index if not exists idx_plant_sections_name on public.plant_sections (name);
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 9. DAILY UTILITY LOG — Raw cumulative meter/DG readings per day
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.daily_utility_log (
+  id                              text primary key,
+  date                            date not null unique,
+  u1_import_kwh_reading           numeric(14, 2) not null default 0,
+  u1_import_kvah_reading          numeric(14, 2) not null default 0,
+  u1_export_kwh_reading           numeric(14, 2) not null default 0,
+  u1_export_kvah_reading          numeric(14, 2) not null default 0,
+  u1_solar_kwh_reading            numeric(14, 2) not null default 0,
+  u1_solar_kvah_reading           numeric(14, 2) not null default 0,
+  u2_import_kwh_reading           numeric(14, 2) not null default 0,
+  u2_import_kvah_reading          numeric(14, 2) not null default 0,
+  u2_export_kwh_reading           numeric(14, 2) not null default 0,
+  u2_export_kvah_reading          numeric(14, 2) not null default 0,
+  u2_solar_kwh_reading            numeric(14, 2) not null default 0,
+  u2_solar_kvah_reading           numeric(14, 2) not null default 0,
+  dg380_kwh_reading               numeric(14, 2) not null default 0,
+  dg380_hourmeter_reading         numeric(14, 2) not null default 0,
+  dg380_hsd_opening_ltr           numeric(10, 2) not null default 0,
+  dg380_hsd_added_ltr             numeric(10, 2) not null default 0,
+  dg380_def_opening_pct           numeric(5, 1) not null default 0,
+  dg380_def_added_pct             numeric(5, 1) not null default 0,
+  dg500_kwh_reading               numeric(14, 2) not null default 0,
+  dg500_hourmeter_reading         numeric(14, 2) not null default 0,
+  dg500_hsd_opening_ltr           numeric(10, 2) not null default 0,
+  dg500_hsd_added_ltr             numeric(10, 2) not null default 0,
+  dg500_def_opening_pct           numeric(5, 1) not null default 0,
+  dg500_def_added_pct             numeric(5, 1) not null default 0,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_daily_utility_date on public.daily_utility_log (date desc);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 10. MONTHLY HERBICIDE SECTION — Sub-meter readings for herbicide area
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.monthly_herbicide_section (
+  id                              text primary key,
+  month                           text not null,
+  glyphosate_m1_meter_reading     numeric(14, 2) not null default 0,
+  maintenance_topper_m2_meter_reading numeric(14, 2) not null default 0,
+  acm_herbicide_m3_meter_reading  numeric(14, 2) not null default 0,
+  topper_herbicide_m4_meter_reading numeric(14, 2) not null default 0,
+  maintenance_printing_meter_reading numeric(14, 2) not null default 0,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now()),
+  unique (month)
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 11. MONTHLY INSECTICIDE SECTION — Sub-meter readings for insecticide area
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.monthly_insecticide_section (
+  id                                    text primary key,
+  month                                 text not null,
+  feeder2_sc_electric_room_meter_reading  numeric(14, 2) not null default 0,
+  feeder3_waterbath_meter_reading       numeric(14, 2) not null default 0,
+  feeder4_jetmill_meter_reading         numeric(14, 2) not null default 0,
+  feeder5_cartap_plant_meter_reading    numeric(14, 2) not null default 0,
+  feeder6_ec_formulation_meter_reading  numeric(14, 2) not null default 0,
+  feeder7_spare_meter_reading           numeric(14, 2) not null default 0,
+  feeder8_ec_packing_meter_reading      numeric(14, 2) not null default 0,
+  feeder9_admin_block_meter_reading     numeric(14, 2) not null default 0,
+  acm_insecticide_meter_reading         numeric(14, 2) not null default 0,
+  air_compressor02_ir_meter_reading     numeric(14, 2) not null default 0,
+  air_compressor03_atlas_meter_reading  numeric(14, 2) not null default 0,
+  air_compressor01_ir_atlas_meter_reading numeric(14, 2) not null default 0,
+  created_at                            timestamptz not null default timezone('utc', now()),
+  updated_at                            timestamptz not null default timezone('utc', now()),
+  unique (month)
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 12. MONTHLY WATER STP — Sub-meter readings for water/STP
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.monthly_water_stp (
+  id                              text primary key,
+  month                           text not null,
+  stp_outlet_meter_reading        numeric(14, 2) not null default 0,
+  ro_inlet_meter_reading          numeric(14, 2) not null default 0,
+  ro_rejected_meter_reading       numeric(14, 2) not null default 0,
+  piau_water_meter_reading        numeric(14, 2) not null default 0,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now()),
+  unique (month)
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 13. MONTHLY AIR COMPRESSOR — Run/load hours per compressor
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.monthly_air_compressor (
+  id                              text primary key,
+  month                           text not null,
+  compressor1_run_hrs_reading     numeric(10, 2) not null default 0,
+  compressor1_load_hrs_reading    numeric(10, 2) not null default 0,
+  compressor2_run_hrs_reading     numeric(10, 2) not null default 0,
+  compressor2_load_hrs_reading    numeric(10, 2) not null default 0,
+  compressor3_run_hrs_reading     numeric(10, 2) not null default 0,
+  compressor3_load_hrs_reading    numeric(10, 2) not null default 0,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now()),
+  unique (month)
+);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 14. DAILY SOLAR INVERTER GENERATION — Per-inverter kWh per day
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.daily_solar_generation (
+  id                              text primary key,
+  date                            date not null unique,
+  u1_inv1_kwh                     numeric(14, 2) not null default 0,
+  u1_inv2_kwh                     numeric(14, 2) not null default 0,
+  u1_inv3_kwh                     numeric(14, 2) not null default 0,
+  u1_inv4_kwh                     numeric(14, 2) not null default 0,
+  u2_inv1_kwh                     numeric(14, 2) not null default 0,
+  u2_inv2_kwh                     numeric(14, 2) not null default 0,
+  u2_inv3_kwh                     numeric(14, 2) not null default 0,
+  daily_total_kwh                 numeric(14, 2) not null default 0,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_daily_solar_date on public.daily_solar_generation (date desc);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 15. ENERGY SETTINGS — Editable configuration for energy calculations
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.energy_settings (
+  id                              text primary key default 'default',
+  u1_import_export_ct             numeric(8, 2) not null default 5,
+  u1_solar_ct                     numeric(8, 2) not null default 100,
+  u2_import_export_ct             numeric(8, 2) not null default 10,
+  u2_solar_ct                     numeric(8, 2) not null default 80,
+  pf_warning_threshold            numeric(5, 2) not null default 0.90,
+  installed_solar_capacity_kwp    numeric(10, 2) not null default 540,
+  grid_co2_emission_factor        numeric(8, 4) not null default 0.82,
+  avg_peak_sun_hours_per_day      numeric(5, 2) not null default 5.5,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now())
+);
+
+insert into public.energy_settings (id) values ('default') on conflict (id) do nothing;
+
 -- =============================================================================
 -- ROW LEVEL SECURITY — Enable RLS on all tables and create permissive policies
 -- =============================================================================
@@ -199,6 +345,13 @@ alter table public.amc_records              enable row level security;
 alter table public.machine_breakdown_logs   enable row level security;
 alter table public.machine_pm_records       enable row level security;
 alter table public.plant_sections           enable row level security;
+alter table public.daily_utility_log        enable row level security;
+alter table public.monthly_herbicide_section enable row level security;
+alter table public.monthly_insecticide_section enable row level security;
+alter table public.monthly_water_stp        enable row level security;
+alter table public.monthly_air_compressor   enable row level security;
+alter table public.daily_solar_generation   enable row level security;
+alter table public.energy_settings          enable row level security;
 
 drop policy if exists "public machines access"              on public.machines;
 drop policy if exists "public breakdown access"             on public.breakdown_logs;
@@ -208,6 +361,13 @@ drop policy if exists "public amc access"                   on public.amc_record
 drop policy if exists "public machine bd logs access"       on public.machine_breakdown_logs;
 drop policy if exists "public machine pm records access"    on public.machine_pm_records;
 drop policy if exists "public plant sections access"        on public.plant_sections;
+drop policy if exists "public daily utility access"         on public.daily_utility_log;
+drop policy if exists "public monthly herbicide access"     on public.monthly_herbicide_section;
+drop policy if exists "public monthly insecticide access"   on public.monthly_insecticide_section;
+drop policy if exists "public monthly water stp access"     on public.monthly_water_stp;
+drop policy if exists "public monthly air compressor access" on public.monthly_air_compressor;
+drop policy if exists "public daily solar access"           on public.daily_solar_generation;
+drop policy if exists "public energy settings access"       on public.energy_settings;
 
 create policy "public machines access"
   on public.machines for all to anon, authenticated
@@ -239,6 +399,34 @@ create policy "public machine pm records access"
 
 create policy "public plant sections access"
   on public.plant_sections for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public daily utility access"
+  on public.daily_utility_log for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public monthly herbicide access"
+  on public.monthly_herbicide_section for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public monthly insecticide access"
+  on public.monthly_insecticide_section for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public monthly water stp access"
+  on public.monthly_water_stp for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public monthly air compressor access"
+  on public.monthly_air_compressor for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public daily solar access"
+  on public.daily_solar_generation for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public energy settings access"
+  on public.energy_settings for all to anon, authenticated
   using (true) with check (true);
 
 -- =============================================================================
@@ -301,6 +489,55 @@ begin
   ) then
     alter publication supabase_realtime add table public.plant_sections;
   end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_utility_log'
+  ) then
+    alter publication supabase_realtime add table public.daily_utility_log;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'monthly_herbicide_section'
+  ) then
+    alter publication supabase_realtime add table public.monthly_herbicide_section;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'monthly_insecticide_section'
+  ) then
+    alter publication supabase_realtime add table public.monthly_insecticide_section;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'monthly_water_stp'
+  ) then
+    alter publication supabase_realtime add table public.monthly_water_stp;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'monthly_air_compressor'
+  ) then
+    alter publication supabase_realtime add table public.monthly_air_compressor;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'daily_solar_generation'
+  ) then
+    alter publication supabase_realtime add table public.daily_solar_generation;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'energy_settings'
+  ) then
+    alter publication supabase_realtime add table public.energy_settings;
+  end if;
 end
 $$;
 
@@ -316,6 +553,13 @@ alter table public.amc_records             replica identity full;
 alter table public.machine_breakdown_logs  replica identity full;
 alter table public.machine_pm_records      replica identity full;
 alter table public.plant_sections          replica identity full;
+alter table public.daily_utility_log       replica identity full;
+alter table public.monthly_herbicide_section replica identity full;
+alter table public.monthly_insecticide_section replica identity full;
+alter table public.monthly_water_stp       replica identity full;
+alter table public.monthly_air_compressor  replica identity full;
+alter table public.daily_solar_generation  replica identity full;
+alter table public.energy_settings         replica identity full;
 
 -- =============================================================================
 -- SUPABASE STORAGE — AMC documents bucket

@@ -16,6 +16,7 @@ import {
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution, monthlyEnergyOverview,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey,
+  computePfTrend, computeDgFuelEfficiency, computeRenewableSummary,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -65,6 +66,7 @@ export default function Dashboard() {
   const { refreshKey, openUpload, openMasterImport } = useUI();
   const navigate = useNavigate();
   const store = useStore();
+  const { machines, breakdowns, pms, energy, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -102,6 +104,9 @@ export default function Dashboard() {
     store.energy.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
+    dailyUtilityLog.forEach((r) => {
+      if (r.date) allPeriods.add(String(r.date).slice(0, 7));
+    });
     return [...allPeriods].sort().reverse();
   }, [store]);
 
@@ -122,6 +127,42 @@ export default function Dashboard() {
     [store.machineBreakdownLogs, periodFilter]
   );
 
+  const filteredDailyUtilityLog = useMemo(() =>
+    periodFilter === 'all' ? dailyUtilityLog : dailyUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [dailyUtilityLog, periodFilter]
+  );
+  const filteredDailySolarGeneration = useMemo(() =>
+    periodFilter === 'all' ? dailySolarGeneration : dailySolarGeneration.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [dailySolarGeneration, periodFilter]
+  );
+
+  const pfTrend = useMemo(() =>
+    computePfTrend(filteredDailyUtilityLog).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
+    [filteredDailyUtilityLog]
+  );
+  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(filteredDailyUtilityLog), [filteredDailyUtilityLog]);
+
+  const currentMonthKey = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const renewableSummary = useMemo(
+    () => computeRenewableSummary(dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey),
+    [dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey]
+  );
+
+  const latestPf = useMemo(() => {
+    if (filteredDailyUtilityLog.length === 0) return null;
+    const sorted = [...filteredDailyUtilityLog].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const last = sorted[sorted.length - 1];
+    return {
+      date: last.date,
+      u1Pf: (Number(last.u1ImportKvah) || 0) > 0 ? round1((Number(last.u1ImportKwh) || 0) / (Number(last.u1ImportKvah) || 0)) : 0,
+      u2Pf: (Number(last.u2ImportKvah) || 0) > 0 ? round1((Number(last.u2ImportKwh) || 0) / (Number(last.u2ImportKvah) || 0)) : 0,
+    };
+  }, [filteredDailyUtilityLog]);
+
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
     equipment: equipmentWiseBreakdown(filteredBreakdowns).slice(0, 8),
@@ -139,7 +180,9 @@ export default function Dashboard() {
     monthlyRegister: machineBreakdownRegister(filteredMachineBDLogs),
     activeBreakdowns: currentlyUnderBreakdown(store.machineBreakdownLogs),
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
-  }), [filteredBreakdowns, filteredPMs, filteredEnergy, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc]);
+    pfTrend,
+    dgFuelEfficiency,
+  }), [filteredBreakdowns, filteredPMs, filteredEnergy, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
@@ -175,6 +218,8 @@ export default function Dashboard() {
   const noBDs = store.breakdowns.length === 0;
   const noPMs = store.pms.length === 0;
   const noEnergy = store.energy.length === 0;
+  const noDailyUtility = filteredDailyUtilityLog.length === 0;
+  const noSolar = filteredDailySolarGeneration.length === 0;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -286,7 +331,7 @@ export default function Dashboard() {
             <Zap size={16} className="text-amber-400" aria-hidden="true" />
             <h3 className="text-card-title">Energy Snapshot — This Month</h3>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
             {/* UHBVNL Unit 1 */}
             <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 1 Grid</p>
@@ -328,6 +373,18 @@ export default function Dashboard() {
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Fuel</p>
               <p className="text-red-300 text-base font-bold tabular-nums">{(kpi.fuelMonth || 0).toLocaleString()}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">Ltrs</p>
+            </div>
+            {/* Power Factor */}
+            <div className="rounded-control bg-teal-500/[0.07] border border-teal-500/20 p-3 text-center">
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
+              {latestPf ? (
+                <>
+                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.u1Pf || '—'}</p>
+                  <p className="text-slate-500 text-[10px] mt-0.5">U1 · U2 {latestPf.u2Pf || '—'}</p>
+                </>
+              ) : (
+                <p className="text-slate-500 text-[10px]">No data</p>
+              )}
             </div>
           </div>
           {/* Unit 1 vs Unit 2 split bar */}
@@ -424,6 +481,99 @@ export default function Dashboard() {
         </ChartCard>
         <ChartCard title="Monthly Energy Consumption" subtitle="Total live kWh trend" empty={noEnergy}>
           <TrendChart data={charts.energy} dataKey="kwh" color="#F59E0B" unit=" kWh" />
+        </ChartCard>
+        <ChartCard title="Power Factor Trend" subtitle="Unit 1 & Unit 2 daily power factor" empty={noDailyUtility} height={260} raw>
+          {noDailyUtility ? (
+            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
+          ) : (
+            <div className="space-y-3 h-full">
+              <div className="flex-1 min-h-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 px-1">Unit 1 PF</p>
+                <TrendChart data={charts.pfTrend} dataKey="u1Pf" color="#14B8A6" unit="" yDomain={[0, 1]} />
+              </div>
+              <div className="flex-1 min-h-0">
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 px-1">Unit 2 PF</p>
+                <TrendChart data={charts.pfTrend} dataKey="u2Pf" color="#8B5CF6" unit="" yDomain={[0, 1]} />
+              </div>
+            </div>
+          )}
+        </ChartCard>
+        <ChartCard title="DG Fuel Efficiency" subtitle="kWh per litre — DG 500 vs DG 380" empty={noDailyUtility}>
+          {noDailyUtility ? (
+            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
+          ) : (
+            <GroupedBarChart
+              data={charts.dgFuelEfficiency}
+              bars={[
+                { dataKey: 'dg500KwhPerLitre', name: 'DG 500 kVA (kWh/L)', color: '#F59E0B' },
+                { dataKey: 'dg380KwhPerLitre', name: 'DG 380 kVA (kWh/L)', color: '#FB923C' },
+              ]}
+            />
+          )}
+        </ChartCard>
+        <ChartCard title="Solar Performance" subtitle="Inverter total vs meter-side generation" empty={noSolar && noDailyUtility} height={260} raw>
+          {(noSolar && noDailyUtility) ? (
+            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-5 px-6">
+              <div className="flex items-end gap-8 w-full max-w-xs">
+                <div className="flex-1 text-center">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Inverter Total</p>
+                  <div className="rounded-t-md bg-emerald-500/20 border border-emerald-500/30 pt-3 pb-2 px-2">
+                    <p className="text-emerald-300 text-lg font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
+                    <p className="text-emerald-400/60 text-[10px]">kWh</p>
+                  </div>
+                </div>
+                <div className="flex-1 text-center">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Side</p>
+                  <div className="rounded-t-md bg-cyan-500/20 border border-cyan-500/30 pt-3 pb-2 px-2">
+                    <p className="text-cyan-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolar.toLocaleString()}</p>
+                    <p className="text-cyan-400/60 text-[10px]">kWh</p>
+                  </div>
+                </div>
+              </div>
+              {renewableSummary.solarCrossCheck > 0 && (
+                <p className="text-[11px] text-amber-400/80">Cross-check deviation: {renewableSummary.solarCrossCheck}%</p>
+              )}
+            </div>
+          )}
+        </ChartCard>
+        <ChartCard title="Renewable Energy & CO₂ Avoided" subtitle="This month's sustainability metrics" empty={noSolar && noDailyUtility} height={260} raw>
+          {(noSolar && noDailyUtility) ? (
+            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 h-full items-center px-4">
+              <div className="text-center">
+                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Solar Generation</p>
+                <p className="text-emerald-300 text-2xl font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
+                <p className="text-emerald-400/60 text-[10px] mt-0.5">kWh</p>
+              </div>
+              <div className="text-center">
+                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Renewable Share</p>
+                <p className="text-cyan-300 text-2xl font-bold tabular-nums">{renewableSummary.renewableSharePct}%</p>
+                <p className="text-cyan-400/60 text-[10px] mt-0.5">of total consumption</p>
+              </div>
+              <div className="text-center">
+                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">CO₂ Avoided</p>
+                <p className="text-teal-300 text-2xl font-bold tabular-nums">{renewableSummary.co2AvoidedKg.toLocaleString()}</p>
+                <p className="text-teal-400/60 text-[10px] mt-0.5">kg</p>
+              </div>
+              <div className="text-center">
+                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Performance Ratio</p>
+                <p className="text-amber-300 text-2xl font-bold tabular-nums">{renewableSummary.performanceRatio}%</p>
+                <p className="text-amber-400/60 text-[10px] mt-0.5">of expected output</p>
+              </div>
+              {renewableSummary.warnings.length > 0 && (
+                <div className="col-span-2 mt-2">
+                  {renewableSummary.warnings.map((w, i) => (
+                    <p key={i} className="text-[11px] text-amber-400/80 flex items-center gap-1.5">
+                      <AlertTriangle size={11} aria-hidden="true" /> {w}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </ChartCard>
         <ChartCard title="Machine Health Distribution" subtitle="Fleet condition derived from failures & PM" empty={!store.machines.length}>
           <PieDonutChart data={charts.health} donut centerLabel={kpi.machineCount} centerSub="Machines" />

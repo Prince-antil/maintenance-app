@@ -859,3 +859,305 @@ export function monthlyPMComplianceTrendFromRecords(machinePmRecords, n = 12) {
     };
   });
 }
+
+// ── Domain A: Daily Utility Calculations ─────────────────────────────────────
+
+export function computeDailyUtilityDerived(current, previous, settings) {
+  const s = settings || {};
+  const u1SolarCt = Number(s.u1SolarCt) || 0;
+  const u2SolarCt = Number(s.u2SolarCt) || 0;
+  const pfWarningThreshold = Number(s.pfWarningThreshold) || 0.9;
+  const gridCo2EmissionFactor = Number(s.gridCo2EmissionFactor) || 0;
+  const installedCapacity = Number(s.installedCapacity) || 0;
+  const peakSunHours = Number(s.peakSunHours) || 0;
+
+  const c = current || {};
+  const p = previous || {};
+  const warnings = [];
+
+  const diffCheck = (label, cur, prev) => {
+    if (Number(cur) < Number(prev) && Number(prev) > 0) {
+      warnings.push(`${label} meter appears to have reset (current ${cur} < previous ${prev})`);
+    }
+  };
+
+  // U1 grid
+  diffCheck('U1 Import kWh', c.u1ImportKwh, p.u1ImportKwh);
+  const u1ImportKwh = round1((Number(c.u1ImportKwh) || 0) - (Number(p.u1ImportKwh) || 0));
+  const u1ImportKvah = round1((Number(c.u1ImportKvah) || 0) - (Number(p.u1ImportKvah) || 0));
+  const u1Pf = u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0;
+
+  // U1 export
+  diffCheck('U1 Export kWh', c.u1ExportKwh, p.u1ExportKwh);
+  const u1ExportKwh = round1((Number(c.u1ExportKwh) || 0) - (Number(p.u1ExportKwh) || 0));
+  const u1ExportKvah = round1((Number(c.u1ExportKvah) || 0) - (Number(p.u1ExportKvah) || 0));
+
+  // U1 solar
+  const u1SolarKwh = round1(((Number(c.u1SolarKwh) || 0) - (Number(p.u1SolarKwh) || 0)) * u1SolarCt);
+
+  // U2 grid
+  diffCheck('U2 Import kWh', c.u2ImportKwh, p.u2ImportKwh);
+  const u2ImportKwh = round1((Number(c.u2ImportKwh) || 0) - (Number(p.u2ImportKwh) || 0));
+  const u2ImportKvah = round1((Number(c.u2ImportKvah) || 0) - (Number(p.u2ImportKvah) || 0));
+  const u2Pf = u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0;
+
+  // U2 export
+  diffCheck('U2 Export kWh', c.u2ExportKwh, p.u2ExportKwh);
+  const u2ExportKwh = round1((Number(c.u2ExportKwh) || 0) - (Number(p.u2ExportKwh) || 0));
+  const u2ExportKvah = round1((Number(c.u2ExportKvah) || 0) - (Number(p.u2ExportKvah) || 0));
+
+  // U2 solar
+  const u2SolarKwh = round1(((Number(c.u2SolarKwh) || 0) - (Number(p.u2SolarKwh) || 0)) * u2SolarCt);
+
+  // DG 380
+  diffCheck('DG380 kWh', c.dg380Kwh, p.dg380Kwh);
+  const dg380Generation = round1((Number(c.dg380Kwh) || 0) - (Number(p.dg380Kwh) || 0));
+  diffCheck('DG380 hourmeter', c.dg380Hourmeter, p.dg380Hourmeter);
+  const dg380RunHours = round1((Number(c.dg380Hourmeter) || 0) - (Number(p.dg380Hourmeter) || 0));
+  const dg380Opening = Number(p.dg380FuelAdded) != null ? Number(p.dg380FuelAdded) : (Number(c.dg380Opening) || 0);
+  const dg380FuelConsumed = round1(dg380Opening + (Number(c.dg380FuelAdded) || 0) - (Number(c.dg380Closing) || 0));
+  const dg380KwhPerLitre = dg380FuelConsumed > 0 ? round1(dg380Generation / dg380FuelConsumed) : 0;
+
+  // DG 500
+  diffCheck('DG500 kWh', c.dg500Kwh, p.dg500Kwh);
+  const dg500Generation = round1((Number(c.dg500Kwh) || 0) - (Number(p.dg500Kwh) || 0));
+  diffCheck('DG500 hourmeter', c.dg500Hourmeter, p.dg500Hourmeter);
+  const dg500RunHours = round1((Number(c.dg500Hourmeter) || 0) - (Number(p.dg500Hourmeter) || 0));
+  const dg500Opening = Number(p.dg500FuelAdded) != null ? Number(p.dg500FuelAdded) : (Number(c.dg500Opening) || 0);
+  const dg500FuelConsumed = round1(dg500Opening + (Number(c.dg500FuelAdded) || 0) - (Number(c.dg500Closing) || 0));
+  const dg500KwhPerLitre = dg500FuelConsumed > 0 ? round1(dg500Generation / dg500FuelConsumed) : 0;
+
+  // Totals
+  const totalGridKwh = round1(u1ImportKwh + u2ImportKwh);
+  const totalDgKwh = round1(dg380Generation + dg500Generation);
+  const totalSolarKwh = round1(u1SolarKwh + u2SolarKwh);
+  const totalEnergyKwh = round1(totalGridKwh + totalDgKwh + totalSolarKwh);
+
+  const gridSharePct = totalEnergyKwh > 0 ? round1((totalGridKwh / totalEnergyKwh) * 100) : 0;
+  const dgSharePct = totalEnergyKwh > 0 ? round1((totalDgKwh / totalEnergyKwh) * 100) : 0;
+  const solarSharePct = totalEnergyKwh > 0 ? round1((totalSolarKwh / totalEnergyKwh) * 100) : 0;
+
+  // PF warnings
+  if (u1Pf > 0 && u1Pf < pfWarningThreshold) {
+    warnings.push(`U1 Power Factor (${u1Pf}) is below threshold (${pfWarningThreshold})`);
+  }
+  if (u2Pf > 0 && u2Pf < pfWarningThreshold) {
+    warnings.push(`U2 Power Factor (${u2Pf}) is below threshold (${pfWarningThreshold})`);
+  }
+
+  return {
+    u1ImportKwh, u1ImportKvah, u1Pf,
+    u1ExportKwh, u1ExportKvah, u1SolarKwh,
+    u2ImportKwh, u2ImportKvah, u2Pf,
+    u2ExportKwh, u2ExportKvah, u2SolarKwh,
+    dg380Generation, dg380RunHours, dg380FuelConsumed, dg380KwhPerLitre,
+    dg500Generation, dg500RunHours, dg500FuelConsumed, dg500KwhPerLitre,
+    totalGridKwh, totalDgKwh, totalSolarKwh, totalEnergyKwh,
+    gridSharePct, dgSharePct, solarSharePct,
+    warnings,
+  };
+}
+
+// ── Domain B: Monthly Section Consumption (Herbicide) ────────────────────────
+
+const HERBICIDE_FEEDERS = [
+  'glyphosateM1', 'glyphosateM2', 'glufosinateM1', 'glufosinateM2',
+  '24dM1', '24dM2', 'metribuzinM1', 'metribuzinM2',
+  'oxyfluorfenM1', 'oxyfluorfenM2', 'pendimethalinM1', 'pendimethalinM2',
+];
+
+export function computeHerbicideConsumption(current, previous) {
+  const warnings = [];
+  const feeders = {};
+  let totalKwh = 0;
+
+  HERBICIDE_FEEDERS.forEach((key) => {
+    const cur = Number(current?.[key]) || 0;
+    const prev = Number(previous?.[key]) || 0;
+    let consumption = cur - prev;
+    if (consumption < 0 && prev > 0) {
+      warnings.push(`${key} meter appears to have reset (current ${cur} < previous ${prev})`);
+      consumption = 0;
+    }
+    feeders[key] = round1(consumption);
+    totalKwh += consumption;
+  });
+
+  return { feeders, totalKwh: round1(totalKwh), warnings };
+}
+
+// ── Domain B: Monthly Section Consumption (Insecticide) ──────────────────────
+
+const INSECTICIDE_FEEDERS = [
+  'chlorpyrifosM1', 'chlorpyrifosM2', 'cypermethrinM1', 'cypermethrinM2',
+  'imidaclopridM1', 'imidaclopridM2', 'thiamethoxamM1', 'thiamethoxamM2',
+  'lambdaCyalothrinM1', 'lambdaCyalothrinM2', 'acetamipridM1', 'acetamipridM2',
+  'profenofosM1',
+];
+
+export function computeInsecticideConsumption(current, previous) {
+  const warnings = [];
+  const feeders = {};
+  let totalKwh = 0;
+
+  INSECTICIDE_FEEDERS.forEach((key) => {
+    const cur = Number(current?.[key]) || 0;
+    const prev = Number(previous?.[key]) || 0;
+    let consumption = cur - prev;
+    if (consumption < 0 && prev > 0) {
+      warnings.push(`${key} meter appears to have reset (current ${cur} < previous ${prev})`);
+      consumption = 0;
+    }
+    feeders[key] = round1(consumption);
+    totalKwh += consumption;
+  });
+
+  return { feeders, totalKwh: round1(totalKwh), warnings };
+}
+
+// ── Domain C: Monthly Water Consumption ──────────────────────────────────────
+
+export function computeWaterConsumption(current, previous) {
+  const warnings = [];
+  const keys = ['stpOutletKl', 'roInletKl', 'roRejectedKl', 'piauWaterKl'];
+  const result = {};
+
+  keys.forEach((key) => {
+    const cur = Number(current?.[key]) || 0;
+    const prev = Number(previous?.[key]) || 0;
+    let consumption = cur - prev;
+    if (consumption < 0 && prev > 0) {
+      warnings.push(`${key} meter appears to have reset (current ${cur} < previous ${prev})`);
+      consumption = 0;
+    }
+    result[key] = round1(consumption);
+  });
+
+  result.totalWaterKl = round1(
+    result.stpOutletKl + result.roInletKl + result.roRejectedKl + result.piauWaterKl
+  );
+  result.warnings = warnings;
+  return result;
+}
+
+// ── Domain D: Air Compressor Performance ─────────────────────────────────────
+
+export function computeAirCompressorPerformance(current, previous) {
+  const compressors = [1, 2, 3];
+  return compressors.map((id) => {
+    const c = current || {};
+    const p = previous || {};
+    const runHours = round1((Number(c[`compressor${id}RunHours`]) || 0) - (Number(p[`compressor${id}RunHours`]) || 0));
+    const loadHours = round1((Number(c[`compressor${id}LoadHours`]) || 0) - (Number(p[`compressor${id}LoadHours`]) || 0));
+    const unloadHours = round1(Math.max(0, runHours - loadHours));
+    const loadPct = runHours > 0 ? round1((loadHours / runHours) * 100) : 0;
+    return { compressor: id, runHours, loadHours, unloadHours, loadPct };
+  });
+}
+
+// ── Domain D: Renewable Energy Summary ───────────────────────────────────────
+
+export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energySettings, monthKey_) {
+  const logs = (dailyUtilityLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthKey_);
+  const solarLogs = (dailySolarLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthKey_);
+  const s = energySettings || {};
+
+  // Solar from inverter logs
+  const solarFromInverters = round1(
+    solarLogs.reduce((sum, l) => sum + (Number(l.daily_total_kwh) || 0), 0)
+  );
+
+  // Meter-side solar from daily utility
+  const meterSideSolar = round1(
+    logs.reduce((sum, l) => sum + (Number(l.u1SolarKwh) || 0) + (Number(l.u2SolarKwh) || 0), 0)
+  );
+
+  // Total plant consumption from utility
+  const totalPlantConsumption = round1(
+    logs.reduce((sum, l) => sum + (Number(l.totalGridKwh) || 0) + (Number(l.totalDgKwh) || 0) + (Number(l.totalSolarKwh) || 0), 0)
+  );
+
+  const renewableSharePct = totalPlantConsumption > 0
+    ? round1((solarFromInverters / totalPlantConsumption) * 100)
+    : 0;
+
+  // Performance ratio
+  const installedCapacity = Number(s.installedCapacity) || 0;
+  const peakSunHours = Number(s.peakSunHours) || 0;
+  const daysInMonth = new Date(Number(monthKey_.split('-')[0]), Number(monthKey_.split('-')[1]), 0).getDate() || 30;
+  const expectedSolar = installedCapacity * peakSunHours * daysInMonth;
+  const performanceRatio = expectedSolar > 0 ? round1((solarFromInverters / expectedSolar) * 100) : 0;
+
+  // CO2 avoided
+  const gridCo2EmissionFactor = Number(s.gridCo2EmissionFactor) || 0;
+  const co2AvoidedKg = round1(solarFromInverters * gridCo2EmissionFactor);
+
+  // Cross-check
+  const solarCrossCheck = meterSideSolar > 0
+    ? round1(Math.abs(solarFromInverters - meterSideSolar) / meterSideSolar * 100)
+    : 0;
+  const warnings = [];
+  if (solarCrossCheck > 10) {
+    warnings.push('Solar Metering Cross-Check Required');
+  }
+
+  return {
+    solarFromInverters,
+    meterSideSolar,
+    totalPlantConsumption,
+    renewableSharePct,
+    performanceRatio,
+    co2AvoidedKg,
+    solarCrossCheck,
+    warnings,
+  };
+}
+
+// ── Domain D: Power Factor Trend ─────────────────────────────────────────────
+
+export function computePfTrend(dailyUtilityLogs, n = 12) {
+  const logs = dailyUtilityLogs || [];
+  const sorted = [...logs].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const last = sorted.slice(-n);
+
+  return last.map((l) => {
+    const u1ImportKwh = Number(l.u1ImportKwh) || 0;
+    const u1ImportKvah = Number(l.u1ImportKvah) || 0;
+    const u2ImportKwh = Number(l.u2ImportKwh) || 0;
+    const u2ImportKvah = Number(l.u2ImportKvah) || 0;
+    return {
+      date: l.date || '',
+      u1Pf: u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0,
+      u2Pf: u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0,
+    };
+  });
+}
+
+// ── Domain D: DG Fuel Efficiency Trend ───────────────────────────────────────
+
+export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6) {
+  const months = lastNMonths(n);
+  const logs = dailyUtilityLogs || [];
+
+  return months.map((month) => {
+    const monthLogs = logs.filter((l) => (l.date || '').slice(0, 7) === month.key);
+
+    let dg380Generation = 0;
+    let dg380Fuel = 0;
+    let dg500Generation = 0;
+    let dg500Fuel = 0;
+
+    monthLogs.forEach((l) => {
+      dg380Generation += Number(l.dg380Generation) || 0;
+      dg380Fuel += Number(l.dg380FuelConsumed) || 0;
+      dg500Generation += Number(l.dg500Generation) || 0;
+      dg500Fuel += Number(l.dg500FuelConsumed) || 0;
+    });
+
+    return {
+      label: month.label,
+      dg380KwhPerLitre: dg380Fuel > 0 ? round1(dg380Generation / dg380Fuel) : 0,
+      dg500KwhPerLitre: dg500Fuel > 0 ? round1(dg500Generation / dg500Fuel) : 0,
+    };
+  });
+}

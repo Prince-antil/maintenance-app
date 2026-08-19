@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
-import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData } from '../store.js';
+import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData, getEnergySettings, upsertEnergySettings } from '../store.js';
 import { clearReportVault, listReportMetadata } from '../reportVault.js';
 import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
 import {
@@ -32,6 +32,20 @@ export default function Settings() {
   const [notifReminderDays, setNotifReminderDays] = useState('30,15,7,1');
   const [notifSaved, setNotifSaved] = useState(false);
   const [notifTestMsg, setNotifTestMsg] = useState(null);
+
+  const currentEnergy = getEnergySettings();
+  const [energyEditing, setEnergyEditing] = useState(false);
+  const [energyForm, setEnergyForm] = useState({
+    u1ImportExportCtRatio: currentEnergy.u1ImportExportCtRatio ?? '',
+    u1SolarCtRatio: currentEnergy.u1SolarCtRatio ?? '',
+    u2ImportExportCtRatio: currentEnergy.u2ImportExportCtRatio ?? '',
+    u2SolarCtRatio: currentEnergy.u2SolarCtRatio ?? '',
+    pfWarningThreshold: currentEnergy.pfWarningThreshold ?? '',
+    installedSolarCapacityKwp: currentEnergy.installedSolarCapacityKwp ?? '',
+    gridCO2EmissionFactor: currentEnergy.gridCO2EmissionFactor ?? '',
+    avgPeakSunHoursPerDay: currentEnergy.avgPeakSunHoursPerDay ?? '',
+  });
+  const [energySaved, setEnergySaved] = useState(false);
 
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
@@ -87,6 +101,17 @@ export default function Settings() {
     }
 
     logActivity(userName, 'cleared persistent browser data', 'Restored default machine master and cleared monthly logs', 'warning');
+  };
+
+  const saveEnergy = () => {
+    const numericForm = {};
+    for (const [k, v] of Object.entries(energyForm)) {
+      numericForm[k] = v === '' ? null : Number(v);
+    }
+    upsertEnergySettings(numericForm, userName);
+    setEnergyEditing(false);
+    setEnergySaved(true);
+    setTimeout(() => setEnergySaved(false), 2500);
   };
 
   const DATA_ROWS = [
@@ -235,6 +260,136 @@ export default function Settings() {
           <Info size={11} className="mt-px flex-shrink-0" aria-hidden="true" />
           Equipment master data, monthly logs, and uploaded files are stored in persistent browser storage. They remain available after reloads and browser restarts until you clear them here. The JSON backup covers operational records; uploaded report files stay in the browser vault on this device.
         </p>
+      </div>
+
+      {/* Energy Configuration */}
+      <div className="glass-card p-5">
+        <h3 className="text-card-title flex items-center gap-2 mb-4">
+          <Zap size={15} className="text-amber-400" aria-hidden="true" /> Energy Configuration
+        </h3>
+        {energyEditing ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-meta block mb-1.5">U1 Import/Export CT Ratio</label>
+                <input
+                  type="number"
+                  className="input-field text-xs w-full"
+                  value={energyForm.u1ImportExportCtRatio}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u1ImportExportCtRatio: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">U1 Solar CT Ratio</label>
+                <input
+                  type="number"
+                  className="input-field text-xs w-full"
+                  value={energyForm.u1SolarCtRatio}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u1SolarCtRatio: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">U2 Import/Export CT Ratio</label>
+                <input
+                  type="number"
+                  className="input-field text-xs w-full"
+                  value={energyForm.u2ImportExportCtRatio}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u2ImportExportCtRatio: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">U2 Solar CT Ratio</label>
+                <input
+                  type="number"
+                  className="input-field text-xs w-full"
+                  value={energyForm.u2SolarCtRatio}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u2SolarCtRatio: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">PF Warning Threshold (0–1)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  className="input-field text-xs w-full"
+                  value={energyForm.pfWarningThreshold}
+                  onChange={(e) => setEnergyForm({ ...energyForm, pfWarningThreshold: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Installed Solar Capacity (kWp)</label>
+                <input
+                  type="number"
+                  className="input-field text-xs w-full"
+                  value={energyForm.installedSolarCapacityKwp}
+                  onChange={(e) => setEnergyForm({ ...energyForm, installedSolarCapacityKwp: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Grid CO2 Emission Factor</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input-field text-xs w-full"
+                  value={energyForm.gridCO2EmissionFactor}
+                  onChange={(e) => setEnergyForm({ ...energyForm, gridCO2EmissionFactor: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Avg Peak Sun Hours per Day</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  className="input-field text-xs w-full"
+                  value={energyForm.avgPeakSunHoursPerDay}
+                  onChange={(e) => setEnergyForm({ ...energyForm, avgPeakSunHoursPerDay: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button onClick={saveEnergy} className="btn-primary text-xs inline-flex items-center gap-2">
+                <CheckCircle2 size={13} aria-hidden="true" /> Save Energy Settings
+              </button>
+              <button onClick={() => setEnergyEditing(false)} className="btn-ghost text-xs">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+              {[
+                { label: 'U1 Import/Export CT Ratio', value: currentEnergy.u1ImportExportCtRatio },
+                { label: 'U1 Solar CT Ratio', value: currentEnergy.u1SolarCtRatio },
+                { label: 'U2 Import/Export CT Ratio', value: currentEnergy.u2ImportExportCtRatio },
+                { label: 'U2 Solar CT Ratio', value: currentEnergy.u2SolarCtRatio },
+                { label: 'PF Warning Threshold', value: currentEnergy.pfWarningThreshold },
+                { label: 'Installed Solar Capacity (kWp)', value: currentEnergy.installedSolarCapacityKwp },
+                { label: 'Grid CO2 Emission Factor', value: currentEnergy.gridCO2EmissionFactor },
+                { label: 'Avg Peak Sun Hours per Day', value: currentEnergy.avgPeakSunHoursPerDay },
+              ].map((row) => (
+                <div key={row.label} className="flex items-center justify-between rounded-control bg-white/[0.03] border border-white/[0.06] px-3 py-2">
+                  <span className="text-slate-400 text-xs">{row.label}</span>
+                  <span className="text-white text-sm font-semibold">{row.value ?? '—'}</span>
+                </div>
+              ))}
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-3 pt-1">
+                <button onClick={() => setEnergyEditing(true)} className="btn-ghost text-xs inline-flex items-center gap-2">
+                  <Cog size={13} aria-hidden="true" /> Edit
+                </button>
+                {energySaved && (
+                  <span className="inline-flex items-center gap-1.5 text-emerald-400 text-xs" role="status">
+                    <CheckCircle2 size={13} aria-hidden="true" /> Saved
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Notification Settings */}

@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
 
-const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'machines', 'machinePmRecords'];
+const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'energyDailyUtility', 'energyMonthlyHerbicide', 'energyMonthlyInsecticide', 'energyMonthlyWater', 'energyMonthlyAirCompressor', 'energyDailySolar', 'machines', 'machinePmRecords'];
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -142,6 +142,142 @@ export const IMPORT_MODULES = {
       },
     ],
   },
+  energyDailyUtility: {
+    id: 'energyDailyUtility',
+    label: 'Daily Utility Readings',
+    shortLabel: 'Daily Utility',
+    templateFilename: 'Energy_Daily_Utility_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['date'],
+    sampleRows: [
+      {
+        'Date': new Date().toISOString().slice(0, 10),
+        'U1 Import KWh Reading': 4200,
+        'U1 Import kVAh Reading': 4500,
+        'U1 Export KWh Reading': 0,
+        'U1 Export kVAh Reading': 0,
+        'U1 Solar KWh Reading': 620,
+        'U1 Solar kVAh Reading': 640,
+        'U2 Import KWh Reading': 1850,
+        'U2 Import kVAh Reading': 1950,
+        'U2 Export KWh Reading': 0,
+        'U2 Export kVAh Reading': 0,
+        'U2 Solar KWh Reading': 310,
+        'U2 Solar kVAh Reading': 320,
+        'DG 380 KWh Reading': 800,
+        'DG 380 Hourmeter Reading': 12500,
+        'DG 380 HSD Opening (Ltr)': 500,
+        'DG 380 HSD Added (Ltr)': 200,
+        'DG 380 DEF Opening (%)': 80,
+        'DG 380 DEF Added (%)': 10,
+        'DG 500 KWh Reading': 1200,
+        'DG 500 Hourmeter Reading': 8900,
+        'DG 500 HSD Opening (Ltr)': 600,
+        'DG 500 HSD Added (Ltr)': 250,
+        'DG 500 DEF Opening (%)': 75,
+        'DG 500 DEF Added (%)': 15,
+      },
+    ],
+  },
+  energyMonthlyHerbicide: {
+    id: 'energyMonthlyHerbicide',
+    label: 'Monthly Herbicide Readings',
+    shortLabel: 'Herbicide',
+    templateFilename: 'Energy_Monthly_Herbicide_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['month'],
+    sampleRows: [
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'Glyphosate M1 Meter Reading': 3100,
+        'Maintenance Topper M2 Meter Reading': 1200,
+        'ACM Herbicide M3 Meter Reading': 820,
+        'Topper Herbicide M4 Meter Reading': 450,
+        'Maintenance Printing Meter Reading': 680,
+      },
+    ],
+  },
+  energyMonthlyInsecticide: {
+    id: 'energyMonthlyInsecticide',
+    label: 'Monthly Insecticide Readings',
+    shortLabel: 'Insecticide',
+    templateFilename: 'Energy_Monthly_Insecticide_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['month'],
+    sampleRows: [
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'Feeder 2 SC Electric Room Meter Reading': 540,
+        'Feeder 3 Waterbath Meter Reading': 320,
+        'Feeder 4 Jetmill Meter Reading': 780,
+        'Feeder 5 Cartap Plant Meter Reading': 270,
+        'Feeder 6 EC Formulation Meter Reading': 410,
+        'Feeder 7 Spare Meter Reading': 0,
+        'Feeder 8 EC Packing Meter Reading': 190,
+        'Feeder 9 Admin Block Meter Reading': 150,
+        'ACM Insecticide Meter Reading': 890,
+        'Air Compressor 02 IR Meter Reading': 120,
+        'Air Compressor 03 Atlas Meter Reading': 95,
+        'Air Compressor 01 IR Atlas Meter Reading': 110,
+      },
+    ],
+  },
+  energyMonthlyWater: {
+    id: 'energyMonthlyWater',
+    label: 'Monthly Water STP Readings',
+    shortLabel: 'Water STP',
+    templateFilename: 'Energy_Monthly_Water_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['month'],
+    sampleRows: [
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'STP Outlet Meter Reading': 1500,
+        'RO Inlet Meter Reading': 2200,
+        'RO Rejected Meter Reading': 800,
+        'PIAU Water Meter Reading': 350,
+      },
+    ],
+  },
+  energyMonthlyAirCompressor: {
+    id: 'energyMonthlyAirCompressor',
+    label: 'Monthly Air Compressor Readings',
+    shortLabel: 'Air Compressor',
+    templateFilename: 'Energy_Monthly_Air_Compressor_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['month'],
+    sampleRows: [
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'Compressor 1 Run Hrs Reading': 720,
+        'Compressor 1 Load Hrs Reading': 580,
+        'Compressor 2 Run Hrs Reading': 650,
+        'Compressor 2 Load Hrs Reading': 520,
+        'Compressor 3 Run Hrs Reading': 480,
+        'Compressor 3 Load Hrs Reading': 390,
+      },
+    ],
+  },
+  energyDailySolar: {
+    id: 'energyDailySolar',
+    label: 'Daily Solar Inverter Generation',
+    shortLabel: 'Solar',
+    templateFilename: 'Energy_Daily_Solar_Inverter_Template.xlsx',
+    defaultCategory: 'Plantwise Energy Consumption',
+    required: ['date'],
+    sampleRows: [
+      {
+        'Date': new Date().toISOString().slice(0, 10),
+        'U1 INV1 KWh': 320,
+        'U1 INV2 KWh': 290,
+        'U1 INV3 KWh': 310,
+        'U1 INV4 KWh': 280,
+        'U2 INV1 KWh': 180,
+        'U2 INV2 KWh': 170,
+        'U2 INV3 KWh': 160,
+      },
+    ],
+  },
 };
 
 const FIELD_ALIASES = {
@@ -228,6 +364,82 @@ const FIELD_ALIASES = {
     actionTaken:   ['actiontaken', 'action', 'correctiveaction', 'resolution'],
     technician:    ['technician', 'assignedto', 'doneby', 'engineer'],
     remarks:       ['remarks', 'notes', 'comment', 'comments'],
+  },
+  energyDailyUtility: {
+    date: ['date', 'readingdate', 'logdate'],
+    u1ImportKwhReading: ['u1importkwhreading', 'u1importkwh', 'unit1importkwh', 'u1kwhimport'],
+    u1ImportKvahReading: ['u1importkvahreading', 'u1importkvah', 'unit1importkvah', 'u1kvahimport'],
+    u1ExportKwhReading: ['u1exportkwhreading', 'u1exportkwh', 'unit1exportkwh', 'u1kwhexport'],
+    u1ExportKvahReading: ['u1exportkvahreading', 'u1exportkvah', 'unit1exportkvah', 'u1kvahexport'],
+    u1SolarKwhReading: ['u1solarkwhreading', 'u1solarkwh', 'unit1solarkwh', 'u1kwhsolar'],
+    u1SolarKvahReading: ['u1solarkvahreading', 'u1solarkvah', 'unit1solarkvah', 'u1kvahsolar'],
+    u2ImportKwhReading: ['u2importkwhreading', 'u2importkwh', 'unit2importkwh', 'u2kwhimport'],
+    u2ImportKvahReading: ['u2importkvahreading', 'u2importkvah', 'unit2importkvah', 'u2kvahimport'],
+    u2ExportKwhReading: ['u2exportkwhreading', 'u2exportkwh', 'unit2exportkwh', 'u2kwhexport'],
+    u2ExportKvahReading: ['u2exportkvahreading', 'u2exportkvah', 'unit2exportkvah', 'u2kvahexport'],
+    u2SolarKwhReading: ['u2solarkwhreading', 'u2solarkwh', 'unit2solarkwh', 'u2kwhsolar'],
+    u2SolarKvahReading: ['u2solarkvahreading', 'u2solarkvah', 'unit2solarkvah', 'u2kvahsolar'],
+    dg380KwhReading: ['dg380kwhreading', 'dg380kwh', 'dg380kwhr'],
+    dg380HourmeterReading: ['dg380hourmeterreading', 'dg380hourmeter', 'dg380hours'],
+    dg380HsdOpeningLtr: ['dg380hsdopeningltr', 'dg380hsdopening', 'dg380hsdopen'],
+    dg380HsdAddedLtr: ['dg380hsdaddedltr', 'dg380hsdadded', 'dg380hsdadd'],
+    dg380DefOpeningPct: ['dg380defopeningpct', 'dg380defopening', 'dg380defopen'],
+    dg380DefAddedPct: ['dg380defaddedpct', 'dg380defadded', 'dg380defadd'],
+    dg500KwhReading: ['dg500kwhreading', 'dg500kwh', 'dg500kwhr'],
+    dg500HourmeterReading: ['dg500hourmeterreading', 'dg500hourmeter', 'dg500hours'],
+    dg500HsdOpeningLtr: ['dg500hsdopeningltr', 'dg500hsdopening', 'dg500hsdopen'],
+    dg500HsdAddedLtr: ['dg500hsdaddedltr', 'dg500hsdadded', 'dg500hsdadd'],
+    dg500DefOpeningPct: ['dg500defopeningpct', 'dg500defopening', 'dg500defopen'],
+    dg500DefAddedPct: ['dg500defaddedpct', 'dg500defadded', 'dg500defadd'],
+  },
+  energyMonthlyHerbicide: {
+    month: ['month', 'period', 'monthyear'],
+    glyphosateM1MeterReading: ['glyphosatem1meterreading', 'glyphosatem1', 'glyphosatemeter', 'glyphosate'],
+    maintenanceTopperM2MeterReading: ['maintenancetopperm2meterreading', 'maintenancetopperm2', 'topperm2', 'maintenancetopper'],
+    acmHerbicideM3MeterReading: ['acmherbicidem3meterreading', 'acmherbicidem3', 'acmherbicide', 'acmm3'],
+    topperHerbicideM4MeterReading: ['topperherbicidem4meterreading', 'topperherbicidem4', 'topperherbicide', 'topperm4'],
+    maintenancePrintingMeterReading: ['maintenanceprintingmeterreading', 'printingmeter', 'maintenanceprinting'],
+  },
+  energyMonthlyInsecticide: {
+    month: ['month', 'period', 'monthyear'],
+    feeder2ScElectricRoomMeterReading: ['feeder2scelectricroommeterreading', 'feeder2sc', 'feeder2', 'scmeter'],
+    feeder3WaterbathMeterReading: ['feeder3waterbathmeterreading', 'feeder3waterbath', 'feeder3', 'waterbathmeter'],
+    feeder4JetmillMeterReading: ['feeder4jetmillmeterreading', 'feeder4jetmill', 'feeder4', 'jetmillmeter'],
+    feeder5CartapPlantMeterReading: ['feeder5cartapplantmeterreading', 'feeder5cartap', 'feeder5', 'cartapmeter'],
+    feeder6EcFormulationMeterReading: ['feeder6ecformulationmeterreading', 'feeder6ecformulation', 'feeder6', 'ecformulationmeter'],
+    feeder7SpareMeterReading: ['feeder7sparemeterreading', 'feeder7spare', 'feeder7', 'sparemeter'],
+    feeder8EcPackingMeterReading: ['feeder8ecpackingmeterreading', 'feeder8ecpacking', 'feeder8', 'ecpackingmeter'],
+    feeder9AdminBlockMeterReading: ['feeder9adminblockmeterreading', 'feeder9adminblock', 'feeder9', 'adminblockmeter'],
+    acmInsecticideMeterReading: ['acminsecticidemeterreading', 'acminsecticide', 'acminsectmeter'],
+    airCompressor02IrMeterReading: ['aircompressor02irmeterreading', 'compressor02ir', 'compressor02', 'aircompressor02'],
+    airCompressor03AtlasMeterReading: ['aircompressor03atlasmeterreading', 'compressor03atlas', 'compressor03', 'aircompressor03'],
+    airCompressor01IrAtlasMeterReading: ['aircompressor01iratlasmeterreading', 'compressor01iratlas', 'compressor01', 'aircompressor01'],
+  },
+  energyMonthlyWater: {
+    month: ['month', 'period', 'monthyear'],
+    stpOutletMeterReading: ['stpoutletmeterreading', 'stpoutlet', 'stpmeter'],
+    roInletMeterReading: ['roinletmeterreading', 'roinlet', 'rometer'],
+    roRejectedMeterReading: ['rorejectedmeterreading', 'rorejected', 'rorejmeter'],
+    piauWaterMeterReading: ['piauwatermeterreading', 'piauwater', 'piaumeter'],
+  },
+  energyMonthlyAirCompressor: {
+    month: ['month', 'period', 'monthyear'],
+    compressor1RunHrsReading: ['compressor1runhrsreading', 'compressor1runhrs', 'compressor1run'],
+    compressor1LoadHrsReading: ['compressor1loadhrsreading', 'compressor1loadhrs', 'compressor1load'],
+    compressor2RunHrsReading: ['compressor2runhrsreading', 'compressor2runhrs', 'compressor2run'],
+    compressor2LoadHrsReading: ['compressor2loadhrsreading', 'compressor2loadhrs', 'compressor2load'],
+    compressor3RunHrsReading: ['compressor3runhrsreading', 'compressor3runhrs', 'compressor3run'],
+    compressor3LoadHrsReading: ['compressor3loadhrsreading', 'compressor3loadhrs', 'compressor3load'],
+  },
+  energyDailySolar: {
+    date: ['date', 'readingdate', 'logdate'],
+    u1Inv1Kwh: ['u1inv1kwh', 'unit1inv1kwh', 'u1inv1'],
+    u1Inv2Kwh: ['u1inv2kwh', 'unit1inv2kwh', 'u1inv2'],
+    u1Inv3Kwh: ['u1inv3kwh', 'unit1inv3kwh', 'u1inv3'],
+    u1Inv4Kwh: ['u1inv4kwh', 'unit1inv4kwh', 'u1inv4'],
+    u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1'],
+    u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2'],
+    u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3'],
   },
 };
 
@@ -492,6 +704,118 @@ function parseModuleRow(moduleId, row, mapping, index) {
       actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
       technician: String(getCell(row, mapping, 'technician') || '').trim(),
       remarks: String(getCell(row, mapping, 'remarks') || '').trim(),
+    };
+  }
+
+  if (moduleId === 'energyDailyUtility') {
+    const date = parseDateValue(getCell(row, mapping, 'date'));
+    if (!date) return { error: `Row ${index}: date is required.` };
+
+    return {
+      date,
+      u1ImportKwhReading: parseNumber(getCell(row, mapping, 'u1ImportKwhReading')),
+      u1ImportKvahReading: parseNumber(getCell(row, mapping, 'u1ImportKvahReading')),
+      u1ExportKwhReading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
+      u1ExportKvahReading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
+      u1SolarKwhReading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
+      u1SolarKvahReading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
+      u2ImportKwhReading: parseNumber(getCell(row, mapping, 'u2ImportKwhReading')),
+      u2ImportKvahReading: parseNumber(getCell(row, mapping, 'u2ImportKvahReading')),
+      u2ExportKwhReading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
+      u2ExportKvahReading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
+      u2SolarKwhReading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
+      u2SolarKvahReading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
+      dg380KwhReading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
+      dg380HourmeterReading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
+      dg380HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),
+      dg380HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg380HsdAddedLtr')),
+      dg380DefOpeningPct: parseNumber(getCell(row, mapping, 'dg380DefOpeningPct')),
+      dg380DefAddedPct: parseNumber(getCell(row, mapping, 'dg380DefAddedPct')),
+      dg500KwhReading: parseNumber(getCell(row, mapping, 'dg500KwhReading')),
+      dg500HourmeterReading: parseNumber(getCell(row, mapping, 'dg500HourmeterReading')),
+      dg500HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg500HsdOpeningLtr')),
+      dg500HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg500HsdAddedLtr')),
+      dg500DefOpeningPct: parseNumber(getCell(row, mapping, 'dg500DefOpeningPct')),
+      dg500DefAddedPct: parseNumber(getCell(row, mapping, 'dg500DefAddedPct')),
+    };
+  }
+
+  if (moduleId === 'energyMonthlyHerbicide') {
+    const month = parsePeriodValue(getCell(row, mapping, 'month'), '', '');
+    if (!month) return { error: `Row ${index}: month is required.` };
+
+    return {
+      month,
+      glyphosateM1MeterReading: parseNumber(getCell(row, mapping, 'glyphosateM1MeterReading')),
+      maintenanceTopperM2MeterReading: parseNumber(getCell(row, mapping, 'maintenanceTopperM2MeterReading')),
+      acmHerbicideM3MeterReading: parseNumber(getCell(row, mapping, 'acmHerbicideM3MeterReading')),
+      topperHerbicideM4MeterReading: parseNumber(getCell(row, mapping, 'topperHerbicideM4MeterReading')),
+      maintenancePrintingMeterReading: parseNumber(getCell(row, mapping, 'maintenancePrintingMeterReading')),
+    };
+  }
+
+  if (moduleId === 'energyMonthlyInsecticide') {
+    const month = parsePeriodValue(getCell(row, mapping, 'month'), '', '');
+    if (!month) return { error: `Row ${index}: month is required.` };
+
+    return {
+      month,
+      feeder2ScElectricRoomMeterReading: parseNumber(getCell(row, mapping, 'feeder2ScElectricRoomMeterReading')),
+      feeder3WaterbathMeterReading: parseNumber(getCell(row, mapping, 'feeder3WaterbathMeterReading')),
+      feeder4JetmillMeterReading: parseNumber(getCell(row, mapping, 'feeder4JetmillMeterReading')),
+      feeder5CartapPlantMeterReading: parseNumber(getCell(row, mapping, 'feeder5CartapPlantMeterReading')),
+      feeder6EcFormulationMeterReading: parseNumber(getCell(row, mapping, 'feeder6EcFormulationMeterReading')),
+      feeder7SpareMeterReading: parseNumber(getCell(row, mapping, 'feeder7SpareMeterReading')),
+      feeder8EcPackingMeterReading: parseNumber(getCell(row, mapping, 'feeder8EcPackingMeterReading')),
+      feeder9AdminBlockMeterReading: parseNumber(getCell(row, mapping, 'feeder9AdminBlockMeterReading')),
+      acmInsecticideMeterReading: parseNumber(getCell(row, mapping, 'acmInsecticideMeterReading')),
+      airCompressor02IrMeterReading: parseNumber(getCell(row, mapping, 'airCompressor02IrMeterReading')),
+      airCompressor03AtlasMeterReading: parseNumber(getCell(row, mapping, 'airCompressor03AtlasMeterReading')),
+      airCompressor01IrAtlasMeterReading: parseNumber(getCell(row, mapping, 'airCompressor01IrAtlasMeterReading')),
+    };
+  }
+
+  if (moduleId === 'energyMonthlyWater') {
+    const month = parsePeriodValue(getCell(row, mapping, 'month'), '', '');
+    if (!month) return { error: `Row ${index}: month is required.` };
+
+    return {
+      month,
+      stpOutletMeterReading: parseNumber(getCell(row, mapping, 'stpOutletMeterReading')),
+      roInletMeterReading: parseNumber(getCell(row, mapping, 'roInletMeterReading')),
+      roRejectedMeterReading: parseNumber(getCell(row, mapping, 'roRejectedMeterReading')),
+      piauWaterMeterReading: parseNumber(getCell(row, mapping, 'piauWaterMeterReading')),
+    };
+  }
+
+  if (moduleId === 'energyMonthlyAirCompressor') {
+    const month = parsePeriodValue(getCell(row, mapping, 'month'), '', '');
+    if (!month) return { error: `Row ${index}: month is required.` };
+
+    return {
+      month,
+      compressor1RunHrsReading: parseNumber(getCell(row, mapping, 'compressor1RunHrsReading')),
+      compressor1LoadHrsReading: parseNumber(getCell(row, mapping, 'compressor1LoadHrsReading')),
+      compressor2RunHrsReading: parseNumber(getCell(row, mapping, 'compressor2RunHrsReading')),
+      compressor2LoadHrsReading: parseNumber(getCell(row, mapping, 'compressor2LoadHrsReading')),
+      compressor3RunHrsReading: parseNumber(getCell(row, mapping, 'compressor3RunHrsReading')),
+      compressor3LoadHrsReading: parseNumber(getCell(row, mapping, 'compressor3LoadHrsReading')),
+    };
+  }
+
+  if (moduleId === 'energyDailySolar') {
+    const date = parseDateValue(getCell(row, mapping, 'date'));
+    if (!date) return { error: `Row ${index}: date is required.` };
+
+    return {
+      date,
+      u1Inv1Kwh: parseNumber(getCell(row, mapping, 'u1Inv1Kwh')),
+      u1Inv2Kwh: parseNumber(getCell(row, mapping, 'u1Inv2Kwh')),
+      u1Inv3Kwh: parseNumber(getCell(row, mapping, 'u1Inv3Kwh')),
+      u1Inv4Kwh: parseNumber(getCell(row, mapping, 'u1Inv4Kwh')),
+      u2Inv1Kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
+      u2Inv2Kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
+      u2Inv3Kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
     };
   }
 

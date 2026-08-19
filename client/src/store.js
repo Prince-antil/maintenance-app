@@ -16,6 +16,13 @@ const KEYS = {
   plantSections: 'CCPL_PLANT_SECTIONS_V1',
   activity: 'ccpl_activity_v1',
   settings: 'ccpl_settings_v1',
+  dailyUtilityLog: 'CCPL_DAILY_UTILITY_LOG_V1',
+  monthlyHerbicide: 'CCPL_MONTHLY_HERBICIDE_V1',
+  monthlyInsecticide: 'CCPL_MONTHLY_INSECTICIDE_V1',
+  monthlyWater: 'CCPL_MONTHLY_WATER_V1',
+  monthlyAirCompressor: 'CCPL_MONTHLY_AIR_COMPRESSOR_V1',
+  dailySolarGeneration: 'CCPL_DAILY_SOLAR_GENERATION_V1',
+  energySettings: 'CCPL_ENERGY_SETTINGS_V1',
 };
 
 const LEGACY_KEYS = {
@@ -29,6 +36,13 @@ const LEGACY_KEYS = {
   plantSections: [],
   activity: ['ccpl_activity_v1'],
   settings: ['ccpl_settings_v1'],
+  dailyUtilityLog: [],
+  monthlyHerbicide: [],
+  monthlyInsecticide: [],
+  monthlyWater: [],
+  monthlyAirCompressor: [],
+  dailySolarGeneration: [],
+  energySettings: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -59,7 +73,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -150,6 +164,393 @@ function normalizeEnergyRecord(fields) {
     kwh: totalKwh || toNumber(fields.kwh || fields.solarGenerationKwh),
     // ── Section sub-meters ─────────────────────────────────────────────────
     sectionConsumption,
+  };
+}
+
+// ── Daily Utility Log normalizer ──────────────────────────────────────────
+function normalizeDailyUtilityLog(fields) {
+  return {
+    id: fields.id || uid('dul'),
+    date: fields.date || new Date().toISOString().slice(0, 10),
+    u1ImportKwhReading: toNumber(fields.u1ImportKwhReading),
+    u1ImportKvahReading: toNumber(fields.u1ImportKvahReading),
+    u1ExportKwhReading: toNumber(fields.u1ExportKwhReading),
+    u1ExportKvahReading: toNumber(fields.u1ExportKvahReading),
+    u1SolarKwhReading: toNumber(fields.u1SolarKwhReading),
+    u1SolarKvahReading: toNumber(fields.u1SolarKvahReading),
+    u2ImportKwhReading: toNumber(fields.u2ImportKwhReading),
+    u2ImportKvahReading: toNumber(fields.u2ImportKvahReading),
+    u2ExportKwhReading: toNumber(fields.u2ExportKwhReading),
+    u2ExportKvahReading: toNumber(fields.u2ExportKvahReading),
+    u2SolarKwhReading: toNumber(fields.u2SolarKwhReading),
+    u2SolarKvahReading: toNumber(fields.u2SolarKvahReading),
+    dg380KwhReading: toNumber(fields.dg380KwhReading),
+    dg380HourmeterReading: toNumber(fields.dg380HourmeterReading),
+    dg380HsdOpeningLtr: toNumber(fields.dg380HsdOpeningLtr),
+    dg380HsdAddedLtr: toNumber(fields.dg380HsdAddedLtr),
+    dg380DefOpeningPct: toNumber(fields.dg380DefOpeningPct),
+    dg380DefAddedPct: toNumber(fields.dg380DefAddedPct),
+    dg500KwhReading: toNumber(fields.dg500KwhReading),
+    dg500HourmeterReading: toNumber(fields.dg500HourmeterReading),
+    dg500HsdOpeningLtr: toNumber(fields.dg500HsdOpeningLtr),
+    dg500HsdAddedLtr: toNumber(fields.dg500HsdAddedLtr),
+    dg500DefOpeningPct: toNumber(fields.dg500DefOpeningPct),
+    dg500DefAddedPct: toNumber(fields.dg500DefAddedPct),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeDailyUtilityLogCloudRow(row) {
+  return normalizeDailyUtilityLog({
+    id: row.id,
+    date: row.date,
+    u1ImportKwhReading: row.u1_import_kwh_reading,
+    u1ImportKvahReading: row.u1_import_kvah_reading,
+    u1ExportKwhReading: row.u1_export_kwh_reading,
+    u1ExportKvahReading: row.u1_export_kvah_reading,
+    u1SolarKwhReading: row.u1_solar_kwh_reading,
+    u1SolarKvahReading: row.u1_solar_kvah_reading,
+    u2ImportKwhReading: row.u2_import_kwh_reading,
+    u2ImportKvahReading: row.u2_import_kvah_reading,
+    u2ExportKwhReading: row.u2_export_kwh_reading,
+    u2ExportKvahReading: row.u2_export_kvah_reading,
+    u2SolarKwhReading: row.u2_solar_kwh_reading,
+    u2SolarKvahReading: row.u2_solar_kvah_reading,
+    dg380KwhReading: row.dg380_kwh_reading,
+    dg380HourmeterReading: row.dg380_hourmeter_reading,
+    dg380HsdOpeningLtr: row.dg380_hsd_opening_ltr,
+    dg380HsdAddedLtr: row.dg380_hsd_added_ltr,
+    dg380DefOpeningPct: row.dg380_def_opening_pct,
+    dg380DefAddedPct: row.dg380_def_added_pct,
+    dg500KwhReading: row.dg500_kwh_reading,
+    dg500HourmeterReading: row.dg500_hourmeter_reading,
+    dg500HsdOpeningLtr: row.dg500_hsd_opening_ltr,
+    dg500HsdAddedLtr: row.dg500_hsd_added_ltr,
+    dg500DefOpeningPct: row.dg500_def_opening_pct,
+    dg500DefAddedPct: row.dg500_def_added_pct,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function dailyUtilityLogToCloudRow(record) {
+  return {
+    id: record.id,
+    date: record.date,
+    u1_import_kwh_reading: record.u1ImportKwhReading,
+    u1_import_kvah_reading: record.u1ImportKvahReading,
+    u1_export_kwh_reading: record.u1ExportKwhReading,
+    u1_export_kvah_reading: record.u1ExportKvahReading,
+    u1_solar_kwh_reading: record.u1SolarKwhReading,
+    u1_solar_kvah_reading: record.u1SolarKvahReading,
+    u2_import_kwh_reading: record.u2ImportKwhReading,
+    u2_import_kvah_reading: record.u2ImportKvahReading,
+    u2_export_kwh_reading: record.u2ExportKwhReading,
+    u2_export_kvah_reading: record.u2ExportKvahReading,
+    u2_solar_kwh_reading: record.u2SolarKwhReading,
+    u2_solar_kvah_reading: record.u2SolarKvahReading,
+    dg380_kwh_reading: record.dg380KwhReading,
+    dg380_hourmeter_reading: record.dg380HourmeterReading,
+    dg380_hsd_opening_ltr: record.dg380HsdOpeningLtr,
+    dg380_hsd_added_ltr: record.dg380HsdAddedLtr,
+    dg380_def_opening_pct: record.dg380DefOpeningPct,
+    dg380_def_added_pct: record.dg380DefAddedPct,
+    dg500_kwh_reading: record.dg500KwhReading,
+    dg500_hourmeter_reading: record.dg500HourmeterReading,
+    dg500_hsd_opening_ltr: record.dg500HsdOpeningLtr,
+    dg500_hsd_added_ltr: record.dg500HsdAddedLtr,
+    dg500_def_opening_pct: record.dg500DefOpeningPct,
+    dg500_def_added_pct: record.dg500DefAddedPct,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Monthly Herbicide normalizer ─────────────────────────────────────────
+function normalizeMonthlyHerbicide(fields) {
+  return {
+    id: fields.id || uid('mherb'),
+    month: fields.month || '',
+    glyphosateM1MeterReading: toNumber(fields.glyphosateM1MeterReading),
+    maintenanceTopperM2MeterReading: toNumber(fields.maintenanceTopperM2MeterReading),
+    acmHerbicideM3MeterReading: toNumber(fields.acmHerbicideM3MeterReading),
+    topperHerbicideM4MeterReading: toNumber(fields.topperHerbicideM4MeterReading),
+    maintenancePrintingMeterReading: toNumber(fields.maintenancePrintingMeterReading),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeMonthlyHerbicideCloudRow(row) {
+  return normalizeMonthlyHerbicide({
+    id: row.id,
+    month: row.month,
+    glyphosateM1MeterReading: row.glyphosate_m1_meter_reading,
+    maintenanceTopperM2MeterReading: row.maintenance_topper_m2_meter_reading,
+    acmHerbicideM3MeterReading: row.acm_herbicide_m3_meter_reading,
+    topperHerbicideM4MeterReading: row.topper_herbicide_m4_meter_reading,
+    maintenancePrintingMeterReading: row.maintenance_printing_meter_reading,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function monthlyHerbicideToCloudRow(record) {
+  return {
+    id: record.id,
+    month: record.month,
+    glyphosate_m1_meter_reading: record.glyphosateM1MeterReading,
+    maintenance_topper_m2_meter_reading: record.maintenanceTopperM2MeterReading,
+    acm_herbicide_m3_meter_reading: record.acmHerbicideM3MeterReading,
+    topper_herbicide_m4_meter_reading: record.topperHerbicideM4MeterReading,
+    maintenance_printing_meter_reading: record.maintenancePrintingMeterReading,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Monthly Insecticide normalizer ───────────────────────────────────────
+function normalizeMonthlyInsecticide(fields) {
+  return {
+    id: fields.id || uid('mins'),
+    month: fields.month || '',
+    feeder2ScElectricRoomMeterReading: toNumber(fields.feeder2ScElectricRoomMeterReading),
+    feeder3WaterbathMeterReading: toNumber(fields.feeder3WaterbathMeterReading),
+    feeder4JetmillMeterReading: toNumber(fields.feeder4JetmillMeterReading),
+    feeder5CartapPlantMeterReading: toNumber(fields.feeder5CartapPlantMeterReading),
+    feeder6EcFormulationMeterReading: toNumber(fields.feeder6EcFormulationMeterReading),
+    feeder7SpareMeterReading: toNumber(fields.feeder7SpareMeterReading),
+    feeder8EcPackingMeterReading: toNumber(fields.feeder8EcPackingMeterReading),
+    feeder9AdminBlockMeterReading: toNumber(fields.feeder9AdminBlockMeterReading),
+    acmInsecticideMeterReading: toNumber(fields.acmInsecticideMeterReading),
+    airCompressor02IrMeterReading: toNumber(fields.airCompressor02IrMeterReading),
+    airCompressor03AtlasMeterReading: toNumber(fields.airCompressor03AtlasMeterReading),
+    airCompressor01IrAtlasMeterReading: toNumber(fields.airCompressor01IrAtlasMeterReading),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeMonthlyInsecticideCloudRow(row) {
+  return normalizeMonthlyInsecticide({
+    id: row.id,
+    month: row.month,
+    feeder2ScElectricRoomMeterReading: row.feeder2_sc_electric_room_meter_reading,
+    feeder3WaterbathMeterReading: row.feeder3_waterbath_meter_reading,
+    feeder4JetmillMeterReading: row.feeder4_jetmill_meter_reading,
+    feeder5CartapPlantMeterReading: row.feeder5_cartap_plant_meter_reading,
+    feeder6EcFormulationMeterReading: row.feeder6_ec_formulation_meter_reading,
+    feeder7SpareMeterReading: row.feeder7_spare_meter_reading,
+    feeder8EcPackingMeterReading: row.feeder8_ec_packing_meter_reading,
+    feeder9AdminBlockMeterReading: row.feeder9_admin_block_meter_reading,
+    acmInsecticideMeterReading: row.acm_insecticide_meter_reading,
+    airCompressor02IrMeterReading: row.air_compressor02_ir_meter_reading,
+    airCompressor03AtlasMeterReading: row.air_compressor03_atlas_meter_reading,
+    airCompressor01IrAtlasMeterReading: row.air_compressor01_ir_atlas_meter_reading,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function monthlyInsecticideToCloudRow(record) {
+  return {
+    id: record.id,
+    month: record.month,
+    feeder2_sc_electric_room_meter_reading: record.feeder2ScElectricRoomMeterReading,
+    feeder3_waterbath_meter_reading: record.feeder3WaterbathMeterReading,
+    feeder4_jetmill_meter_reading: record.feeder4JetmillMeterReading,
+    feeder5_cartap_plant_meter_reading: record.feeder5CartapPlantMeterReading,
+    feeder6_ec_formulation_meter_reading: record.feeder6EcFormulationMeterReading,
+    feeder7_spare_meter_reading: record.feeder7SpareMeterReading,
+    feeder8_ec_packing_meter_reading: record.feeder8EcPackingMeterReading,
+    feeder9_admin_block_meter_reading: record.feeder9AdminBlockMeterReading,
+    acm_insecticide_meter_reading: record.acmInsecticideMeterReading,
+    air_compressor02_ir_meter_reading: record.airCompressor02IrMeterReading,
+    air_compressor03_atlas_meter_reading: record.airCompressor03AtlasMeterReading,
+    air_compressor01_ir_atlas_meter_reading: record.airCompressor01IrAtlasMeterReading,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Monthly Water normalizer ─────────────────────────────────────────────
+function normalizeMonthlyWater(fields) {
+  return {
+    id: fields.id || uid('mwat'),
+    month: fields.month || '',
+    stpOutletMeterReading: toNumber(fields.stpOutletMeterReading),
+    roInletMeterReading: toNumber(fields.roInletMeterReading),
+    roRejectedMeterReading: toNumber(fields.roRejectedMeterReading),
+    piauWaterMeterReading: toNumber(fields.piauWaterMeterReading),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeMonthlyWaterCloudRow(row) {
+  return normalizeMonthlyWater({
+    id: row.id,
+    month: row.month,
+    stpOutletMeterReading: row.stp_outlet_meter_reading,
+    roInletMeterReading: row.ro_inlet_meter_reading,
+    roRejectedMeterReading: row.ro_rejected_meter_reading,
+    piauWaterMeterReading: row.piau_water_meter_reading,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function monthlyWaterToCloudRow(record) {
+  return {
+    id: record.id,
+    month: record.month,
+    stp_outlet_meter_reading: record.stpOutletMeterReading,
+    ro_inlet_meter_reading: record.roInletMeterReading,
+    ro_rejected_meter_reading: record.roRejectedMeterReading,
+    piau_water_meter_reading: record.piauWaterMeterReading,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Monthly Air Compressor normalizer ────────────────────────────────────
+function normalizeMonthlyAirCompressor(fields) {
+  return {
+    id: fields.id || uid('macmp'),
+    month: fields.month || '',
+    compressor1RunHrsReading: toNumber(fields.compressor1RunHrsReading),
+    compressor1LoadHrsReading: toNumber(fields.compressor1LoadHrsReading),
+    compressor2RunHrsReading: toNumber(fields.compressor2RunHrsReading),
+    compressor2LoadHrsReading: toNumber(fields.compressor2LoadHrsReading),
+    compressor3RunHrsReading: toNumber(fields.compressor3RunHrsReading),
+    compressor3LoadHrsReading: toNumber(fields.compressor3LoadHrsReading),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeMonthlyAirCompressorCloudRow(row) {
+  return normalizeMonthlyAirCompressor({
+    id: row.id,
+    month: row.month,
+    compressor1RunHrsReading: row.compressor1_run_hrs_reading,
+    compressor1LoadHrsReading: row.compressor1_load_hrs_reading,
+    compressor2RunHrsReading: row.compressor2_run_hrs_reading,
+    compressor2LoadHrsReading: row.compressor2_load_hrs_reading,
+    compressor3RunHrsReading: row.compressor3_run_hrs_reading,
+    compressor3LoadHrsReading: row.compressor3_load_hrs_reading,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function monthlyAirCompressorToCloudRow(record) {
+  return {
+    id: record.id,
+    month: record.month,
+    compressor1_run_hrs_reading: record.compressor1RunHrsReading,
+    compressor1_load_hrs_reading: record.compressor1LoadHrsReading,
+    compressor2_run_hrs_reading: record.compressor2RunHrsReading,
+    compressor2_load_hrs_reading: record.compressor2LoadHrsReading,
+    compressor3_run_hrs_reading: record.compressor3RunHrsReading,
+    compressor3_load_hrs_reading: record.compressor3LoadHrsReading,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Daily Solar Generation normalizer ────────────────────────────────────
+function normalizeDailySolarGeneration(fields) {
+  return {
+    id: fields.id || uid('dsg'),
+    date: fields.date || new Date().toISOString().slice(0, 10),
+    u1Inv1Kwh: toNumber(fields.u1Inv1Kwh),
+    u1Inv2Kwh: toNumber(fields.u1Inv2Kwh),
+    u1Inv3Kwh: toNumber(fields.u1Inv3Kwh),
+    u1Inv4Kwh: toNumber(fields.u1Inv4Kwh),
+    u2Inv1Kwh: toNumber(fields.u2Inv1Kwh),
+    u2Inv2Kwh: toNumber(fields.u2Inv2Kwh),
+    u2Inv3Kwh: toNumber(fields.u2Inv3Kwh),
+    dailyTotalKwh: toNumber(fields.dailyTotalKwh),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeDailySolarGenerationCloudRow(row) {
+  return normalizeDailySolarGeneration({
+    id: row.id,
+    date: row.date,
+    u1Inv1Kwh: row.u1_inv1_kwh,
+    u1Inv2Kwh: row.u1_inv2_kwh,
+    u1Inv3Kwh: row.u1_inv3_kwh,
+    u1Inv4Kwh: row.u1_inv4_kwh,
+    u2Inv1Kwh: row.u2_inv1_kwh,
+    u2Inv2Kwh: row.u2_inv2_kwh,
+    u2Inv3Kwh: row.u2_inv3_kwh,
+    dailyTotalKwh: row.daily_total_kwh,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function dailySolarGenerationToCloudRow(record) {
+  return {
+    id: record.id,
+    date: record.date,
+    u1_inv1_kwh: record.u1Inv1Kwh,
+    u1_inv2_kwh: record.u1Inv2Kwh,
+    u1_inv3_kwh: record.u1Inv3Kwh,
+    u1_inv4_kwh: record.u1Inv4Kwh,
+    u2_inv1_kwh: record.u2Inv1Kwh,
+    u2_inv2_kwh: record.u2Inv2Kwh,
+    u2_inv3_kwh: record.u2Inv3Kwh,
+    daily_total_kwh: record.dailyTotalKwh,
+    updated_at: record.updatedAt,
+  };
+}
+
+// ── Energy Settings normalizer ───────────────────────────────────────────
+function normalizeEnergySettings(fields) {
+  return {
+    id: fields.id || 'default',
+    u1ImportExportCt: toNumber(fields.u1ImportExportCt),
+    u1SolarCt: toNumber(fields.u1SolarCt),
+    u2ImportExportCt: toNumber(fields.u2ImportExportCt),
+    u2SolarCt: toNumber(fields.u2SolarCt),
+    pfWarningThreshold: toNumber(fields.pfWarningThreshold),
+    installedSolarCapacityKwp: toNumber(fields.installedSolarCapacityKwp),
+    gridCo2EmissionFactor: toNumber(fields.gridCo2EmissionFactor),
+    avgPeakSunHoursPerDay: toNumber(fields.avgPeakSunHoursPerDay),
+    createdAt: fields.createdAt || now(),
+    updatedAt: fields.updatedAt || now(),
+  };
+}
+
+function normalizeEnergySettingsCloudRow(row) {
+  return normalizeEnergySettings({
+    id: row.id,
+    u1ImportExportCt: row.u1_import_export_ct,
+    u1SolarCt: row.u1_solar_ct,
+    u2ImportExportCt: row.u2_import_export_ct,
+    u2SolarCt: row.u2_solar_ct,
+    pfWarningThreshold: row.pf_warning_threshold,
+    installedSolarCapacityKwp: row.installed_solar_capacity_kwp,
+    gridCo2EmissionFactor: row.grid_co2_emission_factor,
+    avgPeakSunHoursPerDay: row.avg_peak_sun_hours_per_day,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function energySettingsToCloudRow(record) {
+  return {
+    id: record.id,
+    u1_import_export_ct: record.u1ImportExportCt,
+    u1_solar_ct: record.u1SolarCt,
+    u2_import_export_ct: record.u2ImportExportCt,
+    u2_solar_ct: record.u2SolarCt,
+    pf_warning_threshold: record.pfWarningThreshold,
+    installed_solar_capacity_kwp: record.installedSolarCapacityKwp,
+    grid_co2_emission_factor: record.gridCo2EmissionFactor,
+    avg_peak_sun_hours_per_day: record.avgPeakSunHoursPerDay,
+    updated_at: record.updatedAt,
   };
 }
 
@@ -760,6 +1161,42 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: plantSectionToCloudRow,
     orderBy: [{ column: 'name', ascending: true }],
   },
+  dailyUtilityLog: {
+    table: 'daily_utility_log',
+    fromRow: normalizeDailyUtilityLogCloudRow,
+    toRow: dailyUtilityLogToCloudRow,
+    orderBy: [{ column: 'date', ascending: false }],
+  },
+  monthlyHerbicide: {
+    table: 'monthly_herbicide_section',
+    fromRow: normalizeMonthlyHerbicideCloudRow,
+    toRow: monthlyHerbicideToCloudRow,
+    orderBy: [{ column: 'month', ascending: false }],
+  },
+  monthlyInsecticide: {
+    table: 'monthly_insecticide_section',
+    fromRow: normalizeMonthlyInsecticideCloudRow,
+    toRow: monthlyInsecticideToCloudRow,
+    orderBy: [{ column: 'month', ascending: false }],
+  },
+  monthlyWater: {
+    table: 'monthly_water_stp',
+    fromRow: normalizeMonthlyWaterCloudRow,
+    toRow: monthlyWaterToCloudRow,
+    orderBy: [{ column: 'month', ascending: false }],
+  },
+  monthlyAirCompressor: {
+    table: 'monthly_air_compressor',
+    fromRow: normalizeMonthlyAirCompressorCloudRow,
+    toRow: monthlyAirCompressorToCloudRow,
+    orderBy: [{ column: 'month', ascending: false }],
+  },
+  dailySolarGeneration: {
+    table: 'daily_solar_generation',
+    fromRow: normalizeDailySolarGenerationCloudRow,
+    toRow: dailySolarGenerationToCloudRow,
+    orderBy: [{ column: 'date', ascending: false }],
+  },
 };
 
 let version = 0;
@@ -827,6 +1264,13 @@ let state = {
   breakdowns: loadPersistedValue('breakdowns', []).map((row) => row),
   pms: loadPersistedValue('pms', []).map((row) => row),
   energy: loadPersistedValue('energy', []).map(normalizeEnergyRecord),
+  dailyUtilityLog: loadPersistedValue('dailyUtilityLog', []).map(normalizeDailyUtilityLog),
+  monthlyHerbicide: loadPersistedValue('monthlyHerbicide', []).map(normalizeMonthlyHerbicide),
+  monthlyInsecticide: loadPersistedValue('monthlyInsecticide', []).map(normalizeMonthlyInsecticide),
+  monthlyWater: loadPersistedValue('monthlyWater', []).map(normalizeMonthlyWater),
+  monthlyAirCompressor: loadPersistedValue('monthlyAirCompressor', []).map(normalizeMonthlyAirCompressor),
+  dailySolarGeneration: loadPersistedValue('dailySolarGeneration', []).map(normalizeDailySolarGeneration),
+  energySettings: loadPersistedValue('energySettings', normalizeEnergySettings({})),
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
@@ -1283,7 +1727,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -1292,6 +1736,12 @@ async function initializeCloudSync() {
       fetchCloudEntity('machineBreakdownLogs'),
       fetchCloudEntity('machinePmRecords'),
       fetchCloudEntity('plantSections'),
+      fetchCloudEntity('dailyUtilityLog'),
+      fetchCloudEntity('monthlyHerbicide'),
+      fetchCloudEntity('monthlyInsecticide'),
+      fetchCloudEntity('monthlyWater'),
+      fetchCloudEntity('monthlyAirCompressor'),
+      fetchCloudEntity('dailySolarGeneration'),
     ]);
 
     const remoteSnapshots = {
@@ -1303,6 +1753,12 @@ async function initializeCloudSync() {
       machineBreakdownLogs: remoteBreakdownLogs,
       machinePmRecords: remotePmRecords,
       plantSections: remotePlantSections,
+      dailyUtilityLog: remoteDailyUtilityLog,
+      monthlyHerbicide: remoteMonthlyHerbicide,
+      monthlyInsecticide: remoteMonthlyInsecticide,
+      monthlyWater: remoteMonthlyWater,
+      monthlyAirCompressor: remoteMonthlyAirCompressor,
+      dailySolarGeneration: remoteDailySolarGeneration,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -1336,6 +1792,12 @@ async function initializeCloudSync() {
     if (remoteBreakdownLogs.length) replaceEntityState('machineBreakdownLogs', remoteBreakdownLogs, false);
     if (remotePmRecords.length) replaceEntityState('machinePmRecords', remotePmRecords, false);
     if (remotePlantSections.length) replaceEntityState('plantSections', remotePlantSections, false);
+    if (remoteDailyUtilityLog.length) replaceEntityState('dailyUtilityLog', remoteDailyUtilityLog, false);
+    if (remoteMonthlyHerbicide.length) replaceEntityState('monthlyHerbicide', remoteMonthlyHerbicide, false);
+    if (remoteMonthlyInsecticide.length) replaceEntityState('monthlyInsecticide', remoteMonthlyInsecticide, false);
+    if (remoteMonthlyWater.length) replaceEntityState('monthlyWater', remoteMonthlyWater, false);
+    if (remoteMonthlyAirCompressor.length) replaceEntityState('monthlyAirCompressor', remoteMonthlyAirCompressor, false);
+    if (remoteDailySolarGeneration.length) replaceEntityState('dailySolarGeneration', remoteDailySolarGeneration, false);
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet
@@ -1662,6 +2124,181 @@ export function deleteEnergyLog(id, userName) {
   state = { ...state, energy: state.energy.filter((entry) => entry.id !== id) };
   commitAndQueue('energy', 'delete', id);
   logActivity(userName, 'deleted energy log', '', 'energy');
+}
+
+// ── Daily Utility Log CRUD ───────────────────────────────────────────────
+export const getDailyUtilityLogs = () => state.dailyUtilityLog;
+
+export function addDailyUtilityLog(fields, userName) {
+  const log = normalizeDailyUtilityLog({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, dailyUtilityLog: [log, ...state.dailyUtilityLog] };
+  commitAndQueue('dailyUtilityLog', 'upsert', log);
+  logActivity(userName, 'added daily utility log', log.date, 'energy');
+  return log;
+}
+
+export function updateDailyUtilityLog(id, patch, userName) {
+  const existing = state.dailyUtilityLog.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeDailyUtilityLog({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, dailyUtilityLog: state.dailyUtilityLog.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('dailyUtilityLog', 'upsert', updated);
+  logActivity(userName, 'updated daily utility log', updated.date, 'energy');
+  return updated;
+}
+
+export function deleteDailyUtilityLog(id, userName) {
+  state = { ...state, dailyUtilityLog: state.dailyUtilityLog.filter((e) => e.id !== id) };
+  commitAndQueue('dailyUtilityLog', 'delete', id);
+  logActivity(userName, 'deleted daily utility log', '', 'energy');
+}
+
+// ── Monthly Herbicide CRUD ──────────────────────────────────────────────
+export const getMonthlyHerbicides = () => state.monthlyHerbicide;
+
+export function addMonthlyHerbicide(fields, userName) {
+  const record = normalizeMonthlyHerbicide({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, monthlyHerbicide: [record, ...state.monthlyHerbicide] };
+  commitAndQueue('monthlyHerbicide', 'upsert', record);
+  logActivity(userName, 'added monthly herbicide', record.month, 'energy');
+  return record;
+}
+
+export function updateMonthlyHerbicide(id, patch, userName) {
+  const existing = state.monthlyHerbicide.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeMonthlyHerbicide({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, monthlyHerbicide: state.monthlyHerbicide.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('monthlyHerbicide', 'upsert', updated);
+  logActivity(userName, 'updated monthly herbicide', updated.month, 'energy');
+  return updated;
+}
+
+export function deleteMonthlyHerbicide(id, userName) {
+  state = { ...state, monthlyHerbicide: state.monthlyHerbicide.filter((e) => e.id !== id) };
+  commitAndQueue('monthlyHerbicide', 'delete', id);
+  logActivity(userName, 'deleted monthly herbicide', '', 'energy');
+}
+
+// ── Monthly Insecticide CRUD ────────────────────────────────────────────
+export const getMonthlyInsecticides = () => state.monthlyInsecticide;
+
+export function addMonthlyInsecticide(fields, userName) {
+  const record = normalizeMonthlyInsecticide({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, monthlyInsecticide: [record, ...state.monthlyInsecticide] };
+  commitAndQueue('monthlyInsecticide', 'upsert', record);
+  logActivity(userName, 'added monthly insecticide', record.month, 'energy');
+  return record;
+}
+
+export function updateMonthlyInsecticide(id, patch, userName) {
+  const existing = state.monthlyInsecticide.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeMonthlyInsecticide({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, monthlyInsecticide: state.monthlyInsecticide.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('monthlyInsecticide', 'upsert', updated);
+  logActivity(userName, 'updated monthly insecticide', updated.month, 'energy');
+  return updated;
+}
+
+export function deleteMonthlyInsecticide(id, userName) {
+  state = { ...state, monthlyInsecticide: state.monthlyInsecticide.filter((e) => e.id !== id) };
+  commitAndQueue('monthlyInsecticide', 'delete', id);
+  logActivity(userName, 'deleted monthly insecticide', '', 'energy');
+}
+
+// ── Monthly Water CRUD ──────────────────────────────────────────────────
+export const getMonthlyWaters = () => state.monthlyWater;
+
+export function addMonthlyWater(fields, userName) {
+  const record = normalizeMonthlyWater({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, monthlyWater: [record, ...state.monthlyWater] };
+  commitAndQueue('monthlyWater', 'upsert', record);
+  logActivity(userName, 'added monthly water', record.month, 'energy');
+  return record;
+}
+
+export function updateMonthlyWater(id, patch, userName) {
+  const existing = state.monthlyWater.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeMonthlyWater({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, monthlyWater: state.monthlyWater.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('monthlyWater', 'upsert', updated);
+  logActivity(userName, 'updated monthly water', updated.month, 'energy');
+  return updated;
+}
+
+export function deleteMonthlyWater(id, userName) {
+  state = { ...state, monthlyWater: state.monthlyWater.filter((e) => e.id !== id) };
+  commitAndQueue('monthlyWater', 'delete', id);
+  logActivity(userName, 'deleted monthly water', '', 'energy');
+}
+
+// ── Monthly Air Compressor CRUD ─────────────────────────────────────────
+export const getMonthlyAirCompressors = () => state.monthlyAirCompressor;
+
+export function addMonthlyAirCompressor(fields, userName) {
+  const record = normalizeMonthlyAirCompressor({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, monthlyAirCompressor: [record, ...state.monthlyAirCompressor] };
+  commitAndQueue('monthlyAirCompressor', 'upsert', record);
+  logActivity(userName, 'added monthly air compressor', record.month, 'energy');
+  return record;
+}
+
+export function updateMonthlyAirCompressor(id, patch, userName) {
+  const existing = state.monthlyAirCompressor.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeMonthlyAirCompressor({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, monthlyAirCompressor: state.monthlyAirCompressor.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('monthlyAirCompressor', 'upsert', updated);
+  logActivity(userName, 'updated monthly air compressor', updated.month, 'energy');
+  return updated;
+}
+
+export function deleteMonthlyAirCompressor(id, userName) {
+  state = { ...state, monthlyAirCompressor: state.monthlyAirCompressor.filter((e) => e.id !== id) };
+  commitAndQueue('monthlyAirCompressor', 'delete', id);
+  logActivity(userName, 'deleted monthly air compressor', '', 'energy');
+}
+
+// ── Daily Solar Generation CRUD ─────────────────────────────────────────
+export const getDailySolarGenerations = () => state.dailySolarGeneration;
+
+export function addDailySolarGeneration(fields, userName) {
+  const record = normalizeDailySolarGeneration({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, dailySolarGeneration: [record, ...state.dailySolarGeneration] };
+  commitAndQueue('dailySolarGeneration', 'upsert', record);
+  logActivity(userName, 'added daily solar generation', record.date, 'energy');
+  return record;
+}
+
+export function updateDailySolarGeneration(id, patch, userName) {
+  const existing = state.dailySolarGeneration.find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = normalizeDailySolarGeneration({ ...existing, ...patch, id: existing.id, updatedAt: now() });
+  state = { ...state, dailySolarGeneration: state.dailySolarGeneration.map((e) => (e.id === id ? updated : e)) };
+  commitAndQueue('dailySolarGeneration', 'upsert', updated);
+  logActivity(userName, 'updated daily solar generation', updated.date, 'energy');
+  return updated;
+}
+
+export function deleteDailySolarGeneration(id, userName) {
+  state = { ...state, dailySolarGeneration: state.dailySolarGeneration.filter((e) => e.id !== id) };
+  commitAndQueue('dailySolarGeneration', 'delete', id);
+  logActivity(userName, 'deleted daily solar generation', '', 'energy');
+}
+
+// ── Energy Settings CRUD (upsert single row) ────────────────────────────
+export const getEnergySettings = () => state.energySettings;
+
+export function upsertEnergySettings(fields, userName) {
+  const existing = state.energySettings;
+  const updated = normalizeEnergySettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
+  state = { ...state, energySettings: updated };
+  commit('energySettings');
+  queueCloudMutation('energySettings', 'upsert', updated);
+  logActivity(userName, 'updated energy settings', '', 'energy');
+  return updated;
 }
 
 // ── AMC exports ───────────────────────────────────────────────────────────
@@ -2214,6 +2851,13 @@ export function exportBackup() {
       breakdowns: state.breakdowns,
       pms: state.pms,
       energy: state.energy,
+      dailyUtilityLog: state.dailyUtilityLog,
+      monthlyHerbicide: state.monthlyHerbicide,
+      monthlyInsecticide: state.monthlyInsecticide,
+      monthlyWater: state.monthlyWater,
+      monthlyAirCompressor: state.monthlyAirCompressor,
+      dailySolarGeneration: state.dailySolarGeneration,
+      energySettings: state.energySettings,
       machinePmRecords: state.machinePmRecords,
       activity: state.activity,
       settings: state.settings,
@@ -2263,6 +2907,34 @@ export function importBackup(json) {
     state = { ...state, machinePmRecords: parsed.machinePmRecords.map(normalizeMachinePmRecord) };
     commit('machinePmRecords');
   }
+  if (Array.isArray(parsed.dailyUtilityLog)) {
+    state = { ...state, dailyUtilityLog: parsed.dailyUtilityLog.map(normalizeDailyUtilityLog) };
+    commit('dailyUtilityLog');
+  }
+  if (Array.isArray(parsed.monthlyHerbicide)) {
+    state = { ...state, monthlyHerbicide: parsed.monthlyHerbicide.map(normalizeMonthlyHerbicide) };
+    commit('monthlyHerbicide');
+  }
+  if (Array.isArray(parsed.monthlyInsecticide)) {
+    state = { ...state, monthlyInsecticide: parsed.monthlyInsecticide.map(normalizeMonthlyInsecticide) };
+    commit('monthlyInsecticide');
+  }
+  if (Array.isArray(parsed.monthlyWater)) {
+    state = { ...state, monthlyWater: parsed.monthlyWater.map(normalizeMonthlyWater) };
+    commit('monthlyWater');
+  }
+  if (Array.isArray(parsed.monthlyAirCompressor)) {
+    state = { ...state, monthlyAirCompressor: parsed.monthlyAirCompressor.map(normalizeMonthlyAirCompressor) };
+    commit('monthlyAirCompressor');
+  }
+  if (Array.isArray(parsed.dailySolarGeneration)) {
+    state = { ...state, dailySolarGeneration: parsed.dailySolarGeneration.map(normalizeDailySolarGeneration) };
+    commit('dailySolarGeneration');
+  }
+  if (parsed.energySettings) {
+    state = { ...state, energySettings: normalizeEnergySettings(parsed.energySettings) };
+    commit('energySettings');
+  }
   if (Array.isArray(parsed.activity)) {
     state = { ...state, activity: parsed.activity };
     commit('activity');
@@ -2279,6 +2951,13 @@ export function resetPersistentData() {
     breakdowns: state.breakdowns,
     pms: state.pms,
     energy: state.energy,
+    dailyUtilityLog: state.dailyUtilityLog,
+    monthlyHerbicide: state.monthlyHerbicide,
+    monthlyInsecticide: state.monthlyInsecticide,
+    monthlyWater: state.monthlyWater,
+    monthlyAirCompressor: state.monthlyAirCompressor,
+    dailySolarGeneration: state.dailySolarGeneration,
+    energySettings: state.energySettings,
     machineBreakdownLogs: state.machineBreakdownLogs,
     machinePmRecords: state.machinePmRecords,
     amc: state.amc,
@@ -2290,6 +2969,13 @@ export function resetPersistentData() {
     breakdowns: [],
     pms: [],
     energy: [],
+    dailyUtilityLog: [],
+    monthlyHerbicide: [],
+    monthlyInsecticide: [],
+    monthlyWater: [],
+    monthlyAirCompressor: [],
+    dailySolarGeneration: [],
+    energySettings: normalizeEnergySettings({}),
     amc: [],
     machineBreakdownLogs: [],
     machinePmRecords: [],
@@ -2310,6 +2996,12 @@ export function resetPersistentData() {
   queueEntityReplacement('breakdowns', state.breakdowns, previous.breakdowns);
   queueEntityReplacement('pms', state.pms, previous.pms);
   queueEntityReplacement('energy', state.energy, previous.energy);
+  queueEntityReplacement('dailyUtilityLog', state.dailyUtilityLog, previous.dailyUtilityLog);
+  queueEntityReplacement('monthlyHerbicide', state.monthlyHerbicide, previous.monthlyHerbicide);
+  queueEntityReplacement('monthlyInsecticide', state.monthlyInsecticide, previous.monthlyInsecticide);
+  queueEntityReplacement('monthlyWater', state.monthlyWater, previous.monthlyWater);
+  queueEntityReplacement('monthlyAirCompressor', state.monthlyAirCompressor, previous.monthlyAirCompressor);
+  queueEntityReplacement('dailySolarGeneration', state.dailySolarGeneration, previous.dailySolarGeneration);
   queueEntityReplacement('machineBreakdownLogs', state.machineBreakdownLogs, previous.machineBreakdownLogs);
   queueEntityReplacement('machinePmRecords', state.machinePmRecords, previous.machinePmRecords);
   queueEntityReplacement('amc', state.amc, previous.amc);
@@ -2438,6 +3130,66 @@ export function importEnergyBulk(rows, userName) {
   imports.forEach((record) => queueCloudMutation('energy', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
   logActivity(userName, 'bulk imported energy logs', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importDailyUtilityLogBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeDailyUtilityLog({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, dailyUtilityLog: [...imports, ...state.dailyUtilityLog] };
+  commit('dailyUtilityLog');
+  imports.forEach((record) => queueCloudMutation('dailyUtilityLog', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported daily utility logs', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importMonthlyHerbicideBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeMonthlyHerbicide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, monthlyHerbicide: [...imports, ...state.monthlyHerbicide] };
+  commit('monthlyHerbicide');
+  imports.forEach((record) => queueCloudMutation('monthlyHerbicide', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported monthly herbicide records', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importMonthlyInsecticideBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeMonthlyInsecticide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, monthlyInsecticide: [...imports, ...state.monthlyInsecticide] };
+  commit('monthlyInsecticide');
+  imports.forEach((record) => queueCloudMutation('monthlyInsecticide', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported monthly insecticide records', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importMonthlyWaterBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeMonthlyWater({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, monthlyWater: [...imports, ...state.monthlyWater] };
+  commit('monthlyWater');
+  imports.forEach((record) => queueCloudMutation('monthlyWater', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported monthly water records', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importMonthlyAirCompressorBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeMonthlyAirCompressor({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, monthlyAirCompressor: [...imports, ...state.monthlyAirCompressor] };
+  commit('monthlyAirCompressor');
+  imports.forEach((record) => queueCloudMutation('monthlyAirCompressor', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported monthly air compressor records', `${imports.length} rows added`, 'energy');
+  return { created: imports.length, total: imports.length };
+}
+
+export function importDailySolarGenerationBulk(rows, userName) {
+  const imports = rows.map((row) => normalizeDailySolarGeneration({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
+  state = { ...state, dailySolarGeneration: [...imports, ...state.dailySolarGeneration] };
+  commit('dailySolarGeneration');
+  imports.forEach((record) => queueCloudMutation('dailySolarGeneration', 'upsert', record, { schedule: false }));
+  scheduleCloudFlush();
+  logActivity(userName, 'bulk imported daily solar generation records', `${imports.length} rows added`, 'energy');
   return { created: imports.length, total: imports.length };
 }
 
