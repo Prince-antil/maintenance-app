@@ -118,7 +118,7 @@ export default function Settings() {
     { icon: Cog, label: 'Machines registered', value: store.machines.length, cls: 'text-cyan-400' },
     { icon: AlertOctagon, label: 'Breakdown summaries', value: store.breakdowns.length, cls: 'text-red-400' },
     { icon: ClipboardCheck, label: 'PM summaries', value: store.pms.length, cls: 'text-emerald-400' },
-    { icon: Zap, label: 'Energy readings', value: store.energy.length, cls: 'text-amber-400' },
+    { icon: Zap, label: 'Daily utility readings', value: store.dailyUtilityLog.length, cls: 'text-amber-400' },
     { icon: History, label: 'Activity records', value: store.activity.length, cls: 'text-violet-400' },
     { icon: DownloadCloud, label: 'Saved uploads', value: listReportMetadata().length, cls: 'text-cyan-400' },
   ];

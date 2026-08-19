@@ -125,11 +125,6 @@ export default function TopNavbar() {
         out.push({ kind: 'pm', title: `${p.section} — ${period}`, sub: `PM · ${p.doneCount || 0}/${p.plannedCount || 0} done · ${p.pendingCount || 0} pending`, to: '/pm' });
       }
     });
-    store.energy.forEach((e) => {
-      if ((e.source || '').toLowerCase().includes(q)) {
-        out.push({ kind: 'energy', title: `${e.source} · ${e.kwh} kWh`, sub: `Energy · ${new Date(e.date).toLocaleDateString('en-GB')}`, to: '/energy' });
-      }
-    });
     return out.slice(0, 6);
   }, [query, store]);
 

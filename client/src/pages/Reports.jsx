@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useStore, updateBreakdown, deleteBreakdown, updatePM, deletePM, updateEnergyLog, deleteEnergyLog } from '../store.js';
+import { useStore, updateBreakdown, deleteBreakdown, updatePM, deletePM } from '../store.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   availabilityTrend,
@@ -11,7 +11,6 @@ import {
   lastNMonths,
   machineHealth,
   monthlyBreakdownTrend,
-  monthlyEnergy,
   monthlyPMCompletion,
   mtbfTrend,
   mttrTrend,
@@ -28,11 +27,10 @@ import { api } from '../api.js';
 import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import { COMPANY_NAME } from '../constants.js';
-import SectionSelect from '../components/SectionSelect.jsx';
 import {
   AlertCircle, AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
   Factory, FileBarChart2, FileSpreadsheet, FileText, Gauge, Lightbulb,
-  Pencil, Printer, ShieldCheck, Timer, TimerReset, Trash2, TrendingUp, X, Zap,
+  Pencil, Printer, ShieldCheck, Timer, TimerReset, Trash2, TrendingUp, X,
   ChevronDown,
 } from 'lucide-react';
 import { PieDonutChart, ChartCard } from '../components/AnalyticsCharts.jsx';
@@ -82,9 +80,7 @@ function exportPDF(title, columns, rows) {
 const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—');
 
 // Reports where rows have real store IDs and can be edited / deleted
-const EDITABLE_REPORTS = new Set(['pm', 'breakdown', 'energy']);
-
-const SOURCES = ['DG 500 kVA', 'DG 380 kVA', 'Solar Generation', 'Grid / HT Supply', 'Plant SEC'];
+const EDITABLE_REPORTS = new Set(['pm', 'breakdown']);
 
 // ---------- Edit Modal ----------
 function EditModal({ reportId, row, onSave, onDelete, onClose }) {
@@ -110,18 +106,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
         remarks: row.remarks || '',
       };
     }
-    // energy
-    return {
-      date: row.date ? String(row.date).slice(0, 10) : '',
-      source: row.source || SOURCES[0],
-      kwh: String(row.kwh ?? ''),
-      fuelConsumedLitres: String(row.fuelConsumedLitres ?? ''),
-      solarGenerationKwh: String(row.solarGenerationKwh ?? ''),
-      dg500RunHours: String(row.dg500RunHours ?? ''),
-      dg380RunHours: String(row.dg380RunHours ?? ''),
-      plantSection: row.plantSection || '',
-      remarks: row.remarks || '',
-    };
+    return {};
   }, [reportId, row]);
 
   const [form, setForm] = useState(initialState);
@@ -276,52 +261,6 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
             </>
           )}
 
-          {/* ── Energy section ── */}
-          {reportId === 'energy' && (
-            <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelCls}>Date</label>
-                  <input type="date" value={form.date} onChange={set('date')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Source</label>
-                  <select value={form.source} onChange={set('source')} className={inputCls}>
-                    {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>kWh</label>
-                  <input type="number" min="0" step="0.01" value={form.kwh} onChange={set('kwh')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Fuel (L)</label>
-                  <input type="number" min="0" step="0.01" value={form.fuelConsumedLitres} onChange={set('fuelConsumedLitres')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Solar (kWh)</label>
-                  <input type="number" min="0" step="0.01" value={form.solarGenerationKwh} onChange={set('solarGenerationKwh')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>DG 500 Run Hrs</label>
-                  <input type="number" min="0" step="0.1" value={form.dg500RunHours} onChange={set('dg500RunHours')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>DG 380 Run Hrs</label>
-                  <input type="number" min="0" step="0.1" value={form.dg380RunHours} onChange={set('dg380RunHours')} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls}>Plant Section</label>
-                  <SectionSelect value={form.plantSection} onChange={(v) => set('plantSection')({ target: { value: v } })} showAddNew={false} />
-                </div>
-              </div>
-              <div>
-                <label className={labelCls}>Remarks</label>
-                <textarea rows={2} value={form.remarks} onChange={set('remarks')} className={inputCls} />
-              </div>
-            </>
-          )}
-
           <div className="flex items-center justify-between pt-1">
             {!confirmDelete ? (
               <button
@@ -352,7 +291,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
 export default function Reports() {
   const store = useStore();
   const { user } = useAuth();
-  const { machines, breakdowns, pms, energy } = store;
+  const { machines, breakdowns, pms } = store;
   const [active, setActive] = useState('equipment');
   const [serverDocs, setServerDocs] = useState([]);
   const [editRow, setEditRow] = useState(null); // { reportId, row }
@@ -371,7 +310,6 @@ export default function Reports() {
     const { reportId, row } = editRow;
     if (reportId === 'pm') updatePM(row.id, form, userName);
     else if (reportId === 'breakdown') updateBreakdown(row.id, form, userName);
-    else if (reportId === 'energy') updateEnergyLog(row.id, form, userName);
     setEditRow(null);
   };
 
@@ -380,7 +318,6 @@ export default function Reports() {
     const { reportId, row } = editRow;
     if (reportId === 'pm') deletePM(row.id, userName);
     else if (reportId === 'breakdown') deleteBreakdown(row.id, userName);
-    else if (reportId === 'energy') deleteEnergyLog(row.id, userName);
     setEditRow(null);
   };
 
@@ -429,7 +366,6 @@ export default function Reports() {
         pmDone: doneCount,
         pmPending: pmRows.reduce((sum, row) => sum + (row.pendingCount || 0), 0),
         compliance: plannedCount ? `${Math.round((doneCount / plannedCount) * 1000) / 10}%` : '0%',
-        energy: Math.round(energy.filter((entry) => summaryMonthKey({ createdAt: entry.date || entry.createdAt }) === month.key).reduce((sum, entry) => sum + (entry.kwh || 0), 0)),
       };
     });
 
@@ -482,22 +418,6 @@ export default function Reports() {
           { key: 'remarks', label: 'Remarks' },
         ],
         rows: breakdowns,
-      },
-      {
-        id: 'energy',
-        label: 'Energy Report',
-        icon: Zap,
-        desc: 'DG / solar / grid consumption logs',
-        columns: [
-          { label: 'Date', value: (entry) => fmtDate(entry.date) },
-          { key: 'source', label: 'Source' },
-          { key: 'kwh', label: 'kWh' },
-          { key: 'fuelConsumedLitres', label: 'Fuel (L)' },
-          { key: 'solarGenerationKwh', label: 'Solar (kWh)' },
-          { key: 'plantSection', label: 'Section' },
-          { key: 'remarks', label: 'Remarks' },
-        ],
-        rows: energy,
       },
       {
         id: 'downtime',
@@ -585,7 +505,6 @@ export default function Reports() {
           { key: 'pmDone', label: 'Done PM' },
           { key: 'pmPending', label: 'Pending PM' },
           { key: 'compliance', label: 'Compliance' },
-          { key: 'energy', label: 'Energy (kWh)' },
         ],
         rows: monthlyRows,
       },
@@ -601,12 +520,10 @@ export default function Reports() {
           { key: 'pmPlanned', label: 'Planned PM' },
           { key: 'pmDone', label: 'Done PM' },
           { key: 'pmPending', label: 'Pending PM' },
-          { key: 'energy', label: 'Energy (kWh)' },
         ],
         rows: [...new Set([
           ...breakdowns.map((row) => String(row.year)),
           ...pms.map((row) => String(row.year)),
-          ...energy.map((entry) => String(new Date(entry.date || entry.createdAt).getFullYear())),
         ])]
           .filter(Boolean)
           .sort((a, b) => b.localeCompare(a))
@@ -617,7 +534,6 @@ export default function Reports() {
             pmPlanned: pms.filter((row) => String(row.year) === year).reduce((sum, row) => sum + (row.plannedCount || 0), 0),
             pmDone: pms.filter((row) => String(row.year) === year).reduce((sum, row) => sum + (row.doneCount || 0), 0),
             pmPending: pms.filter((row) => String(row.year) === year).reduce((sum, row) => sum + (row.pendingCount || 0), 0),
-            energy: Math.round(energy.filter((entry) => String(new Date(entry.date || entry.createdAt).getFullYear()) === year).reduce((sum, entry) => sum + (entry.kwh || 0), 0)),
           })),
       },
       {
@@ -671,17 +587,6 @@ export default function Reports() {
         desc: 'Operational risk management records',
         columns: DOC_COLS,
         rows: docRows('ORM Data (Operational Risk Management)'),
-      },
-      {
-        id: 'energy-trend',
-        label: 'Energy Trend Report',
-        icon: Zap,
-        desc: 'Month-by-month energy consumption',
-        columns: [
-          { key: 'label', label: 'Month' },
-          { key: 'kwh', label: 'Energy (kWh)' },
-        ],
-        rows: monthlyEnergy(energy, 12),
       },
       {
         id: 'failure-cause-pareto',
@@ -755,7 +660,7 @@ export default function Reports() {
         ),
       },
     ];
-  }, [store, serverDocs, machines, breakdowns, pms, energy, amcSectionFilter, amcVendorFilter, amcStatusFilter]);
+  }, [store, serverDocs, machines, breakdowns, pms, amcSectionFilter, amcVendorFilter, amcStatusFilter]);
 
   const report = REPORTS.find((item) => item.id === active) || REPORTS[0];
   const filename = report.label.toLowerCase().replace(/\s+/g, '-');

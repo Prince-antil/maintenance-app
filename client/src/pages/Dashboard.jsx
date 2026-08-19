@@ -12,8 +12,8 @@ import {
 import { useStore } from '../store.js';
 import {
   computeKPIs, monthlyBreakdownTrend, equipmentWiseBreakdown,
-  paretoTop10, breakdownByDepartment, monthlyEnergy, healthDistribution,
-  availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution, monthlyEnergyOverview,
+  paretoTop10, breakdownByDepartment, healthDistribution,
+  availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey,
   computePfTrend, computeDgFuelEfficiency, computeRenewableSummary,
@@ -66,7 +66,7 @@ export default function Dashboard() {
   const { refreshKey, openUpload, openMasterImport } = useUI();
   const navigate = useNavigate();
   const store = useStore();
-  const { machines, breakdowns, pms, energy, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
+  const { machines, breakdowns, pms, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -101,9 +101,6 @@ export default function Dashboard() {
     store.machineBreakdownLogs.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
-    store.energy.forEach((r) => {
-      if (r.date) allPeriods.add(String(r.date).slice(0, 7));
-    });
     dailyUtilityLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
@@ -117,10 +114,6 @@ export default function Dashboard() {
   const filteredPMs = useMemo(() =>
     periodFilter === 'all' ? store.pms : store.pms.filter((r) => r.period === periodFilter),
     [store.pms, periodFilter]
-  );
-  const filteredEnergy = useMemo(() =>
-    periodFilter === 'all' ? store.energy : store.energy.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
-    [store.energy, periodFilter]
   );
   const filteredMachineBDLogs = useMemo(() =>
     periodFilter === 'all' ? store.machineBreakdownLogs : store.machineBreakdownLogs.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
@@ -163,13 +156,24 @@ export default function Dashboard() {
     };
   }, [filteredDailyUtilityLog]);
 
+  const energySnapshot = useMemo(() => {
+    const logs = filteredDailyUtilityLog;
+    const solarLogs = filteredDailySolarGeneration;
+    const unit1KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u1ImportKwh) || 0), 0));
+    const unit2KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u2ImportKwh) || 0), 0));
+    const totalGridMonth = unit1KwhMonth + unit2KwhMonth;
+    const dg500HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg500RunHours) || 0), 0));
+    const dg380HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg380RunHours) || 0), 0));
+    const solarMonth = Math.round(solarLogs.reduce((s, e) => s + (Number(e.daily_total_kwh) || 0), 0));
+    const fuelMonth = Math.round(logs.reduce((s, e) => s + (Number(e.dg500FuelConsumed) || 0) + (Number(e.dg380FuelConsumed) || 0), 0));
+    return { unit1KwhMonth, unit2KwhMonth, totalGridMonth, dg500HrsMonth, dg380HrsMonth, solarMonth, fuelMonth };
+  }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
+
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
     equipment: equipmentWiseBreakdown(filteredBreakdowns).slice(0, 8),
     pareto: paretoTop10(filteredBreakdowns),
     dept: breakdownByDepartment(filteredBreakdowns),
-    energy: monthlyEnergy(filteredEnergy),
-    energyOverview: monthlyEnergyOverview(filteredEnergy),
     health: healthDistribution(store.machines, filteredBreakdowns, filteredPMs),
     machineStatus: machineStatusDistribution(store.machines),
     avail: availabilityTrend(filteredBreakdowns, store.machines.length),
@@ -182,7 +186,7 @@ export default function Dashboard() {
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
     pfTrend,
     dgFuelEfficiency,
-  }), [filteredBreakdowns, filteredPMs, filteredEnergy, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
+  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
@@ -217,7 +221,6 @@ export default function Dashboard() {
 
   const noBDs = store.breakdowns.length === 0;
   const noPMs = store.pms.length === 0;
-  const noEnergy = store.energy.length === 0;
   const noDailyUtility = filteredDailyUtilityLog.length === 0;
   const noSolar = filteredDailySolarGeneration.length === 0;
 
@@ -319,7 +322,6 @@ export default function Dashboard() {
           <KPIStatCard icon={TimerReset} label="Avg MTTR" value={`${kpi.mttr} hrs`} sub="Mean time to repair" tone="accent" />
           <KPIStatCard icon={Timer} label="Avg MTBF" value={`${kpi.mtbf} hrs`} sub="Mean time between failures" tone="accent" />
           <KPIStatCard icon={FolderArchive} label="Total Documents" value={kpi.totalDocuments} sub="Reports + machine docs" tone="accent" />
-          <KPIStatCard icon={Zap} label="Energy Today" value={`${kpi.energyToday}`} sub="kWh logged today" tone="warning" />
           <KPIStatCard icon={ListChecks} label="Pending PM" value={kpi.openWorkOrders} sub={`${kpi.pmSectionLogs} PM section summaries`} tone={kpi.openWorkOrders ? 'warning' : 'neutral'} />
         </div>
       </section>
@@ -335,43 +337,43 @@ export default function Dashboard() {
             {/* UHBVNL Unit 1 */}
             <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 1 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{(kpi.unit1KwhMonth || 0).toLocaleString()}</p>
+              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit1KwhMonth.toLocaleString()}</p>
               <p className="text-cyan-400 text-[10px] mt-0.5">kWh</p>
             </div>
             {/* UHBVNL Unit 2 */}
             <div className="rounded-control bg-violet-500/[0.07] border border-violet-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 2 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{(kpi.unit2KwhMonth || 0).toLocaleString()}</p>
+              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit2KwhMonth.toLocaleString()}</p>
               <p className="text-violet-400 text-[10px] mt-0.5">kWh</p>
             </div>
             {/* Total Grid */}
             <div className="rounded-control bg-white/[0.04] border border-white/[0.10] p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Total Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{(kpi.totalGridMonth || 0).toLocaleString()}</p>
+              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.totalGridMonth.toLocaleString()}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
             </div>
             {/* DG 500 */}
             <div className="rounded-control bg-amber-500/[0.07] border border-amber-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500 kVA</p>
-              <p className="text-amber-300 text-base font-bold tabular-nums">{kpi.dg500HrsMonth || 0}</p>
+              <p className="text-amber-300 text-base font-bold tabular-nums">{energySnapshot.dg500HrsMonth}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
             </div>
             {/* DG 380 */}
             <div className="rounded-control bg-orange-500/[0.07] border border-orange-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380 kVA</p>
-              <p className="text-orange-300 text-base font-bold tabular-nums">{kpi.dg380HrsMonth || 0}</p>
+              <p className="text-orange-300 text-base font-bold tabular-nums">{energySnapshot.dg380HrsMonth}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
             </div>
             {/* Solar */}
             <div className="rounded-control bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Solar</p>
-              <p className="text-emerald-300 text-base font-bold tabular-nums">{(kpi.solarMonth || 0).toLocaleString()}</p>
+              <p className="text-emerald-300 text-base font-bold tabular-nums">{energySnapshot.solarMonth.toLocaleString()}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
             </div>
             {/* Fuel */}
             <div className="rounded-control bg-red-500/[0.07] border border-red-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Fuel</p>
-              <p className="text-red-300 text-base font-bold tabular-nums">{(kpi.fuelMonth || 0).toLocaleString()}</p>
+              <p className="text-red-300 text-base font-bold tabular-nums">{energySnapshot.fuelMonth.toLocaleString()}</p>
               <p className="text-slate-500 text-[10px] mt-0.5">Ltrs</p>
             </div>
             {/* Power Factor */}
@@ -388,21 +390,21 @@ export default function Dashboard() {
             </div>
           </div>
           {/* Unit 1 vs Unit 2 split bar */}
-          {(kpi.totalGridMonth || 0) > 0 && (
+          {energySnapshot.totalGridMonth > 0 && (
             <div className="flex items-center gap-3 pt-1">
               <span className="text-slate-500 text-[10px] whitespace-nowrap">Grid split:</span>
               <div className="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
                 <div
                   className="h-full bg-cyan-400 transition-all duration-500"
-                  style={{ width: `${Math.round(((kpi.unit1KwhMonth || 0) / kpi.totalGridMonth) * 100)}%` }}
+                  style={{ width: `${Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
                 />
                 <div
                   className="h-full bg-violet-400 transition-all duration-500"
-                  style={{ width: `${Math.round(((kpi.unit2KwhMonth || 0) / kpi.totalGridMonth) * 100)}%` }}
+                  style={{ width: `${Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
                 />
               </div>
               <span className="text-slate-500 text-[10px] whitespace-nowrap">
-                U1 {Math.round(((kpi.unit1KwhMonth || 0) / kpi.totalGridMonth) * 100)}% · U2 {Math.round(((kpi.unit2KwhMonth || 0) / kpi.totalGridMonth) * 100)}%
+                U1 {Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}% · U2 {Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%
               </span>
             </div>
           )}
@@ -460,16 +462,6 @@ export default function Dashboard() {
             <ProgressGauge value={kpi.pmCompliance} label="PM Compliance" />
           </div>
         </ChartCard>
-        <ChartCard title="Energy Consumption Overview" subtitle="DG 500 kVA vs DG 380 kVA run hours and solar generation" empty={noEnergy}>
-          <GroupedBarChart
-            data={charts.energyOverview}
-            bars={[
-              { dataKey: 'dg500RunHours', name: 'DG 500 kVA (hrs)', color: '#F59E0B' },
-              { dataKey: 'dg380RunHours', name: 'DG 380 kVA (hrs)', color: '#FB923C' },
-              { dataKey: 'solarKwh',      name: 'Solar (kWh)',       color: '#10B981' },
-            ]}
-          />
-        </ChartCard>
         <ChartCard title="Section-wise Breakdowns" subtitle="Failure count per plant section" empty={noBDs}>
           <HorizontalBarChart data={charts.equipment} color="#06B6D4" />
         </ChartCard>
@@ -478,9 +470,6 @@ export default function Dashboard() {
         </ChartCard>
         <ChartCard title="Breakdown by Section" subtitle="Failure distribution across plant" empty={noBDs}>
           <PieDonutChart data={charts.dept} />
-        </ChartCard>
-        <ChartCard title="Monthly Energy Consumption" subtitle="Total live kWh trend" empty={noEnergy}>
-          <TrendChart data={charts.energy} dataKey="kwh" color="#F59E0B" unit=" kWh" />
         </ChartCard>
         <ChartCard title="Power Factor Trend" subtitle="Unit 1 & Unit 2 daily power factor" empty={noDailyUtility} height={260} raw>
           {noDailyUtility ? (

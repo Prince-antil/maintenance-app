@@ -6,7 +6,7 @@ import { useUI } from '../context/UIContext.jsx';
 import { CATEGORIES, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
 import SectionSelect from './SectionSelect.jsx';
 import { IMPORT_MODULES, downloadTemplate, inferUploadMeta, parseImportFile } from '../bulkImport.js';
-import { importBreakdownsBulk, importEnergyBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk, dryRunImportMachinePmRecords, importDailyUtilityLogBulk, importMonthlyHerbicideBulk, importMonthlyInsecticideBulk, importMonthlyWaterBulk, importMonthlyAirCompressorBulk, importDailySolarGenerationBulk } from '../store.js';
+import { importBreakdownsBulk, importMachinesBulk, importPMBulk, importMachineBreakdownLogsBulk, importMachinePmRecordsBulk, dryRunImportMachinePmRecords, importDailyUtilityLogBulk, importMonthlyHerbicideBulk, importMonthlyInsecticideBulk, importMonthlyWaterBulk, importMonthlyAirCompressorBulk, importDailySolarGenerationBulk } from '../store.js';
 
 const BULK_ALLOWED_EXT = ['.xlsx', '.xls', '.csv'];
 const MODULE_OPTIONS = [
@@ -17,7 +17,6 @@ const MODULE_OPTIONS = [
 const importers = {
   pm: importPMBulk,
   breakdowns: importBreakdownsBulk,
-  energy: importEnergyBulk,
   machines: importMachinesBulk,
   machineBreakdownLogs: importMachineBreakdownLogsBulk,
   machinePmRecords: importMachinePmRecordsBulk,

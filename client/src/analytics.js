@@ -156,24 +156,13 @@ export function pmStats(pms) {
 }
 
 export function computeKPIs(state, totalDocuments = 0) {
-  const { machines, breakdowns, pms, energy } = state;
+  const { machines, breakdowns, pms } = state;
   const running = machines.filter((machine) => machine.status === 'running').length;
   const maint = machines.filter((machine) => machine.status === 'maintenance').length;
   const manualDown = machines.filter((machine) => machine.status === 'breakdown').length;
   const currentKey = monthKey(new Date());
   const bd = aggregateBreakdownRecords(breakdowns, currentKey);
   const pm = aggregatePMRecords(pms, currentKey);
-  const energyToday = energy
-    .filter((entry) => isToday(entry.date || entry.createdAt))
-    .reduce((sum, entry) => sum + energyTotal(entry), 0);
-  const energyThisMonth = energy.filter((entry) => monthKey(entry.date || entry.createdAt) === currentKey);
-  const unit1KwhMonth  = Math.round(energyThisMonth.reduce((s, e) => s + (e.uhbvnlUnit1Kwh || 0), 0));
-  const unit2KwhMonth  = Math.round(energyThisMonth.reduce((s, e) => s + (e.uhbvnlUnit2Kwh || 0), 0));
-  const totalGridMonth = Math.round(energyThisMonth.reduce((s, e) => s + (e.totalGridKwh || 0), 0)) || (unit1KwhMonth + unit2KwhMonth);
-  const solarMonth     = Math.round(energyThisMonth.reduce((s, e) => s + (e.solarGenerationKwh || 0), 0));
-  const dg500HrsMonth  = round1(energyThisMonth.reduce((s, e) => s + (e.dg500RunHours || 0), 0));
-  const dg380HrsMonth  = round1(energyThisMonth.reduce((s, e) => s + (e.dg380RunHours || 0), 0));
-  const fuelMonth      = Math.round(energyThisMonth.reduce((s, e) => s + (e.fuelConsumedLitres || 0), 0));
   const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
 
   return {
@@ -191,15 +180,6 @@ export function computeKPIs(state, totalDocuments = 0) {
     mttr: bd.mttr,
     mtbf: bd.mtbf,
     totalDocuments: totalDocuments + machineDocs,
-    energyToday: Math.round(energyToday),
-    // ── Energy detail ──────────────────────────────────────────────────────
-    unit1KwhMonth,
-    unit2KwhMonth,
-    totalGridMonth,
-    solarMonth,
-    dg500HrsMonth,
-    dg380HrsMonth,
-    fuelMonth,
     openWorkOrders: pm.pendingCount,
     breakdownsThisMonth: bd.breakdownCount,
     downtimeThisMonth: bd.downtimeHours,
