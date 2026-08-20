@@ -73,7 +73,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -1196,6 +1196,12 @@ const CLOUD_ENTITY_CONFIG = {
     fromRow: normalizeDailySolarGenerationCloudRow,
     toRow: dailySolarGenerationToCloudRow,
     orderBy: [{ column: 'date', ascending: false }],
+  },
+  energySettings: {
+    table: 'energy_settings',
+    fromRow: normalizeEnergySettingsCloudRow,
+    toRow: energySettingsToCloudRow,
+    orderBy: [{ column: 'id', ascending: true }],
   },
 };
 
