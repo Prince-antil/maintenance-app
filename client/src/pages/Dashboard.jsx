@@ -151,21 +151,21 @@ export default function Dashboard() {
     const last = sorted[sorted.length - 1];
     return {
       date: last.date,
-      u1Pf: (Number(last.u1ImportKvah) || 0) > 0 ? round1((Number(last.u1ImportKwh) || 0) / (Number(last.u1ImportKvah) || 0)) : 0,
-      u2Pf: (Number(last.u2ImportKvah) || 0) > 0 ? round1((Number(last.u2ImportKwh) || 0) / (Number(last.u2ImportKvah) || 0)) : 0,
+      u1Pf: (Number(last.u1ImportKvahReading) || 0) > 0 ? round1((Number(last.u1ImportKwhReading) || 0) / (Number(last.u1ImportKvahReading) || 0)) : 0,
+      u2Pf: (Number(last.u2ImportKvahReading) || 0) > 0 ? round1((Number(last.u2ImportKwhReading) || 0) / (Number(last.u2ImportKvahReading) || 0)) : 0,
     };
   }, [filteredDailyUtilityLog]);
 
   const energySnapshot = useMemo(() => {
     const logs = filteredDailyUtilityLog;
     const solarLogs = filteredDailySolarGeneration;
-    const unit1KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u1ImportKwh) || 0), 0));
-    const unit2KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u2ImportKwh) || 0), 0));
+    const unit1KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u1ImportKwhReading) || 0), 0));
+    const unit2KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u2ImportKwhReading) || 0), 0));
     const totalGridMonth = unit1KwhMonth + unit2KwhMonth;
-    const dg500HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg500RunHours) || 0), 0));
-    const dg380HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg380RunHours) || 0), 0));
-    const solarMonth = Math.round(solarLogs.reduce((s, e) => s + (Number(e.daily_total_kwh) || 0), 0));
-    const fuelMonth = Math.round(logs.reduce((s, e) => s + (Number(e.dg500FuelConsumed) || 0) + (Number(e.dg380FuelConsumed) || 0), 0));
+    const dg500HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg500HourmeterReading) || 0), 0));
+    const dg380HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg380HourmeterReading) || 0), 0));
+    const solarMonth = Math.round(solarLogs.reduce((s, e) => s + (Number(e.dailyTotalKwh) || 0), 0));
+    const fuelMonth = Math.round(logs.reduce((s, e) => s + (Number(e.dg500HsdAddedLtr) || 0) + (Number(e.dg380HsdAddedLtr) || 0), 0));
     return { unit1KwhMonth, unit2KwhMonth, totalGridMonth, dg500HrsMonth, dg380HrsMonth, solarMonth, fuelMonth };
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
 

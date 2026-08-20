@@ -440,6 +440,7 @@ const FIELD_ALIASES = {
     u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1'],
     u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2'],
     u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3'],
+    dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum'],
   },
 };
 
@@ -816,6 +817,7 @@ function parseModuleRow(moduleId, row, mapping, index) {
       u2Inv1Kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
       u2Inv2Kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
       u2Inv3Kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
+      dailyTotalKwh: parseNumber(getCell(row, mapping, 'dailyTotalKwh')),
     };
   }
 

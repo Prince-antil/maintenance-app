@@ -36,13 +36,13 @@ export default function Settings() {
   const currentEnergy = getEnergySettings();
   const [energyEditing, setEnergyEditing] = useState(false);
   const [energyForm, setEnergyForm] = useState({
-    u1ImportExportCtRatio: currentEnergy.u1ImportExportCtRatio ?? '',
-    u1SolarCtRatio: currentEnergy.u1SolarCtRatio ?? '',
-    u2ImportExportCtRatio: currentEnergy.u2ImportExportCtRatio ?? '',
-    u2SolarCtRatio: currentEnergy.u2SolarCtRatio ?? '',
+    u1ImportExportCt: currentEnergy.u1ImportExportCt ?? '',
+    u1SolarCt: currentEnergy.u1SolarCt ?? '',
+    u2ImportExportCt: currentEnergy.u2ImportExportCt ?? '',
+    u2SolarCt: currentEnergy.u2SolarCt ?? '',
     pfWarningThreshold: currentEnergy.pfWarningThreshold ?? '',
     installedSolarCapacityKwp: currentEnergy.installedSolarCapacityKwp ?? '',
-    gridCO2EmissionFactor: currentEnergy.gridCO2EmissionFactor ?? '',
+    gridCo2EmissionFactor: currentEnergy.gridCo2EmissionFactor ?? '',
     avgPeakSunHoursPerDay: currentEnergy.avgPeakSunHoursPerDay ?? '',
   });
   const [energySaved, setEnergySaved] = useState(false);
@@ -275,8 +275,8 @@ export default function Settings() {
                 <input
                   type="number"
                   className="input-field text-xs w-full"
-                  value={energyForm.u1ImportExportCtRatio}
-                  onChange={(e) => setEnergyForm({ ...energyForm, u1ImportExportCtRatio: e.target.value })}
+                  value={energyForm.u1ImportExportCt}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u1ImportExportCt: e.target.value })}
                 />
               </div>
               <div>
@@ -284,8 +284,8 @@ export default function Settings() {
                 <input
                   type="number"
                   className="input-field text-xs w-full"
-                  value={energyForm.u1SolarCtRatio}
-                  onChange={(e) => setEnergyForm({ ...energyForm, u1SolarCtRatio: e.target.value })}
+                  value={energyForm.u1SolarCt}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u1SolarCt: e.target.value })}
                 />
               </div>
               <div>
@@ -293,8 +293,8 @@ export default function Settings() {
                 <input
                   type="number"
                   className="input-field text-xs w-full"
-                  value={energyForm.u2ImportExportCtRatio}
-                  onChange={(e) => setEnergyForm({ ...energyForm, u2ImportExportCtRatio: e.target.value })}
+                  value={energyForm.u2ImportExportCt}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u2ImportExportCt: e.target.value })}
                 />
               </div>
               <div>
@@ -302,8 +302,8 @@ export default function Settings() {
                 <input
                   type="number"
                   className="input-field text-xs w-full"
-                  value={energyForm.u2SolarCtRatio}
-                  onChange={(e) => setEnergyForm({ ...energyForm, u2SolarCtRatio: e.target.value })}
+                  value={energyForm.u2SolarCt}
+                  onChange={(e) => setEnergyForm({ ...energyForm, u2SolarCt: e.target.value })}
                 />
               </div>
               <div>
@@ -333,8 +333,8 @@ export default function Settings() {
                   type="number"
                   step="0.01"
                   className="input-field text-xs w-full"
-                  value={energyForm.gridCO2EmissionFactor}
-                  onChange={(e) => setEnergyForm({ ...energyForm, gridCO2EmissionFactor: e.target.value })}
+                  value={energyForm.gridCo2EmissionFactor}
+                  onChange={(e) => setEnergyForm({ ...energyForm, gridCo2EmissionFactor: e.target.value })}
                 />
               </div>
               <div>
@@ -361,13 +361,13 @@ export default function Settings() {
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
               {[
-                { label: 'U1 Import/Export CT Ratio', value: currentEnergy.u1ImportExportCtRatio },
-                { label: 'U1 Solar CT Ratio', value: currentEnergy.u1SolarCtRatio },
-                { label: 'U2 Import/Export CT Ratio', value: currentEnergy.u2ImportExportCtRatio },
-                { label: 'U2 Solar CT Ratio', value: currentEnergy.u2SolarCtRatio },
+                { label: 'U1 Import/Export CT Ratio', value: currentEnergy.u1ImportExportCt },
+                { label: 'U1 Solar CT Ratio', value: currentEnergy.u1SolarCt },
+                { label: 'U2 Import/Export CT Ratio', value: currentEnergy.u2ImportExportCt },
+                { label: 'U2 Solar CT Ratio', value: currentEnergy.u2SolarCt },
                 { label: 'PF Warning Threshold', value: currentEnergy.pfWarningThreshold },
                 { label: 'Installed Solar Capacity (kWp)', value: currentEnergy.installedSolarCapacityKwp },
-                { label: 'Grid CO2 Emission Factor', value: currentEnergy.gridCO2EmissionFactor },
+                { label: 'Grid CO2 Emission Factor', value: currentEnergy.gridCo2EmissionFactor },
                 { label: 'Avg Peak Sun Hours per Day', value: currentEnergy.avgPeakSunHoursPerDay },
               ].map((row) => (
                 <div key={row.label} className="flex items-center justify-between rounded-control bg-white/[0.03] border border-white/[0.06] px-3 py-2">

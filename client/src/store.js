@@ -1733,7 +1733,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -1748,6 +1748,7 @@ async function initializeCloudSync() {
       fetchCloudEntity('monthlyWater'),
       fetchCloudEntity('monthlyAirCompressor'),
       fetchCloudEntity('dailySolarGeneration'),
+      fetchCloudEntity('energySettings'),
     ]);
 
     const remoteSnapshots = {
@@ -1765,6 +1766,7 @@ async function initializeCloudSync() {
       monthlyWater: remoteMonthlyWater,
       monthlyAirCompressor: remoteMonthlyAirCompressor,
       dailySolarGeneration: remoteDailySolarGeneration,
+      energySettings: remoteEnergySettings,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -1804,6 +1806,10 @@ async function initializeCloudSync() {
     if (remoteMonthlyWater.length) replaceEntityState('monthlyWater', remoteMonthlyWater, false);
     if (remoteMonthlyAirCompressor.length) replaceEntityState('monthlyAirCompressor', remoteMonthlyAirCompressor, false);
     if (remoteDailySolarGeneration.length) replaceEntityState('dailySolarGeneration', remoteDailySolarGeneration, false);
+    if (remoteEnergySettings?.length) {
+      state = { ...state, energySettings: normalizeEnergySettings(remoteEnergySettings[0] || {}) };
+      persistEntity('energySettings');
+    }
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet

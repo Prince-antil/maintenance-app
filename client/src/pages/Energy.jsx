@@ -154,6 +154,8 @@ function Toolbar({ isAdmin, onAdd, onUpload, onDownload, label }) {
 }
 
 function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, todayStr, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Daily Utility' : 'Add Daily Utility';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { dailyUtilityLog } = store;
   const sorted = useMemo(() => [...dailyUtilityLog].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailyUtilityLog]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
@@ -368,6 +370,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
 }
 
 function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Herbicide' : 'Add Herbicide';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { monthlyHerbicide } = store;
   const sorted = useMemo(() => [...monthlyHerbicide].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyHerbicide]);
   const filtered = useMemo(() => sorted.filter((r) => monthInRange(r.month, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
@@ -483,6 +487,8 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
 }
 
 function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Insecticide' : 'Add Insecticide';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { monthlyInsecticide } = store;
   const sorted = useMemo(() => [...monthlyInsecticide].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyInsecticide]);
 
@@ -575,6 +581,8 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
 }
 
 function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Water' : 'Add Water';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { monthlyWater } = store;
   const sorted = useMemo(() => [...monthlyWater].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyWater]);
   const withCalc = useMemo(() => sorted.map((row, idx) => {
@@ -670,6 +678,8 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
 }
 
 function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Air Compressor' : 'Add Air Compressor';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { monthlyAirCompressor } = store;
   const sorted = useMemo(() => [...monthlyAirCompressor].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyAirCompressor]);
   const withCalc = useMemo(() => sorted.map((row, idx) => {
@@ -780,6 +790,8 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
 }
 
 function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, todayStr, currentMK, pushToast }) {
+  const formTitle = editRow ? 'Edit Solar' : 'Add Solar';
+  const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { dailySolarGeneration } = store;
   const sorted = useMemo(() => [...dailySolarGeneration].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailySolarGeneration]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
@@ -829,8 +841,10 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
 
   const handleSave = () => {
     if (!formValues.date) { pushToast({ type: 'error', message: 'Date is required' }); return; }
-    if (editRow) updateDailySolarGeneration(editRow.id, formValues, userName);
-    else addDailySolarGeneration(formValues, userName);
+    const total = toN(formValues.u1Inv1Kwh) + toN(formValues.u1Inv2Kwh) + toN(formValues.u1Inv3Kwh) + toN(formValues.u1Inv4Kwh) + toN(formValues.u2Inv1Kwh) + toN(formValues.u2Inv2Kwh) + toN(formValues.u2Inv3Kwh);
+    const payload = { ...formValues, dailyTotalKwh: r1(total) };
+    if (editRow) updateDailySolarGeneration(editRow.id, payload, userName);
+    else addDailySolarGeneration(payload, userName);
     closeForm();
   };
 

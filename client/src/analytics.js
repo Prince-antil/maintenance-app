@@ -848,8 +848,8 @@ export function computeDailyUtilityDerived(current, previous, settings) {
   const u2SolarCt = Number(s.u2SolarCt) || 0;
   const pfWarningThreshold = Number(s.pfWarningThreshold) || 0.9;
   const gridCo2EmissionFactor = Number(s.gridCo2EmissionFactor) || 0;
-  const installedCapacity = Number(s.installedCapacity) || 0;
-  const peakSunHours = Number(s.peakSunHours) || 0;
+  const installedCapacity = Number(s.installedSolarCapacityKwp) || 0;
+  const peakSunHours = Number(s.avgPeakSunHoursPerDay) || 0;
 
   const c = current || {};
   const p = previous || {};
@@ -1044,17 +1044,22 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
 
   // Solar from inverter logs
   const solarFromInverters = round1(
-    solarLogs.reduce((sum, l) => sum + (Number(l.daily_total_kwh) || 0), 0)
+    solarLogs.reduce((sum, l) => sum + (Number(l.dailyTotalKwh) || 0), 0)
   );
 
   // Meter-side solar from daily utility
   const meterSideSolar = round1(
-    logs.reduce((sum, l) => sum + (Number(l.u1SolarKwh) || 0) + (Number(l.u2SolarKwh) || 0), 0)
+    logs.reduce((sum, l) => sum + (Number(l.u1SolarKwhReading) || 0) + (Number(l.u2SolarKwhReading) || 0), 0)
   );
 
   // Total plant consumption from utility
   const totalPlantConsumption = round1(
-    logs.reduce((sum, l) => sum + (Number(l.totalGridKwh) || 0) + (Number(l.totalDgKwh) || 0) + (Number(l.totalSolarKwh) || 0), 0)
+    logs.reduce((sum, l) => {
+      const grid = (Number(l.u1ImportKwhReading) || 0) + (Number(l.u2ImportKwhReading) || 0);
+      const dg = (Number(l.dg380KwhReading) || 0) + (Number(l.dg500KwhReading) || 0);
+      const solar = (Number(l.u1SolarKwhReading) || 0) + (Number(l.u2SolarKwhReading) || 0);
+      return sum + grid + dg + solar;
+    }, 0)
   );
 
   const renewableSharePct = totalPlantConsumption > 0
@@ -1062,8 +1067,8 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
     : 0;
 
   // Performance ratio
-  const installedCapacity = Number(s.installedCapacity) || 0;
-  const peakSunHours = Number(s.peakSunHours) || 0;
+  const installedCapacity = Number(s.installedSolarCapacityKwp) || 0;
+  const peakSunHours = Number(s.avgPeakSunHoursPerDay) || 0;
   const daysInMonth = new Date(Number(monthKey_.split('-')[0]), Number(monthKey_.split('-')[1]), 0).getDate() || 30;
   const expectedSolar = installedCapacity * peakSunHours * daysInMonth;
   const performanceRatio = expectedSolar > 0 ? round1((solarFromInverters / expectedSolar) * 100) : 0;
@@ -1101,10 +1106,10 @@ export function computePfTrend(dailyUtilityLogs, n = 12) {
   const last = sorted.slice(-n);
 
   return last.map((l) => {
-    const u1ImportKwh = Number(l.u1ImportKwh) || 0;
-    const u1ImportKvah = Number(l.u1ImportKvah) || 0;
-    const u2ImportKwh = Number(l.u2ImportKwh) || 0;
-    const u2ImportKvah = Number(l.u2ImportKvah) || 0;
+    const u1ImportKwh = Number(l.u1ImportKwhReading) || 0;
+    const u1ImportKvah = Number(l.u1ImportKvahReading) || 0;
+    const u2ImportKwh = Number(l.u2ImportKwhReading) || 0;
+    const u2ImportKvah = Number(l.u2ImportKvahReading) || 0;
     return {
       date: l.date || '',
       u1Pf: u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0,
@@ -1128,10 +1133,10 @@ export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6) {
     let dg500Fuel = 0;
 
     monthLogs.forEach((l) => {
-      dg380Generation += Number(l.dg380Generation) || 0;
-      dg380Fuel += Number(l.dg380FuelConsumed) || 0;
-      dg500Generation += Number(l.dg500Generation) || 0;
-      dg500Fuel += Number(l.dg500FuelConsumed) || 0;
+      dg380Generation += Number(l.dg380KwhReading) || 0;
+      dg380Fuel += Number(l.dg380HsdAddedLtr) || 0;
+      dg500Generation += Number(l.dg500KwhReading) || 0;
+      dg500Fuel += Number(l.dg500HsdAddedLtr) || 0;
     });
 
     return {
