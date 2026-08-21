@@ -178,12 +178,14 @@ function normalizeDailyUtilityLog(fields) {
     u1ExportKvahReading: toNumber(fields.u1ExportKvahReading),
     u1SolarKwhReading: toNumber(fields.u1SolarKwhReading),
     u1SolarKvahReading: toNumber(fields.u1SolarKvahReading),
+    u1Pf: toNumber(fields.u1Pf),
     u2ImportKwhReading: toNumber(fields.u2ImportKwhReading),
     u2ImportKvahReading: toNumber(fields.u2ImportKvahReading),
     u2ExportKwhReading: toNumber(fields.u2ExportKwhReading),
     u2ExportKvahReading: toNumber(fields.u2ExportKvahReading),
     u2SolarKwhReading: toNumber(fields.u2SolarKwhReading),
     u2SolarKvahReading: toNumber(fields.u2SolarKvahReading),
+    u2Pf: toNumber(fields.u2Pf),
     dg380KwhReading: toNumber(fields.dg380KwhReading),
     dg380HourmeterReading: toNumber(fields.dg380HourmeterReading),
     dg380HsdOpeningLtr: toNumber(fields.dg380HsdOpeningLtr),
@@ -211,12 +213,14 @@ function normalizeDailyUtilityLogCloudRow(row) {
     u1ExportKvahReading: row.u1_export_kvah_reading,
     u1SolarKwhReading: row.u1_solar_kwh_reading,
     u1SolarKvahReading: row.u1_solar_kvah_reading,
+    u1Pf: row.u1_pf,
     u2ImportKwhReading: row.u2_import_kwh_reading,
     u2ImportKvahReading: row.u2_import_kvah_reading,
     u2ExportKwhReading: row.u2_export_kwh_reading,
     u2ExportKvahReading: row.u2_export_kvah_reading,
     u2SolarKwhReading: row.u2_solar_kwh_reading,
     u2SolarKvahReading: row.u2_solar_kvah_reading,
+    u2Pf: row.u2_pf,
     dg380KwhReading: row.dg380_kwh_reading,
     dg380HourmeterReading: row.dg380_hourmeter_reading,
     dg380HsdOpeningLtr: row.dg380_hsd_opening_ltr,
@@ -244,12 +248,14 @@ function dailyUtilityLogToCloudRow(record) {
     u1_export_kvah_reading: record.u1ExportKvahReading,
     u1_solar_kwh_reading: record.u1SolarKwhReading,
     u1_solar_kvah_reading: record.u1SolarKvahReading,
+    u1_pf: record.u1Pf,
     u2_import_kwh_reading: record.u2ImportKwhReading,
     u2_import_kvah_reading: record.u2ImportKvahReading,
     u2_export_kwh_reading: record.u2ExportKwhReading,
     u2_export_kvah_reading: record.u2ExportKvahReading,
     u2_solar_kwh_reading: record.u2SolarKwhReading,
     u2_solar_kvah_reading: record.u2SolarKvahReading,
+    u2_pf: record.u2Pf,
     dg380_kwh_reading: record.dg380KwhReading,
     dg380_hourmeter_reading: record.dg380HourmeterReading,
     dg380_hsd_opening_ltr: record.dg380HsdOpeningLtr,
@@ -2400,6 +2406,56 @@ export async function purgePmRecords(userName) {
 
   logActivity(userName, 'purged all PM records', `${previousPmCount} records + ${previousSummaryCount} summaries removed`, 'pm');
   return { purged: previousPmCount, summariesPurged: previousSummaryCount };
+}
+
+export async function purgeDailyUtilityLog(userName) {
+  const previousCount = state.dailyUtilityLogs.length;
+  state = { ...state, dailyUtilityLogs: [] };
+  commit('dailyUtilityLogs');
+  notifyStoreUpdate();
+
+  if (supabase && isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('daily_utility_log')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      rtLog('error', 'PURGE failed on daily_utility_log:', error.message);
+      throw error;
+    }
+  }
+
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailyUtilityLogs');
+  savePendingCloudOps(queue);
+  updateSyncState({ pending: queue.length });
+
+  logActivity(userName, 'purged all Daily Utility logs', `${previousCount} records removed`, 'energy');
+  return { purged: previousCount };
+}
+
+export async function purgeDailySolarGeneration(userName) {
+  const previousCount = state.dailySolarGenerations.length;
+  state = { ...state, dailySolarGenerations: [] };
+  commit('dailySolarGenerations');
+  notifyStoreUpdate();
+
+  if (supabase && isSupabaseConfigured) {
+    const { error } = await supabase
+      .from('daily_solar_generation')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      rtLog('error', 'PURGE failed on daily_solar_generation:', error.message);
+      throw error;
+    }
+  }
+
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailySolarGenerations');
+  savePendingCloudOps(queue);
+  updateSyncState({ pending: queue.length });
+
+  logActivity(userName, 'purged all Daily Solar logs', `${previousCount} records removed`, 'energy');
+  return { purged: previousCount };
 }
 
 export function importMachinePmRecordsBulk(rows, userName) {

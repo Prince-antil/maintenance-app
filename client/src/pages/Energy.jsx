@@ -3,12 +3,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import {
   useStore,
-  addDailyUtilityLog, updateDailyUtilityLog, deleteDailyUtilityLog,
+  addDailyUtilityLog, updateDailyUtilityLog, deleteDailyUtilityLog, purgeDailyUtilityLog,
   addMonthlyHerbicide, updateMonthlyHerbicide, deleteMonthlyHerbicide,
   addMonthlyInsecticide, updateMonthlyInsecticide, deleteMonthlyInsecticide,
   addMonthlyWater, updateMonthlyWater, deleteMonthlyWater,
   addMonthlyAirCompressor, updateMonthlyAirCompressor, deleteMonthlyAirCompressor,
-  addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration,
+  addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
   upsertEnergySettings,
 } from '../store.js';
 import { computeRenewableSummary } from '../analytics.js';
@@ -160,6 +160,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const sorted = useMemo(() => [...dailyUtilityLog].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailyUtilityLog]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
 
   const derived = useMemo(() => {
     const byDate = {};
@@ -180,22 +182,21 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       const dg380 = diff('dg380KwhReading');
       const dg380Hrs = diff('dg380HourmeterReading');
       const dg380Fuel = toN(cur.dg380HsdAddedLtr);
-      const dg380KwhL = dg380Fuel > 0 ? r1(dg380 / dg380Fuel) : 0;
+      const dg380DefPct = toN(cur.dg380DefAddedPct);
       const dg500 = diff('dg500KwhReading');
       const dg500Hrs = diff('dg500HourmeterReading');
       const dg500Fuel = toN(cur.dg500HsdAddedLtr);
-      const dg500KwhL = dg500Fuel > 0 ? r1(dg500 / dg500Fuel) : 0;
-      const u1Kvah = diff('u1ImportKvahReading');
-      const u2Kvah = diff('u2ImportKvahReading');
-      const u1Pf = u1Kvah > 0 ? r1(u1Grid / u1Kvah) : 0;
-      const u2Pf = u2Kvah > 0 ? r1(u2Grid / u2Kvah) : 0;
-      const total = r1(gridTotal + dg380 + dg500 + solar);
+      const dg500DefPct = toN(cur.dg500DefAddedPct);
+      const totalDg = r1(dg380 + dg500);
+      const u1Pf = toN(cur.u1Pf);
+      const u2Pf = toN(cur.u2Pf);
+      const total = r1(gridTotal + totalDg + solar);
       return {
         date, u1Grid, u2Grid, gridTotal, u1Export, u2Export, u1Solar, u2Solar, solar,
-        dg380, dg380Hrs, dg380Fuel, dg380KwhL, dg500, dg500Hrs, dg500Fuel, dg500KwhL,
-        u1Pf, u2Pf, total,
+        dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
+        totalDg, u1Pf, u2Pf, total,
         gridPct: total > 0 ? r1((gridTotal / total) * 100) : 0,
-        dgPct: total > 0 ? r1(((dg380 + dg500) / total) * 100) : 0,
+        dgPct: total > 0 ? r1((totalDg / total) * 100) : 0,
         solarPct: total > 0 ? r1((solar / total) * 100) : 0,
       };
     }).reverse();
@@ -206,26 +207,21 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const kpis = useMemo(() => {
     const latest = derived[0];
     if (!latest) return { grid: 0, dg: 0, solar: 0, pf: 0 };
-    return { grid: latest.gridTotal, dg: r1(latest.dg380 + latest.dg500), solar: latest.solar, pf: latest.u1Pf > 0 && latest.u2Pf > 0 ? r1((latest.u1Pf + latest.u2Pf) / 2) : latest.u1Pf || latest.u2Pf };
+    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: latest.u1Pf > 0 && latest.u2Pf > 0 ? r1((latest.u1Pf + latest.u2Pf) / 2) : latest.u1Pf || latest.u2Pf };
   }, [derived]);
 
-  const trendData = useMemo(() => {
-    const last30 = derived.slice(0, 30).reverse();
-    return last30.map((d) => ({ name: d.date?.slice(5) || d.date, Grid: d.gridTotal, DG: r1(d.dg380 + d.dg500), Solar: d.solar }));
-  }, [derived]);
-
-  const pfData = useMemo(() => derived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'U1 PF': d.u1Pf, 'U2 PF': d.u2Pf })), [derived]);
-
-  const dgData = useMemo(() => derived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380': d.dg380, 'DG500': d.dg500 })), [derived]);
-
-  const effData = useMemo(() => derived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 kWh/L': d.dg380KwhL, 'DG500 kWh/L': d.dg500KwhL })), [derived]);
-
+  const u1EnergyData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Grid, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
+  const u2EnergyData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Grid, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
+  const plantTotalData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.gridTotal, Solar: d.solar, Export: r1(d.u1Export + d.u2Export) })), [filteredDerived]);
+  const dgGenData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380': d.dg380, 'DG 500': d.dg500 })), [filteredDerived]);
+  const dgHoursData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380 Hrs': d.dg380Hrs, 'DG 500 Hrs': d.dg500Hrs })), [filteredDerived]);
+  const dgFuelData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 HSD': d.dg380Fuel, 'DG500 HSD': d.dg500Fuel, 'DG380 DEF%': d.dg380DefPct, 'DG500 DEF%': d.dg500DefPct })), [filteredDerived]);
   const pieData = useMemo(() => {
     if (derived.length === 0) return [];
     const latest = derived[0];
     const data = [];
     if (latest.gridTotal > 0) data.push({ name: 'Grid', value: latest.gridTotal, color: C.grid });
-    if (r1(latest.dg380 + latest.dg500) > 0) data.push({ name: 'DG', value: r1(latest.dg380 + latest.dg500), color: C.dg500 });
+    if (latest.totalDg > 0) data.push({ name: 'DG', value: latest.totalDg, color: C.dg500 });
     if (latest.solar > 0) data.push({ name: 'Solar', value: latest.solar, color: C.solar });
     return data;
   }, [derived]);
@@ -233,20 +229,40 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const fields = useMemo(() => [
     { key: 'date', label: 'Date', type: 'date', required: true },
     nf('u1ImportKwhReading', 'U1 Import kWh'), nf('u1ImportKvahReading', 'U1 Import kVAh'),
-    nf('u1ExportKwhReading', 'U1 Export kWh'), nf('u2ImportKwhReading', 'U2 Import kWh'),
-    nf('u2ImportKvahReading', 'U2 Import kVAh'), nf('u2ExportKwhReading', 'U2 Export kWh'),
-    nf('u1SolarKwhReading', 'U1 Solar kWh'), nf('u2SolarKwhReading', 'U2 Solar kWh'),
+    nf('u1ExportKwhReading', 'U1 Export kWh'), nf('u1SolarKwhReading', 'U1 Solar kWh'), nf('u1Pf', 'U1 PF'),
+    nf('u2ImportKwhReading', 'U2 Import kWh'), nf('u2ImportKvahReading', 'U2 Import kVAh'),
+    nf('u2ExportKwhReading', 'U2 Export kWh'), nf('u2SolarKwhReading', 'U2 Solar kWh'), nf('u2Pf', 'U2 PF'),
     nf('dg380KwhReading', 'DG380 kWh'), nf('dg380HourmeterReading', 'DG380 Hourmeter'),
-    nf('dg380HsdAddedLtr', 'DG380 HSD Added (L)'),
+    nf('dg380HsdAddedLtr', 'DG380 HSD Added (L)'), nf('dg380DefAddedPct', 'DG380 DEF %'),
     nf('dg500KwhReading', 'DG500 kWh'), nf('dg500HourmeterReading', 'DG500 Hourmeter'),
-    nf('dg500HsdAddedLtr', 'DG500 HSD Added (L)'),
+    nf('dg500HsdAddedLtr', 'DG500 HSD Added (L)'), nf('dg500DefAddedPct', 'DG500 DEF %'),
   ], []);
 
   const handleSave = () => {
     if (!formValues.date) { pushToast({ type: 'error', message: 'Date is required' }); return; }
-    if (editRow) updateDailyUtilityLog(editRow.id, formValues, userName);
-    else addDailyUtilityLog(formValues, userName);
+    const u1ImportKwh = toN(formValues.u1ImportKwhReading);
+    const u1ImportKvah = toN(formValues.u1ImportKvahReading);
+    const u2ImportKwh = toN(formValues.u2ImportKwhReading);
+    const u2ImportKvah = toN(formValues.u2ImportKvahReading);
+    let u1Pf = toN(formValues.u1Pf);
+    let u2Pf = toN(formValues.u2Pf);
+    if ((!u1Pf || u1Pf === 0) && u1ImportKvah > 0) u1Pf = Math.round((u1ImportKwh / u1ImportKvah) * 100000) / 100000;
+    if ((!u2Pf || u2Pf === 0) && u2ImportKvah > 0) u2Pf = Math.round((u2ImportKwh / u2ImportKvah) * 100000) / 100000;
+    const payload = { ...formValues, u1Pf, u2Pf };
+    if (editRow) updateDailyUtilityLog(editRow.id, payload, userName);
+    else addDailyUtilityLog(payload, userName);
     closeForm();
+  };
+
+  const handlePurge = async () => {
+    setPurgeLoading(true);
+    try {
+      await purgeDailyUtilityLog(userName);
+      setConfirmPurge(false);
+      pushToast({ type: 'success', message: 'All daily utility logs purged' });
+    } catch (err) {
+      pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+    } finally { setPurgeLoading(false); }
   };
 
   const cols = [
@@ -265,77 +281,110 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
         <KpiCard label="Today's Solar" value={kpis.solar} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Current PF" value={kpis.pf} color={kpis.pf < 0.9 && kpis.pf > 0 ? 'text-red-300' : 'text-white'} bg={kpis.pf < 0.9 && kpis.pf > 0 ? 'bg-red-500/[0.07] border-red-500/20' : 'bg-white/[0.04] border-white/[0.10]'} />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailyUtility' })} onDownload={() => downloadTemplate('energyDailyUtility')} label="Daily Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailyUtility' })} onDownload={() => downloadTemplate('energyDailyUtility')} label="Daily Reading" />
+        {isAdmin && dailyUtilityLog.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge All</button>}
+      </div>
       {filteredDerived.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Daily Energy Trend (last 30 days)">
+            <ChartCard title="Unit 1 Energy">
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={trendData}>
+                <AreaChart data={u1EnergyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Grid" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="DG" stackId="1" stroke={C.dg500} fill={C.dg500} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
                   <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Power Factor Trend">
+            <ChartCard title="Unit 2 Energy">
               <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={pfData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <YAxis domain={[0.5, 1]} tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <Tooltip {...TTIP} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <ReferenceLine y={0.9} stroke="#ef4444" strokeDasharray="5 5" label={{ value: '0.90', fill: '#ef4444', fontSize: 10 }} />
-                  <Line type="monotone" dataKey="U1 PF" stroke={C.grid} dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="U2 PF" stroke="#8b5cf6" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-            <ChartCard title="DG Generation Trend">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgData}>
+                <AreaChart data={u2EnergyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="DG380" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="DG500" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="Plant Total Energy">
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={plantTotalData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <Tooltip {...TTIP} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            {pieData.length > 0 && (
+              <ChartCard title="Source Distribution" className="max-w-md">
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                      {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
+                    </Pie>
+                    <Tooltip {...TTIP} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </ChartCard>
+            )}
+            <ChartCard title="DG Generation">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={dgGenData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <Tooltip {...TTIP} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="DG 380" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="DG 500" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="DG Fuel Efficiency (kWh/L)">
+            <ChartCard title="DG Running Hours">
               <ResponsiveContainer width="100%" height={260}>
-                <LineChart data={effData}>
+                <BarChart data={dgHoursData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
                   <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="DG380 kWh/L" stroke={C.dg380} dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="DG500 kWh/L" stroke={C.dg500} dot={false} strokeWidth={2} />
-                </LineChart>
+                  <Bar dataKey="DG 380 Hrs" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="DG 500 Hrs" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="DG Fuel & DEF" className="lg:col-span-2">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={dgFuelData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis yAxisId="left" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <Tooltip {...TTIP} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar yAxisId="left" dataKey="DG380 HSD" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="DG500 HSD" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Line yAxisId="right" type="monotone" dataKey="DG380 DEF%" stroke={C.grid} dot={false} strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="DG500 DEF%" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                </BarChart>
               </ResponsiveContainer>
             </ChartCard>
           </div>
-          {pieData.length > 0 && (
-            <ChartCard title="Source Distribution" className="max-w-md">
-              <ResponsiveContainer width="100%" height={240}>
-                <PieChart>
-                  <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                    {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                  </Pie>
-                  <Tooltip {...TTIP} />
-                </PieChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          )}
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="enterprise-table w-full min-w-[1100px]">
@@ -345,7 +394,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                     <tr key={r.date}>
                       <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
                       <Td value={r.gridTotal} className="text-cyan-300 tabular-nums" />
-                      <Td value={r1(r.dg380 + r.dg500)} className="text-amber-300 tabular-nums" />
+                      <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
                       <Td value={r.solar} className="text-emerald-300 tabular-nums" />
                       <Td value={r.total} className="text-white font-bold tabular-nums" />
                       <Td value={r.u1Pf || '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
@@ -365,6 +414,25 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
         <EmptyState title="No daily utility data available." description="Add daily meter readings to track grid import, DG generation, solar output, and fuel consumption." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !purgeLoading && setConfirmPurge(false)} role="dialog" aria-modal="true">
+          <div className="glass-card w-full max-w-sm p-5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-red-500/10"><AlertTriangle size={18} className="text-red-400" /></div>
+              <div>
+                <h4 className="text-sm font-semibold text-white">Purge All Daily Utility Logs</h4>
+                <p className="text-xs text-slate-400 mt-0.5">This will permanently delete all {dailyUtilityLog.length} records from Supabase.</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
+              <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
+                <Trash2 size={12} /> {purgeLoading ? 'Purging...' : 'Purge All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

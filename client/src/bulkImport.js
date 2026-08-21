@@ -158,24 +158,22 @@ export const IMPORT_MODULES = {
         'U1 Export kVAh Reading': 0,
         'U1 Solar KWh Reading': 620,
         'U1 Solar kVAh Reading': 640,
+        'U1 PF': 0.933,
         'U2 Import KWh Reading': 1850,
         'U2 Import kVAh Reading': 1950,
         'U2 Export KWh Reading': 0,
         'U2 Export kVAh Reading': 0,
         'U2 Solar KWh Reading': 310,
         'U2 Solar kVAh Reading': 320,
+        'U2 PF': 0.949,
         'DG 380 KWh Reading': 800,
         'DG 380 Hourmeter Reading': 12500,
-        'DG 380 HSD Opening (Ltr)': 500,
         'DG 380 HSD Added (Ltr)': 200,
-        'DG 380 DEF Opening (%)': 80,
-        'DG 380 DEF Added (%)': 10,
+        'DG 380 DEF %': 10,
         'DG 500 KWh Reading': 1200,
         'DG 500 Hourmeter Reading': 8900,
-        'DG 500 HSD Opening (Ltr)': 600,
         'DG 500 HSD Added (Ltr)': 250,
-        'DG 500 DEF Opening (%)': 75,
-        'DG 500 DEF Added (%)': 15,
+        'DG 500 DEF %': 15,
       },
     ],
   },
@@ -373,24 +371,26 @@ const FIELD_ALIASES = {
     u1ExportKvahReading: ['u1exportkvahreading', 'u1exportkvah', 'unit1exportkvah', 'u1kvahexport'],
     u1SolarKwhReading: ['u1solarkwhreading', 'u1solarkwh', 'unit1solarkwh', 'u1kwhsolar'],
     u1SolarKvahReading: ['u1solarkvahreading', 'u1solarkvah', 'unit1solarkvah', 'u1kvahsolar'],
+    u1Pf: ['u1pf', 'u1powerfactor', 'unit1pf', 'unit1powerfactor', 'u1 power factor', 'u1 pf'],
     u2ImportKwhReading: ['u2importkwhreading', 'u2importkwh', 'unit2importkwh', 'u2kwhimport'],
     u2ImportKvahReading: ['u2importkvahreading', 'u2importkvah', 'unit2importkvah', 'u2kvahimport'],
     u2ExportKwhReading: ['u2exportkwhreading', 'u2exportkwh', 'unit2exportkwh', 'u2kwhexport'],
     u2ExportKvahReading: ['u2exportkvahreading', 'u2exportkvah', 'unit2exportkvah', 'u2kvahexport'],
     u2SolarKwhReading: ['u2solarkwhreading', 'u2solarkwh', 'unit2solarkwh', 'u2kwhsolar'],
     u2SolarKvahReading: ['u2solarkvahreading', 'u2solarkvah', 'unit2solarkvah', 'u2kvahsolar'],
+    u2Pf: ['u2pf', 'u2powerfactor', 'unit2pf', 'unit2powerfactor', 'u2 power factor', 'u2 pf'],
     dg380KwhReading: ['dg380kwhreading', 'dg380kwh', 'dg380kwhr'],
     dg380HourmeterReading: ['dg380hourmeterreading', 'dg380hourmeter', 'dg380hours'],
     dg380HsdOpeningLtr: ['dg380hsdopeningltr', 'dg380hsdopening', 'dg380hsdopen'],
     dg380HsdAddedLtr: ['dg380hsdaddedltr', 'dg380hsdadded', 'dg380hsdadd'],
     dg380DefOpeningPct: ['dg380defopeningpct', 'dg380defopening', 'dg380defopen'],
-    dg380DefAddedPct: ['dg380defaddedpct', 'dg380defadded', 'dg380defadd'],
+    dg380DefAddedPct: ['dg380defaddedpct', 'dg380defadded', 'dg380defadd', 'dg380def%', 'dg 380 def %'],
     dg500KwhReading: ['dg500kwhreading', 'dg500kwh', 'dg500kwhr'],
     dg500HourmeterReading: ['dg500hourmeterreading', 'dg500hourmeter', 'dg500hours'],
     dg500HsdOpeningLtr: ['dg500hsdopeningltr', 'dg500hsdopening', 'dg500hsdopen'],
     dg500HsdAddedLtr: ['dg500hsdaddedltr', 'dg500hsdadded', 'dg500hsdadd'],
     dg500DefOpeningPct: ['dg500defopeningpct', 'dg500defopening', 'dg500defopen'],
-    dg500DefAddedPct: ['dg500defaddedpct', 'dg500defadded', 'dg500defadd'],
+    dg500DefAddedPct: ['dg500defaddedpct', 'dg500defadded', 'dg500defadd', 'dg500def%', 'dg 500 def %'],
   },
   energyMonthlyHerbicide: {
     month: ['month', 'period', 'monthyear'],
@@ -712,20 +712,36 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
 
+    const u1ImportKwhReading = parseNumber(getCell(row, mapping, 'u1ImportKwhReading'));
+    const u1ImportKvahReading = parseNumber(getCell(row, mapping, 'u1ImportKvahReading'));
+    const u2ImportKwhReading = parseNumber(getCell(row, mapping, 'u2ImportKwhReading'));
+    const u2ImportKvahReading = parseNumber(getCell(row, mapping, 'u2ImportKvahReading'));
+    let u1Pf = parseNumber(getCell(row, mapping, 'u1Pf'));
+    let u2Pf = parseNumber(getCell(row, mapping, 'u2Pf'));
+
+    if ((!u1Pf || u1Pf === 0) && u1ImportKvahReading > 0) {
+      u1Pf = Math.round((u1ImportKwhReading / u1ImportKvahReading) * 100000) / 100000;
+    }
+    if ((!u2Pf || u2Pf === 0) && u2ImportKvahReading > 0) {
+      u2Pf = Math.round((u2ImportKwhReading / u2ImportKvahReading) * 100000) / 100000;
+    }
+
     return {
       date,
-      u1ImportKwhReading: parseNumber(getCell(row, mapping, 'u1ImportKwhReading')),
-      u1ImportKvahReading: parseNumber(getCell(row, mapping, 'u1ImportKvahReading')),
+      u1ImportKwhReading,
+      u1ImportKvahReading,
       u1ExportKwhReading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
       u1ExportKvahReading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
       u1SolarKwhReading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
       u1SolarKvahReading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
-      u2ImportKwhReading: parseNumber(getCell(row, mapping, 'u2ImportKwhReading')),
-      u2ImportKvahReading: parseNumber(getCell(row, mapping, 'u2ImportKvahReading')),
+      u1Pf,
+      u2ImportKwhReading,
+      u2ImportKvahReading,
       u2ExportKwhReading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
       u2ExportKvahReading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
       u2SolarKwhReading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
       u2SolarKvahReading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
+      u2Pf,
       dg380KwhReading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
       dg380HourmeterReading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
       dg380HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),

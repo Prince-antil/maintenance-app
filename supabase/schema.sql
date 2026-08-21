@@ -200,12 +200,14 @@ create table if not exists public.daily_utility_log (
   u1_export_kvah_reading          numeric(14, 2) not null default 0,
   u1_solar_kwh_reading            numeric(14, 2) not null default 0,
   u1_solar_kvah_reading           numeric(14, 2) not null default 0,
+  u1_pf                           numeric(7, 5) not null default 0,
   u2_import_kwh_reading           numeric(14, 2) not null default 0,
   u2_import_kvah_reading          numeric(14, 2) not null default 0,
   u2_export_kwh_reading           numeric(14, 2) not null default 0,
   u2_export_kvah_reading          numeric(14, 2) not null default 0,
   u2_solar_kwh_reading            numeric(14, 2) not null default 0,
   u2_solar_kvah_reading           numeric(14, 2) not null default 0,
+  u2_pf                           numeric(7, 5) not null default 0,
   dg380_kwh_reading               numeric(14, 2) not null default 0,
   dg380_hourmeter_reading         numeric(14, 2) not null default 0,
   dg380_hsd_opening_ltr           numeric(10, 2) not null default 0,
@@ -223,6 +225,10 @@ create table if not exists public.daily_utility_log (
 );
 
 create index if not exists idx_daily_utility_date on public.daily_utility_log (date desc);
+
+-- ── Safe migration: add u1_pf / u2_pf if upgrading an existing database ──────
+alter table public.daily_utility_log add column if not exists u1_pf numeric(7,5) not null default 0;
+alter table public.daily_utility_log add column if not exists u2_pf numeric(7,5) not null default 0;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 10. MONTHLY HERBICIDE SECTION — Sub-meter readings for herbicide area
