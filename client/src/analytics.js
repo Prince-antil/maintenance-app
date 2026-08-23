@@ -840,6 +840,47 @@ export function monthlyPMComplianceTrendFromRecords(machinePmRecords, n = 12) {
   });
 }
 
+// ── Shared Daily-Delta Calculator ─────────────────────────────────────────────
+// Cumulative meter readings must be diffed per-unit, sorted ascending by date,
+// with negative deltas (meter resets) clamped to null.
+
+const READING_KEYS = [
+  'u1ImportKwhReading', 'u1ImportKvahReading', 'u1ExportKwhReading', 'u1ExportKvahReading',
+  'u1SolarKwhReading', 'u2ImportKwhReading', 'u2ImportKvahReading', 'u2ExportKwhReading',
+  'u2ExportKvahReading', 'u2SolarKwhReading',
+  'dg380KwhReading', 'dg380HourmeterReading', 'dg500KwhReading', 'dg500HourmeterReading',
+];
+
+function safeNum(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+
+/**
+ * Compute daily deltas from cumulative readings.
+ * @param {Array} logs – array of daily utility log records (raw, unsorted)
+ * @returns {Array} sorted descending, each row augmented with _delta object
+ */
+export function computeDailyDeltas(logs) {
+  if (!logs || logs.length === 0) return [];
+  const sorted = [...logs].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return sorted.map((row, i) => {
+    const prev = i > 0 ? sorted[i - 1] : null;
+    const delta = {};
+    READING_KEYS.forEach((k) => {
+      const cur = safeNum(row[k]);
+      const prv = safeNum(prev?.[k]);
+      const d = cur - prv;
+      delta[k] = (prev && d < 0) ? null : (prev ? d : null);
+    });
+    // Direct values (not cumulative — use as-is)
+    delta.dg380HsdAddedLtr = safeNum(row.dg380HsdAddedLtr);
+    delta.dg380DefAddedPct = safeNum(row.dg380DefAddedPct);
+    delta.dg500HsdAddedLtr = safeNum(row.dg500HsdAddedLtr);
+    delta.dg500DefAddedPct = safeNum(row.dg500DefAddedPct);
+    delta.u1Pf = safeNum(row.u1Pf);
+    delta.u2Pf = safeNum(row.u2Pf);
+    return { ...row, _delta: delta };
+  }).reverse(); // most-recent first
+}
+
 // ── Domain A: Daily Utility Calculations ─────────────────────────────────────
 
 export function computeDailyUtilityDerived(current, previous, settings) {
@@ -1038,7 +1079,7 @@ export function computeAirCompressorPerformance(current, previous) {
 // ── Domain D: Renewable Energy Summary ───────────────────────────────────────
 
 export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energySettings, monthKey_) {
-  const logs = (dailyUtilityLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthKey_);
+  const deltas = computeDailyDeltas(dailyUtilityLogs || []).filter((d) => (d.date || '').slice(0, 7) === monthKey_);
   const solarLogs = (dailySolarLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthKey_);
   const s = energySettings || {};
 
@@ -1047,17 +1088,17 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
     solarLogs.reduce((sum, l) => sum + (Number(l.dailyTotalKwh) || 0), 0)
   );
 
-  // Meter-side solar from daily utility
+  // Meter-side solar from daily utility (using deltas)
   const meterSideSolar = round1(
-    logs.reduce((sum, l) => sum + (Number(l.u1SolarKwhReading) || 0) + (Number(l.u2SolarKwhReading) || 0), 0)
+    deltas.reduce((sum, d) => sum + (Number(d._delta?.u1SolarKwhReading) || 0) + (Number(d._delta?.u2SolarKwhReading) || 0), 0)
   );
 
-  // Total plant consumption from utility
+  // Total plant consumption from utility (using deltas)
   const totalPlantConsumption = round1(
-    logs.reduce((sum, l) => {
-      const grid = (Number(l.u1ImportKwhReading) || 0) + (Number(l.u2ImportKwhReading) || 0);
-      const dg = (Number(l.dg380KwhReading) || 0) + (Number(l.dg500KwhReading) || 0);
-      const solar = (Number(l.u1SolarKwhReading) || 0) + (Number(l.u2SolarKwhReading) || 0);
+    deltas.reduce((sum, d) => {
+      const grid = (Number(d._delta?.u1ImportKwhReading) || 0) + (Number(d._delta?.u2ImportKwhReading) || 0);
+      const dg = (Number(d._delta?.dg380KwhReading) || 0) + (Number(d._delta?.dg500KwhReading) || 0);
+      const solar = (Number(d._delta?.u1SolarKwhReading) || 0) + (Number(d._delta?.u2SolarKwhReading) || 0);
       return sum + grid + dg + solar;
     }, 0)
   );
@@ -1101,19 +1142,18 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
 // ── Domain D: Power Factor Trend ─────────────────────────────────────────────
 
 export function computePfTrend(dailyUtilityLogs, n = 12) {
-  const logs = dailyUtilityLogs || [];
-  const sorted = [...logs].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const last = sorted.slice(-n);
+  const deltas = computeDailyDeltas(dailyUtilityLogs || []);
+  const last = deltas.slice(-n);
 
-  return last.map((l) => {
-    const u1ImportKwh = Number(l.u1ImportKwhReading) || 0;
-    const u1ImportKvah = Number(l.u1ImportKvahReading) || 0;
-    const u2ImportKwh = Number(l.u2ImportKwhReading) || 0;
-    const u2ImportKvah = Number(l.u2ImportKvahReading) || 0;
+  return last.map((d) => {
+    const u1ImportKwh = Number(d._delta?.u1ImportKwhReading) || 0;
+    const u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    const u2ImportKwh = Number(d._delta?.u2ImportKwhReading) || 0;
+    const u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
     return {
-      date: l.date || '',
-      u1Pf: u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0,
-      u2Pf: u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0,
+      date: d.date || '',
+      u1Pf: d.u1Pf > 0 ? d.u1Pf : (u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0),
+      u2Pf: d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0),
     };
   });
 }
@@ -1122,21 +1162,21 @@ export function computePfTrend(dailyUtilityLogs, n = 12) {
 
 export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6) {
   const months = lastNMonths(n);
-  const logs = dailyUtilityLogs || [];
+  const deltas = computeDailyDeltas(dailyUtilityLogs || []);
 
   return months.map((month) => {
-    const monthLogs = logs.filter((l) => (l.date || '').slice(0, 7) === month.key);
+    const monthDeltas = deltas.filter((d) => (d.date || '').slice(0, 7) === month.key);
 
     let dg380Generation = 0;
     let dg380Fuel = 0;
     let dg500Generation = 0;
     let dg500Fuel = 0;
 
-    monthLogs.forEach((l) => {
-      dg380Generation += Number(l.dg380KwhReading) || 0;
-      dg380Fuel += Number(l.dg380HsdAddedLtr) || 0;
-      dg500Generation += Number(l.dg500KwhReading) || 0;
-      dg500Fuel += Number(l.dg500HsdAddedLtr) || 0;
+    monthDeltas.forEach((d) => {
+      dg380Generation += Number(d._delta?.dg380KwhReading) || 0;
+      dg380Fuel += Number(d._delta?.dg380HsdAddedLtr) || 0;
+      dg500Generation += Number(d._delta?.dg500KwhReading) || 0;
+      dg500Fuel += Number(d._delta?.dg500HsdAddedLtr) || 0;
     });
 
     return {

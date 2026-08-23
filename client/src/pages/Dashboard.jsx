@@ -16,7 +16,7 @@ import {
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey,
-  computePfTrend, computeDgFuelEfficiency, computeRenewableSummary,
+  computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -147,25 +147,26 @@ export default function Dashboard() {
 
   const latestPf = useMemo(() => {
     if (filteredDailyUtilityLog.length === 0) return null;
-    const sorted = [...filteredDailyUtilityLog].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const last = sorted[sorted.length - 1];
+    const deltas = computeDailyDeltas(filteredDailyUtilityLog);
+    if (deltas.length === 0) return null;
+    const last = deltas[0];
     return {
       date: last.date,
-      u1Pf: (Number(last.u1ImportKvahReading) || 0) > 0 ? round1((Number(last.u1ImportKwhReading) || 0) / (Number(last.u1ImportKvahReading) || 0)) : 0,
-      u2Pf: (Number(last.u2ImportKvahReading) || 0) > 0 ? round1((Number(last.u2ImportKwhReading) || 0) / (Number(last.u2ImportKvahReading) || 0)) : 0,
+      u1Pf: last.u1Pf > 0 ? last.u1Pf : 0,
+      u2Pf: last.u2Pf > 0 ? last.u2Pf : 0,
     };
   }, [filteredDailyUtilityLog]);
 
   const energySnapshot = useMemo(() => {
-    const logs = filteredDailyUtilityLog;
+    const deltas = computeDailyDeltas(filteredDailyUtilityLog);
     const solarLogs = filteredDailySolarGeneration;
-    const unit1KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u1ImportKwhReading) || 0), 0));
-    const unit2KwhMonth = Math.round(logs.reduce((s, e) => s + (Number(e.u2ImportKwhReading) || 0), 0));
+    const unit1KwhMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0));
+    const unit2KwhMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0));
     const totalGridMonth = unit1KwhMonth + unit2KwhMonth;
-    const dg500HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg500HourmeterReading) || 0), 0));
-    const dg380HrsMonth = round1(logs.reduce((s, e) => s + (Number(e.dg380HourmeterReading) || 0), 0));
+    const dg500HrsMonth = round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0));
+    const dg380HrsMonth = round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0));
     const solarMonth = Math.round(solarLogs.reduce((s, e) => s + (Number(e.dailyTotalKwh) || 0), 0));
-    const fuelMonth = Math.round(logs.reduce((s, e) => s + (Number(e.dg500HsdAddedLtr) || 0) + (Number(e.dg380HsdAddedLtr) || 0), 0));
+    const fuelMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HsdAddedLtr) || 0) + (Number(d._delta?.dg380HsdAddedLtr) || 0), 0));
     return { unit1KwhMonth, unit2KwhMonth, totalGridMonth, dg500HrsMonth, dg380HrsMonth, solarMonth, fuelMonth };
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
 
@@ -219,7 +220,7 @@ export default function Dashboard() {
     );
   }
 
-  const noBDs = store.breakdowns.length === 0;
+  const noBDs = filteredBreakdowns.length === 0;
   const noPMs = store.pms.length === 0;
   const noDailyUtility = filteredDailyUtilityLog.length === 0;
   const noSolar = filteredDailySolarGeneration.length === 0;
@@ -241,7 +242,10 @@ export default function Dashboard() {
             <div className="flex flex-wrap items-center gap-2.5 mt-4">
               <StatusBadge
                 status={kpi.breakdown > 0 ? 'breakdown' : 'running'}
-                label={kpi.breakdown > 0 ? `${kpi.breakdown} Breakdown${kpi.breakdown > 1 ? 's' : ''} Logged This Month` : 'No Breakdown Logged This Month'}
+                label={filteredBreakdowns.length > 0 ? `${filteredBreakdowns.reduce((s, r) => s + (r.breakdownCount || 0), 0)} Breakdown${filteredBreakdowns.reduce((s, r) => s + (r.breakdownCount || 0), 0) > 1 ? 's' : ''} ${periodFilter === 'all' ? 'Logged This Month' : 'in Period'}`
+                  : filteredMachineBDLogs.length > 0
+                    ? `${filteredMachineBDLogs.length} Breakdown${filteredMachineBDLogs.length > 1 ? 's' : ''} ${periodFilter === 'all' ? 'Logged This Month' : 'in Period'}`
+                    : 'No Breakdown Logged This Month'}
                 pulse
               />
               <span className="status-pill bg-cyan-500/10 text-cyan-400 border border-cyan-500/25">
@@ -381,8 +385,8 @@ export default function Dashboard() {
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
               {latestPf ? (
                 <>
-                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.u1Pf || '—'}</p>
-                  <p className="text-slate-500 text-[10px] mt-0.5">U1 · U2 {latestPf.u2Pf || '—'}</p>
+                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.u1Pf != null ? latestPf.u1Pf : '—'}</p>
+                  <p className="text-slate-500 text-[10px] mt-0.5">U1 · U2 {latestPf.u2Pf != null ? latestPf.u2Pf : '—'}</p>
                 </>
               ) : (
                 <p className="text-slate-500 text-[10px]">No data</p>

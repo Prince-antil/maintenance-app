@@ -11,7 +11,7 @@ import {
   addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
   upsertEnergySettings,
 } from '../store.js';
-import { computeRenewableSummary } from '../analytics.js';
+import { computeRenewableSummary, computeDailyDeltas } from '../analytics.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
@@ -203,42 +203,38 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const [purgeLoading, setPurgeLoading] = useState(false);
 
   const derived = useMemo(() => {
-    const byDate = {};
-    sorted.forEach((r) => { byDate[r.date] = r; });
-    const dates = Object.keys(byDate).sort();
-    return dates.map((date, i) => {
-      const cur = byDate[date];
-      const prev = i > 0 ? byDate[dates[i - 1]] : null;
-      const diff = (k) => r1(toN(cur[k]) - toN(prev?.[k]));
-      const u1Grid = diff('u1ImportKwhReading');
-      const u2Grid = diff('u2ImportKwhReading');
+    const deltas = computeDailyDeltas(sorted);
+    return deltas.map((d) => {
+      const dd = d._delta;
+      const u1Grid = dd.u1ImportKwhReading ?? 0;
+      const u2Grid = dd.u2ImportKwhReading ?? 0;
       const gridTotal = r1(u1Grid + u2Grid);
-      const u1Export = diff('u1ExportKwhReading');
-      const u2Export = diff('u2ExportKwhReading');
-      const u1Solar = diff('u1SolarKwhReading');
-      const u2Solar = diff('u2SolarKwhReading');
+      const u1Export = dd.u1ExportKwhReading ?? 0;
+      const u2Export = dd.u2ExportKwhReading ?? 0;
+      const u1Solar = dd.u1SolarKwhReading ?? 0;
+      const u2Solar = dd.u2SolarKwhReading ?? 0;
       const solar = r1(u1Solar + u2Solar);
-      const dg380 = diff('dg380KwhReading');
-      const dg380Hrs = diff('dg380HourmeterReading');
-      const dg380Fuel = toN(cur.dg380HsdAddedLtr);
-      const dg380DefPct = toN(cur.dg380DefAddedPct);
-      const dg500 = diff('dg500KwhReading');
-      const dg500Hrs = diff('dg500HourmeterReading');
-      const dg500Fuel = toN(cur.dg500HsdAddedLtr);
-      const dg500DefPct = toN(cur.dg500DefAddedPct);
+      const dg380 = dd.dg380KwhReading ?? 0;
+      const dg380Hrs = dd.dg380HourmeterReading ?? 0;
+      const dg380Fuel = dd.dg380HsdAddedLtr;
+      const dg380DefPct = dd.dg380DefAddedPct;
+      const dg500 = dd.dg500KwhReading ?? 0;
+      const dg500Hrs = dd.dg500HourmeterReading ?? 0;
+      const dg500Fuel = dd.dg500HsdAddedLtr;
+      const dg500DefPct = dd.dg500DefAddedPct;
       const totalDg = r1(dg380 + dg500);
-      const u1Pf = toN(cur.u1Pf);
-      const u2Pf = toN(cur.u2Pf);
+      const u1Pf = dd.u1Pf;
+      const u2Pf = dd.u2Pf;
       const total = r1(gridTotal + totalDg + solar);
       return {
-        date, u1Grid, u2Grid, gridTotal, u1Export, u2Export, u1Solar, u2Solar, solar,
+        date: d.date, u1Grid, u2Grid, gridTotal, u1Export, u2Export, u1Solar, u2Solar, solar,
         dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
         totalDg, u1Pf, u2Pf, total,
         gridPct: total > 0 ? r1((gridTotal / total) * 100) : 0,
         dgPct: total > 0 ? r1((totalDg / total) * 100) : 0,
         solarPct: total > 0 ? r1((solar / total) * 100) : 0,
       };
-    }).reverse();
+    });
   }, [sorted]);
 
   const filteredDerived = useMemo(() => derived.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [derived, dateFrom, dateTo]);
@@ -246,7 +242,12 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: 0, dg: 0, solar: 0, pf: 0 };
     const latest = filteredDerived[0];
-    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: latest.u1Pf > 0 && latest.u2Pf > 0 ? r1((latest.u1Pf + latest.u2Pf) / 2) : latest.u1Pf || latest.u2Pf };
+    const pf = latest.u1Pf > 0 && latest.u2Pf > 0
+      ? r1((latest.u1Pf + latest.u2Pf) / 2)
+      : latest.u1Pf > 0 ? latest.u1Pf
+      : latest.u2Pf > 0 ? latest.u2Pf
+      : 0;
+    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf };
   }, [filteredDerived]);
 
   const dgSummary = useMemo(() => {
@@ -439,8 +440,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                       <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
                       <Td value={r.solar} className="text-emerald-300 tabular-nums" />
                       <Td value={r.total} className="text-white font-bold tabular-nums" />
-                      <Td value={r.u1Pf || '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.u2Pf || '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u1Pf != null ? r.u1Pf : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u2Pf != null ? r.u2Pf : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
                       <Td value={r.dg380Fuel} className="text-slate-300 tabular-nums" />
                       <Td value={r.dg500Fuel} className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}

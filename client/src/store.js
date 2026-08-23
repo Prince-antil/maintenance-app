@@ -1220,6 +1220,9 @@ const refreshTimers = {};
 // Tracks reconnect attempt count for exponential back-off
 let realtimeReconnectAttempts = 0;
 
+// After a bulk import, suppress Realtime overwrite for 3 seconds per entity
+const localImportSuppressUntil = {};
+
 // ── Diagnostic logger ──────────────────────────────────────────────────────
 // Set VITE_REALTIME_DEBUG=true in your .env to enable verbose Realtime logs.
 // All log calls go through this helper so they're easy to strip later.
@@ -1566,6 +1569,12 @@ function applyRealtimePayload(entity, payload) {
   const { eventType, new: newRow, old: oldRow } = payload;
   const config = CLOUD_ENTITY_CONFIG[entity];
   if (!config) return;
+
+  // Skip Realtime overwrite within 3s of a local bulk import
+  if (localImportSuppressUntil[entity] && Date.now() < localImportSuppressUntil[entity]) {
+    rtLog('debug', `Suppressed Realtime ${eventType} on ${config.table} (local import in progress)`);
+    return;
+  }
 
   rtLog('info',
     `← ${eventType} on ${config.table}`,
@@ -3241,6 +3250,7 @@ export function importBreakdownsBulk(rows, userName) {
     addBreakdown(record, userName);
   });
 
+  localImportSuppressUntil.breakdowns = Date.now() + 3000;
   return { created, updated, total: rows.length };
 }
 
@@ -3265,6 +3275,7 @@ export function importEnergyBulk(rows, userName) {
 
   state = { ...state, energy: [...imports, ...state.energy] };
   commit('energy');
+  localImportSuppressUntil.energy = Date.now() + 3000;
   imports.forEach((record) => queueCloudMutation('energy', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
   logActivity(userName, 'bulk imported energy logs', `${imports.length} rows added`, 'energy');
@@ -3275,6 +3286,7 @@ export function importDailyUtilityLogBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailyUtilityLog({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   state = { ...state, dailyUtilityLog: [...imports, ...state.dailyUtilityLog] };
   commit('dailyUtilityLog');
+  localImportSuppressUntil.dailyUtilityLog = Date.now() + 3000;
   imports.forEach((record) => queueCloudMutation('dailyUtilityLog', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
   logActivity(userName, 'bulk imported daily utility logs', `${imports.length} rows added`, 'energy');
@@ -3325,6 +3337,7 @@ export function importDailySolarGenerationBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailySolarGeneration({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   state = { ...state, dailySolarGeneration: [...imports, ...state.dailySolarGeneration] };
   commit('dailySolarGeneration');
+  localImportSuppressUntil.dailySolarGeneration = Date.now() + 3000;
   imports.forEach((record) => queueCloudMutation('dailySolarGeneration', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
   logActivity(userName, 'bulk imported daily solar generation records', `${imports.length} rows added`, 'energy');
