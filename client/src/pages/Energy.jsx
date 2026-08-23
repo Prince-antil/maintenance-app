@@ -4,10 +4,10 @@ import { useUI } from '../context/UIContext.jsx';
 import {
   useStore,
   addDailyUtilityLog, updateDailyUtilityLog, deleteDailyUtilityLog, purgeDailyUtilityLog,
-  addMonthlyHerbicide, updateMonthlyHerbicide, deleteMonthlyHerbicide,
-  addMonthlyInsecticide, updateMonthlyInsecticide, deleteMonthlyInsecticide,
-  addMonthlyWater, updateMonthlyWater, deleteMonthlyWater,
-  addMonthlyAirCompressor, updateMonthlyAirCompressor, deleteMonthlyAirCompressor,
+  addMonthlyHerbicide, updateMonthlyHerbicide, deleteMonthlyHerbicide, purgeMonthlyHerbicide,
+  addMonthlyInsecticide, updateMonthlyInsecticide, deleteMonthlyInsecticide, purgeMonthlyInsecticide,
+  addMonthlyWater, updateMonthlyWater, deleteMonthlyWater, purgeMonthlyWater,
+  addMonthlyAirCompressor, updateMonthlyAirCompressor, deleteMonthlyAirCompressor, purgeMonthlyAirCompressor,
   addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
   upsertEnergySettings,
 } from '../store.js';
@@ -153,6 +153,45 @@ function Toolbar({ isAdmin, onAdd, onUpload, onDownload, label }) {
   );
 }
 
+function PurgeModal({ domain, totalRecords, periodLabel, onPurgePeriod, onPurgeAll, onClose, loading }) {
+  const [phase, setPhase] = useState('choose');
+  const [periodCount, setPeriodCount] = useState(null);
+  const [allCount, setAllCount] = useState(null);
+  const [purging, setPurging] = useState(false);
+
+  const doPurgePeriod = async () => { setPurging(true); try { await onPurgePeriod(); } finally { setPurging(false); } };
+  const doPurgeAll = async () => { setPurging(true); try { await onPurgeAll(); } finally { setPurging(false); } };
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !purging && onClose()} role="dialog" aria-modal="true">
+      <div className="glass-card w-full max-w-md p-5 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-full bg-red-500/10"><AlertTriangle size={18} className="text-red-400" /></div>
+          <div>
+            <h4 className="text-sm font-semibold text-white">Purge {domain} Data</h4>
+            <p className="text-xs text-slate-400 mt-0.5">This permanently deletes data from Supabase. Cannot be undone.</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {periodLabel && (
+            <button onClick={doPurgePeriod} disabled={purging} className="w-full text-left px-4 py-3 rounded-control bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors disabled:opacity-50">
+              <p className="text-xs font-semibold text-amber-300">Purge Selected Period</p>
+              <p className="text-[10px] text-amber-200/60 mt-0.5">{periodLabel}</p>
+            </button>
+          )}
+          <button onClick={doPurgeAll} disabled={purging} className="w-full text-left px-4 py-3 rounded-control bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 transition-colors disabled:opacity-50">
+            <p className="text-xs font-semibold text-red-300">Purge ALL DATA</p>
+            <p className="text-[10px] text-red-200/60 mt-0.5">Delete all {totalRecords} records from {domain}</p>
+          </button>
+        </div>
+        <div className="flex justify-end">
+          <button onClick={onClose} disabled={purging} className="btn-ghost text-xs">{purging ? 'Purging...' : 'Cancel'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, todayStr, currentMK, pushToast }) {
   const formTitle = editRow ? 'Edit Daily Utility' : 'Add Daily Utility';
   const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
@@ -205,17 +244,27 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const filteredDerived = useMemo(() => derived.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [derived, dateFrom, dateTo]);
 
   const kpis = useMemo(() => {
-    const latest = derived[0];
-    if (!latest) return { grid: 0, dg: 0, solar: 0, pf: 0 };
+    if (filteredDerived.length === 0) return { grid: 0, dg: 0, solar: 0, pf: 0 };
+    const latest = filteredDerived[0];
     return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: latest.u1Pf > 0 && latest.u2Pf > 0 ? r1((latest.u1Pf + latest.u2Pf) / 2) : latest.u1Pf || latest.u2Pf };
-  }, [derived]);
+  }, [filteredDerived]);
 
-  const u1EnergyData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Grid, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
-  const u2EnergyData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Grid, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
-  const plantTotalData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.gridTotal, Solar: d.solar, Export: r1(d.u1Export + d.u2Export) })), [filteredDerived]);
-  const dgGenData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380': d.dg380, 'DG 500': d.dg500 })), [filteredDerived]);
-  const dgHoursData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380 Hrs': d.dg380Hrs, 'DG 500 Hrs': d.dg500Hrs })), [filteredDerived]);
-  const dgFuelData = useMemo(() => filteredDerived.slice(0, 30).reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 HSD': d.dg380Fuel, 'DG500 HSD': d.dg500Fuel, 'DG380 DEF%': d.dg380DefPct, 'DG500 DEF%': d.dg500DefPct })), [filteredDerived]);
+  const dgSummary = useMemo(() => {
+    if (filteredDerived.length === 0) return { dg380Total: 0, dg500Total: 0, totalDg: 0, totalHsd: 0 };
+    const dg380Total = r1(filteredDerived.reduce((s, d) => s + d.dg380, 0));
+    const dg500Total = r1(filteredDerived.reduce((s, d) => s + d.dg500, 0));
+    const totalDg = r1(dg380Total + dg500Total);
+    const totalHsd = r1(filteredDerived.reduce((s, d) => s + d.dg380Fuel + d.dg500Fuel, 0));
+    return { dg380Total, dg500Total, totalDg, totalHsd };
+  }, [filteredDerived]);
+
+  const u1EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Grid, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
+  const u2EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Grid, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
+  const plantTotalData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.gridTotal, Solar: d.solar, Export: r1(d.u1Export + d.u2Export) })), [filteredDerived]);
+  const dgGenData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380': d.dg380, 'DG 500': d.dg500 })), [filteredDerived]);
+  const dgHoursData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380 Hrs': d.dg380Hrs, 'DG 500 Hrs': d.dg500Hrs })), [filteredDerived]);
+  const dgHsdData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 HSD (L)': d.dg380Fuel, 'DG500 HSD (L)': d.dg500Fuel })), [filteredDerived]);
+  const dgDefData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 DEF%': d.dg380DefPct, 'DG500 DEF%': d.dg500DefPct })), [filteredDerived]);
   const pieData = useMemo(() => {
     if (derived.length === 0) return [];
     const latest = derived[0];
@@ -254,17 +303,6 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     closeForm();
   };
 
-  const handlePurge = async () => {
-    setPurgeLoading(true);
-    try {
-      await purgeDailyUtilityLog(userName);
-      setConfirmPurge(false);
-      pushToast({ type: 'success', message: 'All daily utility logs purged' });
-    } catch (err) {
-      pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
-    } finally { setPurgeLoading(false); }
-  };
-
   const cols = [
     { key: 'date', label: 'Date' }, { key: 'grid', label: 'Grid kWh', className: 'text-cyan-400' },
     { key: 'dg', label: 'DG kWh', className: 'text-amber-400' }, { key: 'solar', label: 'Solar kWh', className: 'text-emerald-400' },
@@ -276,77 +314,71 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard label="Today's Grid" value={kpis.grid} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
-        <KpiCard label="Today's DG" value={kpis.dg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
-        <KpiCard label="Today's Solar" value={kpis.solar} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
+        <KpiCard label="Latest Grid" value={kpis.grid} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
+        <KpiCard label="Latest DG" value={kpis.dg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
+        <KpiCard label="Latest Solar" value={kpis.solar} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Current PF" value={kpis.pf} color={kpis.pf < 0.9 && kpis.pf > 0 ? 'text-red-300' : 'text-white'} bg={kpis.pf < 0.9 && kpis.pf > 0 ? 'bg-red-500/[0.07] border-red-500/20' : 'bg-white/[0.04] border-white/[0.10]'} />
+      </div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard label="DG 380 Total" value={dgSummary.dg380Total} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
+        <KpiCard label="DG 500 Total" value={dgSummary.dg500Total} unit="kWh" color="text-orange-300" bg="bg-orange-500/[0.07] border-orange-500/20" />
+        <KpiCard label="Total DG Generation" value={dgSummary.totalDg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
+        <KpiCard label="Total HSD Consumption" value={dgSummary.totalHsd} unit="L" color="text-orange-300" bg="bg-orange-500/[0.07] border-orange-500/20" />
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailyUtility' })} onDownload={() => downloadTemplate('energyDailyUtility')} label="Daily Reading" />
-        {isAdmin && dailyUtilityLog.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge All</button>}
+        {isAdmin && dailyUtilityLog.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
       </div>
       {filteredDerived.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Unit 1 Energy">
+            <ChartCard title="Unit 1 Daily Energy">
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={u1EnergyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Unit 2 Energy">
+            <ChartCard title="Unit 2 Daily Energy">
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={u2EnergyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Plant Total Energy">
+            <ChartCard title="Total Plant Energy">
               <ResponsiveContainer width="100%" height={260}>
                 <AreaChart data={plantTotalData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stackId="1" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stackId="1" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            {pieData.length > 0 && (
-              <ChartCard title="Source Distribution" className="max-w-md">
-                <ResponsiveContainer width="100%" height={260}>
-                  <PieChart>
-                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                      {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
-                    </Pie>
-                    <Tooltip {...TTIP} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </ChartCard>
-            )}
             <ChartCard title="DG Generation">
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={dgGenData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -359,7 +391,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={dgHoursData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -368,19 +400,29 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="DG Fuel & DEF" className="lg:col-span-2">
+            <ChartCard title="DG HSD Consumption">
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgFuelData}>
+                <BarChart data={dgHsdData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <YAxis yAxisId="left" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <YAxis yAxisId="right" orientation="right" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} label={{ value: 'Litres', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar yAxisId="left" dataKey="DG380 HSD" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar yAxisId="left" dataKey="DG500 HSD" fill={C.dg500} radius={[2, 2, 0, 0]} />
-                  <Line yAxisId="right" type="monotone" dataKey="DG380 DEF%" stroke={C.grid} dot={false} strokeWidth={2} />
-                  <Line yAxisId="right" type="monotone" dataKey="DG500 DEF%" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                  <Bar dataKey="DG380 HSD (L)" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="DG500 HSD (L)" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="DG DEF Percentage">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={dgDefData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} label={{ value: '%', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} />
+                  <Tooltip {...TTIP} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="DG380 DEF%" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="DG500 DEF%" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -415,23 +457,33 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
       {confirmPurge && (
-        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && !purgeLoading && setConfirmPurge(false)} role="dialog" aria-modal="true">
-          <div className="glass-card w-full max-w-sm p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-full bg-red-500/10"><AlertTriangle size={18} className="text-red-400" /></div>
-              <div>
-                <h4 className="text-sm font-semibold text-white">Purge All Daily Utility Logs</h4>
-                <p className="text-xs text-slate-400 mt-0.5">This will permanently delete all {dailyUtilityLog.length} records from Supabase.</p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
-                <Trash2 size={12} /> {purgeLoading ? 'Purging...' : 'Purge All'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PurgeModal
+          domain="Daily Utility"
+          totalRecords={dailyUtilityLog.length}
+          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          onPurgePeriod={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeDailyUtilityLog(userName, dateFrom || undefined, dateTo || undefined);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} daily utility records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onPurgeAll={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeDailyUtilityLog(userName);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} daily utility records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onClose={() => setConfirmPurge(false)}
+          loading={purgeLoading}
+        />
       )}
     </div>
   );
@@ -483,6 +535,8 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
   const FEEDER_MAP = { glyphosateM1MeterReading: '_g1', maintenanceTopperM2MeterReading: '_t2', acmHerbicideM3MeterReading: '_a3', topperHerbicideM4MeterReading: '_t4', maintenancePrintingMeterReading: '_pr' };
   const FEEDER_NAMES = { glyphosateM1MeterReading: 'Glyphosate M1', maintenanceTopperM2MeterReading: 'Topper M2', acmHerbicideM3MeterReading: 'ACM M3', topperHerbicideM4MeterReading: 'Topper M4', maintenancePrintingMeterReading: 'Printing' };
   const [selFeeder, setSelFeeder] = useState('glyphosateM1MeterReading');
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
   const feederTrend = useMemo(() => {
     const prop = FEEDER_MAP[selFeeder] || '_g1';
     const name = FEEDER_NAMES[selFeeder] || 'Glyphosate M1';
@@ -518,7 +572,10 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
         <KpiCard label="Highest Feeder" value={kpis.highest} color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
         <KpiCard label="MoM Change" value={kpis.mom} color="text-white" />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyHerbicide' })} onDownload={() => downloadTemplate('energyMonthlyHerbicide')} label="Monthly Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyHerbicide' })} onDownload={() => downloadTemplate('energyMonthlyHerbicide')} label="Monthly Reading" />
+        {isAdmin && monthlyHerbicide.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
+      </div>
       {filteredCalc.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -550,6 +607,35 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
         <EmptyState title="No herbicide data available." description="Add monthly herbicide section consumption readings to track energy usage." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && (
+        <PurgeModal
+          domain="Herbicide"
+          totalRecords={monthlyHerbicide.length}
+          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          onPurgePeriod={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyHerbicide(userName, dateFrom || undefined, dateTo || undefined);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} herbicide records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onPurgeAll={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyHerbicide(userName);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} herbicide records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onClose={() => setConfirmPurge(false)}
+          loading={purgeLoading}
+        />
+      )}
     </div>
   );
 }
@@ -587,6 +673,8 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
   const top5Chart = useMemo(() => [...feederChart].sort((a, b) => b.value - a.value).slice(0, 5), [feederChart]);
 
   const [selIdx, setSelIdx] = useState(0);
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
   const feederTrend = useMemo(() => [...filtered].reverse().map((r) => ({ name: r.month, [FEEDER_LABELS_INSECT[selIdx]]: r._feeders[selIdx] })), [filtered, selIdx]);
 
   const fields = useMemo(() => [
@@ -601,6 +689,17 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
     closeForm();
   };
 
+  const handlePurge = async () => {
+    setPurgeLoading(true);
+    try {
+      const r = await purgeMonthlyInsecticide(userName, dateFrom || undefined, dateTo || undefined);
+      setConfirmPurge(false);
+      pushToast({ type: 'success', message: `${r.purged} insecticide records purged` });
+    } catch (err) {
+      pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+    } finally { setPurgeLoading(false); }
+  };
+
   const cols = [{ key: 'month', label: 'Month' }, ...FEEDER_LABELS_INSECT.map((l, i) => ({ key: 'f' + i, label: l, className: i < 8 ? 'text-cyan-400' : i < 9 ? 'text-violet-400' : 'text-amber-400' })), { key: 'total', label: 'Total kWh', className: 'text-white font-semibold' }];
 
   return (
@@ -611,7 +710,10 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
         <KpiCard label="Highest Feeder" value={kpis.highest} color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
         <KpiCard label="MoM Change" value={kpis.mom} color="text-white" />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyInsecticide' })} onDownload={() => downloadTemplate('energyMonthlyInsecticide')} label="Monthly Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyInsecticide' })} onDownload={() => downloadTemplate('energyMonthlyInsecticide')} label="Monthly Reading" />
+        {isAdmin && monthlyInsecticide.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
+      </div>
       {filtered.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -644,6 +746,7 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
         <EmptyState title="No insecticide data available." description="Add monthly insecticide section consumption readings." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && <PurgeModal domain="Insecticide" totalRecords={monthlyInsecticide.length} periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null} onPurgePeriod={handlePurge} onPurgeAll={async () => { setPurgeLoading(true); try { await purgeMonthlyInsecticide(userName); setConfirmPurge(false); pushToast({ type: 'success', message: 'All insecticide records purged' }); } catch (err) { pushToast({ type: 'error', message: `Purge failed: ${err.message}` }); } finally { setPurgeLoading(false); } }} onClose={() => setConfirmPurge(false)} loading={purgeLoading} />}
     </div>
   );
 }
@@ -694,6 +797,9 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
     closeForm();
   };
 
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
+
   const cols = [
     { key: 'month', label: 'Month' }, { key: 'stp', label: 'STP Outlet', className: 'text-cyan-400' },
     { key: 'roIn', label: 'RO Inlet', className: 'text-emerald-400' }, { key: 'roRej', label: 'RO Rejected', className: 'text-orange-400' },
@@ -708,7 +814,10 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <KpiCard label="RO Inlet KL" value={kpis.roIn} unit="KL" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="RO Rejected KL" value={kpis.roRej} unit="KL" color="text-orange-300" bg="bg-orange-500/[0.07] border-orange-500/20" />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyWater' })} onDownload={() => downloadTemplate('energyMonthlyWater')} label="Monthly Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyWater' })} onDownload={() => downloadTemplate('energyMonthlyWater')} label="Monthly Reading" />
+        {isAdmin && monthlyWater.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
+      </div>
       {filtered.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -741,6 +850,35 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <EmptyState title="No water data available." description="Add monthly water consumption readings (STP, RO, PIAU)." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && (
+        <PurgeModal
+          domain="Water"
+          totalRecords={monthlyWater.length}
+          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          onPurgePeriod={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyWater(userName, dateFrom || undefined, dateTo || undefined);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} water records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onPurgeAll={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyWater(userName);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} water records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onClose={() => setConfirmPurge(false)}
+          loading={purgeLoading}
+        />
+      )}
     </div>
   );
 }
@@ -807,6 +945,9 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
     closeForm();
   };
 
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
+
   const cols = [
     { key: 'month', label: 'Month' },
     { key: 'c1Run', label: 'C1 Run', className: 'text-cyan-400' }, { key: 'c1Load', label: 'C1 Load' }, { key: 'c1Unload', label: 'C1 Unload' }, { key: 'c1Pct', label: 'C1 %' },
@@ -822,7 +963,10 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
         <KpiCard label="Avg Load %" value={kpis.avgPct} unit="%" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
         <KpiCard label="Highest Loaded" value={kpis.highest} color="text-white" />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyAirCompressor' })} onDownload={() => downloadTemplate('energyMonthlyAirCompressor')} label="Monthly Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ month: currentMK })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyMonthlyAirCompressor' })} onDownload={() => downloadTemplate('energyMonthlyAirCompressor')} label="Monthly Reading" />
+        {isAdmin && monthlyAirCompressor.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
+      </div>
       {filtered.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -853,6 +997,35 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
         <EmptyState title="No air compressor data available." description="Add monthly compressor run/load/unload readings." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && (
+        <PurgeModal
+          domain="Air Compressor"
+          totalRecords={monthlyAirCompressor.length}
+          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          onPurgePeriod={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyAirCompressor(userName, dateFrom || undefined, dateTo || undefined);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} air compressor records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onPurgeAll={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeMonthlyAirCompressor(userName);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} air compressor records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onClose={() => setConfirmPurge(false)}
+          loading={purgeLoading}
+        />
+      )}
     </div>
   );
 }
@@ -874,32 +1047,37 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { today: 0, month: 0, avg: 0, best: 0, u1: 0, u2: 0 };
+    if (filteredCalc.length === 0) return { today: 0, month: 0, avg: 0, best: 0, u1: 0, u2: 0, grandTotal: 0 };
     const latest = filteredCalc[0];
-    const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === currentMK);
+    const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === (dateFrom ? dateFrom.slice(0, 7) : currentMK));
     const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
     const avg = monthData.length > 0 ? r1(monthTotal / monthData.length) : 0;
     const best = Math.max(...filteredCalc.map((r) => r._sum));
-    return { today: latest._sum, month: monthTotal, avg, best, u1: latest._u1, u2: latest._u2 };
-  }, [filteredCalc, currentMK]);
+    const u1Total = r1(filteredCalc.reduce((s, r) => s + r._u1, 0));
+    const u2Total = r1(filteredCalc.reduce((s, r) => s + r._u2, 0));
+    return { today: latest._sum, month: monthTotal, avg, best, u1: u1Total, u2: u2Total, grandTotal: r1(u1Total + u2Total) };
+  }, [filteredCalc, currentMK, dateFrom]);
 
-  const dailyChart = useMemo(() => [...filteredCalc].slice(0, 60).reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r._sum })), [filteredCalc]);
+  const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r._sum })), [filteredCalc]);
   const monthlyChart = useMemo(() => {
     const byMonth = {};
     filteredCalc.forEach((r) => { const m = r.date?.slice(0, 7); if (m) byMonth[m] = (byMonth[m] || 0) + r._sum; });
     return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => ({ name: m, kWh: r1(v) }));
   }, [filteredCalc]);
-  const invChart = useMemo(() => {
-    if (filteredCalc.length === 0) return [];
-    const r = filteredCalc[0];
-    return [
-      { name: 'U1 Inv1', kWh: toN(r.u1Inv1Kwh) }, { name: 'U1 Inv2', kWh: toN(r.u1Inv2Kwh) },
-      { name: 'U1 Inv3', kWh: toN(r.u1Inv3Kwh) }, { name: 'U1 Inv4', kWh: toN(r.u1Inv4Kwh) },
-      { name: 'U2 Inv1', kWh: toN(r.u2Inv1Kwh) }, { name: 'U2 Inv2', kWh: toN(r.u2Inv2Kwh) },
-      { name: 'U2 Inv3', kWh: toN(r.u2Inv3Kwh) },
-    ];
+  const u1InvChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U1 Inv1': toN(r.u1Inv1Kwh), 'U1 Inv2': toN(r.u1Inv2Kwh), 'U1 Inv3': toN(r.u1Inv3Kwh), 'U1 Inv4': toN(r.u1Inv4Kwh) })), [filteredCalc]);
+  const u2InvChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U2 Inv1': toN(r.u2Inv1Kwh), 'U2 Inv2': toN(r.u2Inv2Kwh), 'U2 Inv3': toN(r.u2Inv3Kwh) })), [filteredCalc]);
+  const u1u2GrandChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U1 Total': r._u1, 'U2 Total': r._u2, 'Grand Total': r._sum })), [filteredCalc]);
+  const monthlyCompChart = useMemo(() => {
+    const byMonth = {};
+    filteredCalc.forEach((r) => {
+      const m = r.date?.slice(0, 7);
+      if (!m) return;
+      if (!byMonth[m]) byMonth[m] = { u1: 0, u2: 0 };
+      byMonth[m].u1 += r._u1;
+      byMonth[m].u2 += r._u2;
+    });
+    return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => ({ name: m, 'U1 Total': r1(v.u1), 'U2 Total': r1(v.u2), 'Grand Total': r1(v.u1 + v.u2) }));
   }, [filteredCalc]);
-  const u1u2Chart = useMemo(() => [...filteredCalc].slice(0, 30).reverse().map((r) => ({ name: r.date?.slice(5) || r.date, U1: r._u1, U2: r._u2 })), [filteredCalc]);
 
   const fields = useMemo(() => [
     { key: 'date', label: 'Date', type: 'date', required: true },
@@ -916,6 +1094,9 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
     closeForm();
   };
 
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purgeLoading, setPurgeLoading] = useState(false);
+
   const cols = [
     { key: 'date', label: 'Date' }, { key: 'u1i1', label: 'U1 Inv1', className: 'text-emerald-400' },
     { key: 'u1i2', label: 'U1 Inv2', className: 'text-emerald-400' }, { key: 'u1i3', label: 'U1 Inv3', className: 'text-emerald-400' },
@@ -927,21 +1108,25 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <KpiCard label="Today's Generation" value={kpis.today} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
+        <KpiCard label="Latest Day Generation" value={kpis.today} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Month Generation" value={kpis.month} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Avg Daily" value={kpis.avg} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
         <KpiCard label="Best Day" value={kpis.best} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
-        <KpiCard label="U1 Total" value={kpis.u1} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
-        <KpiCard label="U2 Total" value={kpis.u2} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
+        <KpiCard label="U1 Total (Filtered)" value={kpis.u1} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
+        <KpiCard label="U2 Total (Filtered)" value={kpis.u2} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
       </div>
-      <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailySolar' })} onDownload={() => downloadTemplate('energyDailySolar')} label="Daily Reading" />
+      <div className="flex items-center gap-2 flex-wrap">
+        <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailySolar' })} onDownload={() => downloadTemplate('energyDailySolar')} label="Daily Reading" />
+        {isAdmin && dailySolarGeneration.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
+      </div>
       {filteredCalc.length > 0 ? (
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Daily Generation Trend"><ResponsiveContainer width="100%" height={260}><AreaChart data={dailyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Area type="monotone" dataKey="kWh" stroke={C.solar} fill={C.solar} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Monthly Generation"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Inverter-wise (Latest Day)"><ResponsiveContainer width="100%" height={260}><BarChart data={invChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="U1 vs U2"><ResponsiveContainer width="100%" height={260}><BarChart data={u1u2Chart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="U1" stackId="a" fill={C.solar} /><Bar dataKey="U2" stackId="a" fill={C.grid} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Daily Solar Generation"><ResponsiveContainer width="100%" height={260}><AreaChart data={dailyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Area type="monotone" dataKey="kWh" stroke={C.solar} fill={C.solar} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Monthly Solar Generation"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} />                </BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U1 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u1InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} />                <Line type="monotone" dataKey="U1 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv4" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U2 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u2InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} />                <Line type="monotone" dataKey="U2 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U1 vs U2 vs Grand Total"><ResponsiveContainer width="100%" height={260}><LineChart data={u1u2GrandChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="U1 Total" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Total" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Grand Total" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -967,22 +1152,53 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <EmptyState title="No solar generation data available." description="Add daily inverter-level solar generation readings." />
       )}
       {formOpen && <FormModal title={formTitle} subtitle={formSubtitle} fields={fields} values={formValues} onChange={setForm} onSave={handleSave} onClose={closeForm} />}
+      {confirmPurge && (
+        <PurgeModal
+          domain="Solar"
+          totalRecords={dailySolarGeneration.length}
+          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          onPurgePeriod={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeDailySolarGeneration(userName, dateFrom || undefined, dateTo || undefined);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} solar records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onPurgeAll={async () => {
+            setPurgeLoading(true);
+            try {
+              const r = await purgeDailySolarGeneration(userName);
+              setConfirmPurge(false);
+              pushToast({ type: 'success', message: `${r.purged} solar records purged` });
+            } catch (err) {
+              pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
+            } finally { setPurgeLoading(false); }
+          }}
+          onClose={() => setConfirmPurge(false)}
+          loading={purgeLoading}
+        />
+      )}
     </div>
   );
 }
 
 function RenewableTab({ store, currentMK, dateFrom, dateTo }) {
   const { dailyUtilityLog, dailySolarGeneration, energySettings } = store;
-  const data = useMemo(() => computeRenewableSummary(dailyUtilityLog, dailySolarGeneration, energySettings, currentMK), [dailyUtilityLog, dailySolarGeneration, energySettings, currentMK]);
+  const filteredUtility = useMemo(() => dailyUtilityLog.filter((l) => dateInRange(l.date, dateFrom, dateTo)), [dailyUtilityLog, dateFrom, dateTo]);
+  const filteredSolar = useMemo(() => dailySolarGeneration.filter((l) => dateInRange(l.date, dateFrom, dateTo)), [dailySolarGeneration, dateFrom, dateTo]);
+  const data = useMemo(() => computeRenewableSummary(filteredUtility, filteredSolar, energySettings, currentMK), [filteredUtility, filteredSolar, energySettings, currentMK]);
 
   const months = useMemo(() => {
     const keys = new Set();
-    dailyUtilityLog.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
-    dailySolarGeneration.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
+    filteredUtility.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
+    filteredSolar.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
     return [...keys].sort().slice(-12);
-  }, [dailyUtilityLog, dailySolarGeneration]);
+  }, [filteredUtility, filteredSolar]);
 
-  const monthlyData = useMemo(() => months.map((m) => computeRenewableSummary(dailyUtilityLog, dailySolarGeneration, energySettings, m)), [months, dailyUtilityLog, dailySolarGeneration, energySettings]);
+  const monthlyData = useMemo(() => months.map((m) => computeRenewableSummary(filteredUtility, filteredSolar, energySettings, m)), [months, filteredUtility, filteredSolar, energySettings]);
 
   const trendData = useMemo(() => months.map((m, i) => ({ name: m, 'Share %': monthlyData[i]?.renewableSharePct || 0 })), [months, monthlyData]);
   const solarVsCons = useMemo(() => months.map((m, i) => ({ name: m, Solar: monthlyData[i]?.solarFromInverters || 0, Consumption: monthlyData[i]?.totalPlantConsumption || 0 })), [months, monthlyData]);
