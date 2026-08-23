@@ -240,7 +240,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const filteredDerived = useMemo(() => derived.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [derived, dateFrom, dateTo]);
 
   const kpis = useMemo(() => {
-    if (filteredDerived.length === 0) return { grid: 0, dg: 0, solar: 0, pf: 0 };
+    if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     const latest = filteredDerived[0];
     const pf = latest.u1Pf > 0 && latest.u2Pf > 0
       ? r1((latest.u1Pf + latest.u2Pf) / 2)
@@ -267,25 +267,31 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const dgHsdData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 HSD (L)': d.dg380Fuel, 'DG500 HSD (L)': d.dg500Fuel })), [filteredDerived]);
   const dgDefData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 DEF%': d.dg380DefPct, 'DG500 DEF%': d.dg500DefPct })), [filteredDerived]);
   const pieData = useMemo(() => {
-    if (derived.length === 0) return [];
-    const latest = derived[0];
+    if (filteredDerived.length === 0) return [];
+    const latest = filteredDerived[0];
     const data = [];
     if (latest.gridTotal > 0) data.push({ name: 'Grid', value: latest.gridTotal, color: C.grid });
     if (latest.totalDg > 0) data.push({ name: 'DG', value: latest.totalDg, color: C.dg500 });
     if (latest.solar > 0) data.push({ name: 'Solar', value: latest.solar, color: C.solar });
     return data;
-  }, [derived]);
+  }, [filteredDerived]);
 
   const fields = useMemo(() => [
     { key: 'date', label: 'Date', type: 'date', required: true },
     nf('u1ImportKwhReading', 'U1 Import kWh'), nf('u1ImportKvahReading', 'U1 Import kVAh'),
-    nf('u1ExportKwhReading', 'U1 Export kWh'), nf('u1SolarKwhReading', 'U1 Solar kWh'), nf('u1Pf', 'U1 PF'),
+    nf('u1ExportKwhReading', 'U1 Export kWh'), nf('u1ExportKvahReading', 'U1 Export kVAh'),
+    nf('u1SolarKwhReading', 'U1 Solar kWh'), nf('u1SolarKvahReading', 'U1 Solar kVAh'),
+    nf('u1Pf', 'U1 PF'),
     nf('u2ImportKwhReading', 'U2 Import kWh'), nf('u2ImportKvahReading', 'U2 Import kVAh'),
-    nf('u2ExportKwhReading', 'U2 Export kWh'), nf('u2SolarKwhReading', 'U2 Solar kWh'), nf('u2Pf', 'U2 PF'),
+    nf('u2ExportKwhReading', 'U2 Export kWh'), nf('u2ExportKvahReading', 'U2 Export kVAh'),
+    nf('u2SolarKwhReading', 'U2 Solar kWh'), nf('u2SolarKvahReading', 'U2 Solar kVAh'),
+    nf('u2Pf', 'U2 PF'),
     nf('dg380KwhReading', 'DG380 kWh'), nf('dg380HourmeterReading', 'DG380 Hourmeter'),
-    nf('dg380HsdAddedLtr', 'DG380 HSD Added (L)'), nf('dg380DefAddedPct', 'DG380 DEF %'),
+    nf('dg380HsdOpeningLtr', 'DG380 HSD Opening (L)'), nf('dg380HsdAddedLtr', 'DG380 HSD Added (L)'),
+    nf('dg380DefOpeningPct', 'DG380 DEF Opening %'), nf('dg380DefAddedPct', 'DG380 DEF %'),
     nf('dg500KwhReading', 'DG500 kWh'), nf('dg500HourmeterReading', 'DG500 Hourmeter'),
-    nf('dg500HsdAddedLtr', 'DG500 HSD Added (L)'), nf('dg500DefAddedPct', 'DG500 DEF %'),
+    nf('dg500HsdOpeningLtr', 'DG500 HSD Opening (L)'), nf('dg500HsdAddedLtr', 'DG500 HSD Added (L)'),
+    nf('dg500DefOpeningPct', 'DG500 DEF Opening %'), nf('dg500DefAddedPct', 'DG500 DEF %'),
   ], []);
 
   const handleSave = () => {
@@ -499,7 +505,10 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
 
   const withCalc = useMemo(() => sorted.map((row, idx) => {
     const prev = sorted[idx + 1];
-    const calc = (k) => r1(toN(row[k]) - toN(prev?.[k]));
+    const calc = (k) => {
+      const d = r1(toN(row[k]) - toN(prev?.[k]));
+      return (prev && d < 0) ? 0 : d;
+    };
     const g1 = calc('glyphosateM1MeterReading'), t2 = calc('maintenanceTopperM2MeterReading');
     const a3 = calc('acmHerbicideM3MeterReading'), t4 = calc('topperHerbicideM4MeterReading');
     const pr = calc('maintenancePrintingMeterReading');
@@ -596,7 +605,7 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
                     <Td value={r._t4} className="text-amber-300 tabular-nums" />
                     <Td value={r._pr} className="text-orange-300 tabular-nums" />
                     <Td value={r._total} className="text-white font-bold tabular-nums" />
-                    {isAdmin && <td className="text-right"><Acts onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyHerbicide(r.id, userName); }} /></td>}
+                    {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyHerbicide(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -649,7 +658,10 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
 
   const withCalc = useMemo(() => sorted.map((row, idx) => {
     const prev = sorted[idx + 1];
-    const feeders = FEEDER_KEYS_INSECT.map((k) => r1(toN(row[k]) - toN(prev?.[k])));
+    const feeders = FEEDER_KEYS_INSECT.map((k) => {
+      const d = r1(toN(row[k]) - toN(prev?.[k]));
+      return (prev && d < 0) ? 0 : d;
+    });
     return { ...row, _feeders: feeders, _total: r1(feeders.reduce((s, v) => s + v, 0)) };
   }), [sorted]);
 
@@ -735,7 +747,7 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
                     <td className="text-slate-300 whitespace-nowrap">{r.month || '—'}</td>
                     {r._feeders.map((v, i) => <Td key={i} value={v} className={i < 8 ? 'text-cyan-300 tabular-nums' : i < 9 ? 'text-violet-300 tabular-nums' : 'text-amber-300 tabular-nums'} />)}
                     <Td value={r._total} className="text-white font-bold tabular-nums" />
-                    {isAdmin && <td className="text-right"><Acts onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyInsecticide(r.id, userName); }} /></td>}
+                    {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyInsecticide(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -759,7 +771,10 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const sorted = useMemo(() => [...monthlyWater].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyWater]);
   const withCalc = useMemo(() => sorted.map((row, idx) => {
     const prev = sorted[idx + 1];
-    const calc = (k) => r1(toN(row[k]) - toN(prev?.[k]));
+    const calc = (k) => {
+      const d = r1(toN(row[k]) - toN(prev?.[k]));
+      return (prev && d < 0) ? 0 : d;
+    };
     const stp = calc('stpOutletMeterReading'), roIn = calc('roInletMeterReading');
     const roRej = calc('roRejectedMeterReading'), piau = calc('piauWaterMeterReading');
     return { ...row, _stp: stp, _roIn: roIn, _roRej: roRej, _piau: piau, _total: r1(stp + roIn + roRej + piau) };
@@ -768,7 +783,7 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   const kpis = useMemo(() => {
-    if (filtered.length === 0) return { total: 0, stp: 0, roIn: 0, roRej: 0 };
+    if (filtered.length === 0) return { total: '—', stp: '—', roIn: '—', roRej: '—' };
     return { total: r1(filtered.reduce((s, r) => s + r._total, 0)), stp: filtered[0]._stp, roIn: filtered[0]._roIn, roRej: filtered[0]._roRej };
   }, [filtered]);
 
@@ -839,7 +854,7 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                     <Td value={r._roRej} className="text-orange-300 tabular-nums" />
                     <Td value={r._piau} className="text-violet-300 tabular-nums" />
                     <Td value={r._total} className="text-white font-bold tabular-nums" />
-                    {isAdmin && <td className="text-right"><Acts onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyWater(r.id, userName); }} /></td>}
+                    {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyWater(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -891,7 +906,10 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
   const sorted = useMemo(() => [...monthlyAirCompressor].sort((a, b) => (b.month || '').localeCompare(a.month || '')), [monthlyAirCompressor]);
   const withCalc = useMemo(() => sorted.map((row, idx) => {
     const prev = sorted[idx + 1];
-    const calc = (k) => r1(toN(row[k]) - toN(prev?.[k]));
+    const calc = (k) => {
+      const d = r1(toN(row[k]) - toN(prev?.[k]));
+      return (prev && d < 0) ? 0 : d;
+    };
     const mk2 = (id) => {
       const run = calc(`compressor${id}RunHrsReading`), load = calc(`compressor${id}LoadHrsReading`);
       const unload = r1(Math.max(0, run - load));
@@ -905,7 +923,7 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   const kpis = useMemo(() => {
-    if (filtered.length === 0) return { run: 0, load: 0, avgPct: 0, highest: '—' };
+    if (filtered.length === 0) return { run: '—', load: '—', avgPct: '—', highest: '—' };
     const r = filtered[0];
     const comps = [{ name: 'Compressor 1', pct: r.c1.pct }, { name: 'Compressor 2', pct: r.c2.pct }, { name: 'Compressor 3', pct: r.c3.pct }];
     const best = comps.reduce((a, b) => a.pct > b.pct ? a : b);
@@ -986,7 +1004,7 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
                     <Td value={r.c1.run} className="text-cyan-300 tabular-nums" /><Td value={r.c1.load} /><Td value={r.c1.unload} /><Td value={r.c1.pct ? `${r.c1.pct}%` : '—'} />
                     <Td value={r.c2.run} className="text-emerald-300 tabular-nums" /><Td value={r.c2.load} /><Td value={r.c2.unload} /><Td value={r.c2.pct ? `${r.c2.pct}%` : '—'} />
                     <Td value={r.c3.run} className="text-amber-300 tabular-nums" /><Td value={r.c3.load} /><Td value={r.c3.unload} /><Td value={r.c3.pct ? `${r.c3.pct}%` : '—'} />
-                    {isAdmin && <td className="text-right"><Acts onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyAirCompressor(r.id, userName); }} /></td>}
+                    {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyAirCompressor(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -1048,7 +1066,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { today: 0, month: 0, avg: 0, best: 0, u1: 0, u2: 0, grandTotal: 0 };
+    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—' };
     const latest = filteredCalc[0];
     const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === (dateFrom ? dateFrom.slice(0, 7) : currentMK));
     const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
@@ -1124,7 +1142,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ChartCard title="Daily Solar Generation"><ResponsiveContainer width="100%" height={260}><AreaChart data={dailyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Area type="monotone" dataKey="kWh" stroke={C.solar} fill={C.solar} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Monthly Solar Generation"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} />                </BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Monthly Solar Generation"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="U1 Total" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="U2 Total" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="Grand Total" fill={C.dg500} radius={[4, 4, 0, 0]} />                </BarChart></ResponsiveContainer></ChartCard>
             <ChartCard title="U1 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u1InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} />                <Line type="monotone" dataKey="U1 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv4" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
             <ChartCard title="U2 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u2InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} />                <Line type="monotone" dataKey="U2 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
             <ChartCard title="U1 vs U2 vs Grand Total"><ResponsiveContainer width="100%" height={260}><LineChart data={u1u2GrandChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="U1 Total" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Total" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Grand Total" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
@@ -1141,7 +1159,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                     <Td value={r.u2Inv1Kwh} className="text-cyan-300 tabular-nums" /><Td value={r.u2Inv2Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.u2Inv3Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.dailyTotalKwh} className="text-white font-bold tabular-nums" />
-                    {isAdmin && <td className="text-right"><Acts onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
+                    {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -1188,18 +1206,17 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
 
 function RenewableTab({ store, currentMK, dateFrom, dateTo }) {
   const { dailyUtilityLog, dailySolarGeneration, energySettings } = store;
-  const filteredUtility = useMemo(() => dailyUtilityLog.filter((l) => dateInRange(l.date, dateFrom, dateTo)), [dailyUtilityLog, dateFrom, dateTo]);
   const filteredSolar = useMemo(() => dailySolarGeneration.filter((l) => dateInRange(l.date, dateFrom, dateTo)), [dailySolarGeneration, dateFrom, dateTo]);
-  const data = useMemo(() => computeRenewableSummary(filteredUtility, filteredSolar, energySettings, currentMK), [filteredUtility, filteredSolar, energySettings, currentMK]);
+  const data = useMemo(() => computeRenewableSummary(dailyUtilityLog, filteredSolar, energySettings, currentMK), [dailyUtilityLog, filteredSolar, energySettings, currentMK]);
 
   const months = useMemo(() => {
     const keys = new Set();
-    filteredUtility.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
+    dailyUtilityLog.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
     filteredSolar.forEach((l) => { const m = l.date?.slice(0, 7); if (m) keys.add(m); });
     return [...keys].sort().slice(-12);
-  }, [filteredUtility, filteredSolar]);
+  }, [dailyUtilityLog, filteredSolar]);
 
-  const monthlyData = useMemo(() => months.map((m) => computeRenewableSummary(filteredUtility, filteredSolar, energySettings, m)), [months, filteredUtility, filteredSolar, energySettings]);
+  const monthlyData = useMemo(() => months.map((m) => computeRenewableSummary(dailyUtilityLog, filteredSolar, energySettings, m)), [months, dailyUtilityLog, filteredSolar, energySettings]);
 
   const trendData = useMemo(() => months.map((m, i) => ({ name: m, 'Share %': monthlyData[i]?.renewableSharePct || 0 })), [months, monthlyData]);
   const solarVsCons = useMemo(() => months.map((m, i) => ({ name: m, Solar: monthlyData[i]?.solarFromInverters || 0, Consumption: monthlyData[i]?.totalPlantConsumption || 0 })), [months, monthlyData]);
