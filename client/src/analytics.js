@@ -14,7 +14,7 @@ const round1 = (value) => Math.round((Number(value) || 0) * 10) / 10;
 // Strict PF formatting: never round to 1.00; cap at 0.99 for display.
 export function formatPowerFactor(pfVal) {
   const num = Number(pfVal);
-  if (!Number.isFinite(num) || num <= 0) return '0.95';
+  if (!Number.isFinite(num) || num <= 0) return null;
   if (num >= 1.0) return '0.99';
   return num.toFixed(2);
 }
@@ -35,7 +35,7 @@ export function computeWeightedPf(deltas) {
     if (u1Import > 0 && u1Pf > 0) { weightedSum += u1Import * u1Pf; totalImport += u1Import; }
     if (u2Import > 0 && u2Pf > 0) { weightedSum += u2Import * u2Pf; totalImport += u2Import; }
   });
-  return totalImport > 0 ? weightedSum / totalImport : 0.95;
+  return totalImport > 0 ? weightedSum / totalImport : 0;
 }
 
 /**
@@ -62,8 +62,9 @@ export function computeEnergySnapshot(deltas, solarLogs) {
     totalFuel += Number(d._delta?.dg500HsdAddedLtr) || 0;
   });
 
-  // Solar: always use meter-side utility readings for consistency with Energy section
-  const solarKwh = totalSolarFromUtil;
+  // Solar: use inverter data from dailySolarGeneration (Solar section), fall back to meter-side utility
+  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || 0), 0);
+  const solarKwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : totalSolarFromUtil;
 
   const avgPf = computeWeightedPf(deltas);
 
@@ -231,12 +232,12 @@ export function pmStats(pms) {
   };
 }
 
-export function computeKPIs(state, totalDocuments = 0) {
+export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
   const { machines, breakdowns, pms } = state;
   const running = machines.filter((machine) => machine.status === 'running').length;
   const maint = machines.filter((machine) => machine.status === 'maintenance').length;
   const manualDown = machines.filter((machine) => machine.status === 'breakdown').length;
-  const currentKey = monthKey(new Date());
+  const currentKey = periodFilter === 'all' ? monthKey(new Date()) : periodFilter;
   const bd = aggregateBreakdownRecords(breakdowns, currentKey);
   const pm = aggregatePMRecords(pms, currentKey);
   const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
@@ -1217,9 +1218,10 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
 
 // ── Domain D: Power Factor Trend ─────────────────────────────────────────────
 
-export function computePfTrend(dailyUtilityLogs, n = 12) {
+export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
   const deltas = computeDailyDeltas(dailyUtilityLogs || []);
-  const last = deltas.slice(-n);
+  const filtered = periodFilter === 'all' ? deltas : deltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
+  const last = filtered.slice(-n);
 
   return last.map((d) => {
     const u1ImportKwh = Number(d._delta?.u1ImportKwhReading) || 0;
@@ -1230,8 +1232,8 @@ export function computePfTrend(dailyUtilityLogs, n = 12) {
     const u2PfRaw = d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0);
     return {
       date: d.date || '',
-      u1Pf: Number(formatPowerFactor(u1PfRaw)),
-      u2Pf: Number(formatPowerFactor(u2PfRaw)),
+      u1Pf: u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : null,
+      u2Pf: u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null,
       label: (d.date || '').slice(5),
     };
   });
@@ -1239,12 +1241,13 @@ export function computePfTrend(dailyUtilityLogs, n = 12) {
 
 // ── Domain D: DG Fuel Efficiency Trend ───────────────────────────────────────
 
-export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6) {
+export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6, periodFilter = 'all') {
   const months = lastNMonths(n);
   const deltas = computeDailyDeltas(dailyUtilityLogs || []);
+  const filtered = periodFilter === 'all' ? deltas : deltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
 
   return months.map((month) => {
-    const monthDeltas = deltas.filter((d) => (d.date || '').slice(0, 7) === month.key);
+    const monthDeltas = filtered.filter((d) => (d.date || '').slice(0, 7) === month.key);
 
     let dg380Generation = 0;
     let dg380Fuel = 0;

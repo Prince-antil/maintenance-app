@@ -92,7 +92,7 @@ export default function Dashboard() {
   const totalFiles = categories.reduce((sum, c) => sum + c.file_count, 0);
 
   // ---- everything below auto-recomputes when store data changes ----
-  const kpi = useMemo(() => computeKPIs(store, totalFiles), [store, totalFiles]);
+  const kpi = useMemo(() => computeKPIs(store, totalFiles, periodFilter), [store, totalFiles, periodFilter]);
 
   // Period filter for charts
   const availablePeriods = useMemo(() => {
@@ -105,8 +105,11 @@ export default function Dashboard() {
     dailyUtilityLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
+    dailySolarGeneration.forEach((r) => {
+      if (r.date) allPeriods.add(String(r.date).slice(0, 7));
+    });
     return [...allPeriods].sort().reverse();
-  }, [store]);
+  }, [store, dailyUtilityLog, dailySolarGeneration]);
 
   const filteredBreakdowns = useMemo(() =>
     periodFilter === 'all' ? store.breakdowns : store.breakdowns.filter((r) => r.period === periodFilter),
@@ -131,10 +134,10 @@ export default function Dashboard() {
   );
 
   const pfTrend = useMemo(() =>
-    computePfTrend(filteredDailyUtilityLog).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
-    [filteredDailyUtilityLog]
+    computePfTrend(dailyUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
+    [dailyUtilityLog, periodFilter]
   );
-  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(filteredDailyUtilityLog), [filteredDailyUtilityLog]);
+  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(dailyUtilityLog, 6, periodFilter), [dailyUtilityLog, periodFilter]);
 
   const currentMonthKey = useMemo(() => {
     const now = new Date();
@@ -142,8 +145,16 @@ export default function Dashboard() {
   }, []);
 
   const renewableSummary = useMemo(
-    () => computeRenewableSummary(dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey),
-    [dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey]
+    () => {
+      const mk = periodFilter === 'all' ? currentMonthKey : periodFilter;
+      return computeRenewableSummary(
+        dailyUtilityLog,
+        dailySolarGeneration,
+        energySettings,
+        mk
+      );
+    },
+    [dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey, periodFilter]
   );
 
   const latestPf = useMemo(() => {
@@ -156,11 +167,12 @@ export default function Dashboard() {
     const u2ImportKwh = Number(last._delta?.u2ImportKwhReading) || 0;
     const u1PfRaw = last.u1Pf > 0 ? last.u1Pf : 0;
     const u2PfRaw = last.u2Pf > 0 ? last.u2Pf : 0;
+    const avgRaw = computeWeightedPf(periodDeltas.slice(0, 1));
     return {
       date: last.date,
       u1Pf: u1PfRaw > 0 ? formatPowerFactor(u1PfRaw) : null,
       u2Pf: u2PfRaw > 0 ? formatPowerFactor(u2PfRaw) : null,
-      avgPf: formatPowerFactor(computeWeightedPf(periodDeltas.slice(0, 1))),
+      avgPf: avgRaw > 0 ? formatPowerFactor(avgRaw) : null,
     };
   }, [dailyUtilityLog, periodFilter]);
 
@@ -232,7 +244,7 @@ export default function Dashboard() {
   }
 
   const noBDs = filteredBreakdowns.length === 0;
-  const noPMs = store.pms.length === 0;
+  const noPMs = filteredPMs.length === 0;
   const noDailyUtility = filteredDailyUtilityLog.length === 0;
   const noSolar = filteredDailySolarGeneration.length === 0;
 
