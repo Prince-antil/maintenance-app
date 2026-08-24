@@ -10,6 +10,83 @@ const isToday = (value) => value && new Date(value).toDateString() === new Date(
 const energyTotal = (entry) => (entry.source ? (entry.kwh || 0) : (entry.solarGenerationKwh || 0));
 const round1 = (value) => Math.round((Number(value) || 0) * 10) / 10;
 
+// ── Power Factor Utilities ────────────────────────────────────────────────────
+// Strict PF formatting: never round to 1.00; cap at 0.99 for display.
+export function formatPowerFactor(pfVal) {
+  const num = Number(pfVal);
+  if (!Number.isFinite(num) || num <= 0) return '0.95';
+  if (num >= 1.0) return '0.99';
+  return num.toFixed(2);
+}
+
+/**
+ * Compute weighted average Power Factor across an array of delta rows.
+ * Weighted PF = Σ(import_kWh × PF) / Σ(import_kWh)
+ * Uses u1ImportKwhReading and u2ImportKwhReading as weights.
+ */
+export function computeWeightedPf(deltas) {
+  let weightedSum = 0;
+  let totalImport = 0;
+  (deltas || []).forEach((d) => {
+    const u1Import = Number(d._delta?.u1ImportKwhReading) || 0;
+    const u2Import = Number(d._delta?.u2ImportKwhReading) || 0;
+    const u1Pf = Number(d._delta?.u1Pf) || Number(d.u1Pf) || 0;
+    const u2Pf = Number(d._delta?.u2Pf) || Number(d.u2Pf) || 0;
+    if (u1Import > 0 && u1Pf > 0) { weightedSum += u1Import * u1Pf; totalImport += u1Import; }
+    if (u2Import > 0 && u2Pf > 0) { weightedSum += u2Import * u2Pf; totalImport += u2Import; }
+  });
+  return totalImport > 0 ? weightedSum / totalImport : 0.95;
+}
+
+/**
+ * Compute energy snapshot from daily utility deltas.
+ * Returns { gridKwh, solarKwh, dgKwh, totalKwh, avgPowerFactor, fuelLtr, chartData }
+ */
+export function computeEnergySnapshot(deltas, solarLogs) {
+  let totalGrid = 0;
+  let totalSolarFromUtil = 0;
+  let totalDg = 0;
+  let totalFuel = 0;
+
+  (deltas || []).forEach((d) => {
+    const u1Grid = Number(d._delta?.u1ImportKwhReading) || 0;
+    const u2Grid = Number(d._delta?.u2ImportKwhReading) || 0;
+    totalGrid += u1Grid + u2Grid;
+    const u1Solar = Number(d._delta?.u1SolarKwhReading) || 0;
+    const u2Solar = Number(d._delta?.u2SolarKwhReading) || 0;
+    totalSolarFromUtil += u1Solar + u2Solar;
+    const dg380 = Number(d._delta?.dg380KwhReading) || 0;
+    const dg500 = Number(d._delta?.dg500KwhReading) || 0;
+    totalDg += dg380 + dg500;
+    totalFuel += Number(d._delta?.dg380HsdAddedLtr) || 0;
+    totalFuel += Number(d._delta?.dg500HsdAddedLtr) || 0;
+  });
+
+  // Solar fallback: prefer inverter data, fall back to meter-side utility readings
+  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || 0), 0);
+  const solarKwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : totalSolarFromUtil;
+
+  const avgPf = computeWeightedPf(deltas);
+
+  const chartData = (deltas || []).map((d) => ({
+    date: d.date,
+    gridKwh: (Number(d._delta?.u1ImportKwhReading) || 0) + (Number(d._delta?.u2ImportKwhReading) || 0),
+    solarKwh: (Number(d._delta?.u1SolarKwhReading) || 0) + (Number(d._delta?.u2SolarKwhReading) || 0),
+    dgKwh: (Number(d._delta?.dg380KwhReading) || 0) + (Number(d._delta?.dg500KwhReading) || 0),
+    fuelLtr: (Number(d._delta?.dg380HsdAddedLtr) || 0) + (Number(d._delta?.dg500HsdAddedLtr) || 0),
+  })).reverse();
+
+  return {
+    gridKwh: Math.round(totalGrid),
+    solarKwh: Math.round(solarKwh),
+    dgKwh: Math.round(totalDg),
+    totalKwh: Math.round(totalGrid + solarKwh + totalDg),
+    avgPowerFactor: formatPowerFactor(avgPf),
+    fuelLtr: Math.round(totalFuel),
+    chartData,
+  };
+}
+
 export const monthKey = (value) => {
   const dt = new Date(value);
   return Number.isNaN(dt.getTime())
@@ -1150,10 +1227,13 @@ export function computePfTrend(dailyUtilityLogs, n = 12) {
     const u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
     const u2ImportKwh = Number(d._delta?.u2ImportKwhReading) || 0;
     const u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
+    const u1PfRaw = d.u1Pf > 0 ? d.u1Pf : (u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0);
+    const u2PfRaw = d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0);
     return {
       date: d.date || '',
-      u1Pf: d.u1Pf > 0 ? d.u1Pf : (u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0),
-      u2Pf: d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0),
+      u1Pf: Number(formatPowerFactor(u1PfRaw)),
+      u2Pf: Number(formatPowerFactor(u2PfRaw)),
+      label: (d.date || '').slice(5),
     };
   });
 }

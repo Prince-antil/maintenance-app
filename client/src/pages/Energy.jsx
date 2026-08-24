@@ -11,7 +11,7 @@ import {
   addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
   upsertEnergySettings,
 } from '../store.js';
-import { computeRenewableSummary, computeDailyDeltas } from '../analytics.js';
+import { computeRenewableSummary, computeDailyDeltas, formatPowerFactor, computeWeightedPf } from '../analytics.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
@@ -242,12 +242,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     const latest = filteredDerived[0];
-    const pf = latest.u1Pf > 0 && latest.u2Pf > 0
-      ? r1((latest.u1Pf + latest.u2Pf) / 2)
-      : latest.u1Pf > 0 ? latest.u1Pf
-      : latest.u2Pf > 0 ? latest.u2Pf
-      : 0;
-    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf };
+    const pf = computeWeightedPf([{ _delta: { u1ImportKwhReading: latest.u1Grid, u2ImportKwhReading: latest.u2Grid, u1Pf: latest.u1Pf, u2Pf: latest.u2Pf } }]);
+    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: formatPowerFactor(pf) };
   }, [filteredDerived]);
 
   const dgSummary = useMemo(() => {
@@ -304,6 +300,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     let u2Pf = toN(formValues.u2Pf);
     if ((!u1Pf || u1Pf === 0) && u1ImportKvah > 0) u1Pf = Math.round((u1ImportKwh / u1ImportKvah) * 100000) / 100000;
     if ((!u2Pf || u2Pf === 0) && u2ImportKvah > 0) u2Pf = Math.round((u2ImportKwh / u2ImportKvah) * 100000) / 100000;
+    u1Pf = Math.min(u1Pf, 0.99);
+    u2Pf = Math.min(u2Pf, 0.99);
     const payload = { ...formValues, u1Pf, u2Pf };
     if (editRow) updateDailyUtilityLog(editRow.id, payload, userName);
     else addDailyUtilityLog(payload, userName);
@@ -446,8 +444,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                       <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
                       <Td value={r.solar} className="text-emerald-300 tabular-nums" />
                       <Td value={r.total} className="text-white font-bold tabular-nums" />
-                      <Td value={r.u1Pf != null ? r.u1Pf : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.u2Pf != null ? r.u2Pf : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u1Pf != null ? formatPowerFactor(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u2Pf != null ? formatPowerFactor(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
                       <Td value={r.dg380Fuel} className="text-slate-300 tabular-nums" />
                       <Td value={r.dg500Fuel} className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}

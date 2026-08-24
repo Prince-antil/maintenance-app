@@ -17,6 +17,7 @@ import {
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey,
   computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
+  computeEnergySnapshot, formatPowerFactor,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -150,24 +151,34 @@ export default function Dashboard() {
     const deltas = computeDailyDeltas(filteredDailyUtilityLog);
     if (deltas.length === 0) return null;
     const last = deltas[0];
+    const u1ImportKwh = Number(last._delta?.u1ImportKwhReading) || 0;
+    const u2ImportKwh = Number(last._delta?.u2ImportKwhReading) || 0;
+    const u1PfRaw = last.u1Pf > 0 ? last.u1Pf : 0;
+    const u2PfRaw = last.u2Pf > 0 ? last.u2Pf : 0;
+    const totalImport = u1ImportKwh + u2ImportKwh;
+    const weightedPf = totalImport > 0
+      ? ((u1ImportKwh * u1PfRaw) + (u2ImportKwh * u2PfRaw)) / totalImport
+      : 0.95;
     return {
       date: last.date,
-      u1Pf: last.u1Pf > 0 ? last.u1Pf : 0,
-      u2Pf: last.u2Pf > 0 ? last.u2Pf : 0,
+      u1Pf: formatPowerFactor(u1PfRaw),
+      u2Pf: formatPowerFactor(u2PfRaw),
+      avgPf: formatPowerFactor(weightedPf),
     };
   }, [filteredDailyUtilityLog]);
 
   const energySnapshot = useMemo(() => {
     const deltas = computeDailyDeltas(filteredDailyUtilityLog);
-    const solarLogs = filteredDailySolarGeneration;
-    const unit1KwhMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0));
-    const unit2KwhMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0));
-    const totalGridMonth = unit1KwhMonth + unit2KwhMonth;
-    const dg500HrsMonth = round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0));
-    const dg380HrsMonth = round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0));
-    const solarMonth = Math.round(solarLogs.reduce((s, e) => s + (Number(e.dailyTotalKwh) || 0), 0));
-    const fuelMonth = Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HsdAddedLtr) || 0) + (Number(d._delta?.dg380HsdAddedLtr) || 0), 0));
-    return { unit1KwhMonth, unit2KwhMonth, totalGridMonth, dg500HrsMonth, dg380HrsMonth, solarMonth, fuelMonth };
+    const snapshot = computeEnergySnapshot(deltas, filteredDailySolarGeneration);
+    return {
+      unit1KwhMonth: Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0)),
+      unit2KwhMonth: Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0)),
+      totalGridMonth: snapshot.gridKwh,
+      dg500HrsMonth: round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0)),
+      dg380HrsMonth: round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0)),
+      solarMonth: snapshot.solarKwh,
+      fuelMonth: snapshot.fuelLtr,
+    };
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
 
   const charts = useMemo(() => ({
@@ -385,8 +396,8 @@ export default function Dashboard() {
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
               {latestPf ? (
                 <>
-                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.u1Pf != null ? latestPf.u1Pf : '—'}</p>
-                  <p className="text-slate-500 text-[10px] mt-0.5">U1 · U2 {latestPf.u2Pf != null ? latestPf.u2Pf : '—'}</p>
+                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.avgPf || '—'}</p>
+                  <p className="text-slate-500 text-[10px] mt-0.5">U1 {latestPf.u1Pf || '—'} · U2 {latestPf.u2Pf || '—'}</p>
                 </>
               ) : (
                 <p className="text-slate-500 text-[10px]">No data</p>
