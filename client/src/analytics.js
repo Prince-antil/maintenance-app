@@ -161,12 +161,31 @@ export function aggregatePMRecords(pms, mKey = null) {
   };
 }
 
-export function machineHealth(machine, breakdowns, pms) {
+export function aggregateMachinePmRecords(records, mKey = null) {
+  const rows = (records || []).filter((r) => {
+    if (!mKey) return true;
+    return (r.pmDate || '').slice(0, 7) === mKey;
+  });
+  const plannedCount = rows.length;
+  const doneCount = rows.filter(
+    (r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true
+  ).length;
+  const pendingCount = plannedCount - doneCount;
+  const compliance = plannedCount > 0 ? round1((doneCount / plannedCount) * 100) : 0;
+  return { rows, plannedCount, doneCount, pendingCount, compliance };
+}
+
+export function machineHealth(machine, breakdowns, pms, machinePmRecords = []) {
   const recentKeys = recentPeriodKeys(3);
   const sectionBreakdowns = breakdowns.filter((row) => row.section === machine.section && recentKeys.has(summaryMonthKey(row)));
   const sectionPMs = pms.filter((row) => row.section === machine.section && recentKeys.has(summaryMonthKey(row)));
+  const sectionMachinePm = (machinePmRecords || []).filter(
+    (r) => (r.plantSection || '') === machine.section && recentKeys.has((r.pmDate || '').slice(0, 7))
+  );
   const bdSummary = aggregateBreakdownRecords(sectionBreakdowns);
-  const pmSummary = aggregatePMRecords(sectionPMs);
+  const pmSummaryManual = aggregatePMRecords(sectionPMs);
+  const pmSummaryAuto = aggregateMachinePmRecords(sectionMachinePm);
+  const pmSummary = pmSummaryAuto.plannedCount > 0 ? pmSummaryAuto : pmSummaryManual;
 
   let health = 100;
   health -= bdSummary.breakdownCount * 0.8;
@@ -234,13 +253,21 @@ export function pmStats(pms) {
 
 export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
   const { machines, breakdowns, pms } = state;
+  const machinePmRecords = state.machinePmRecords || [];
   const running = machines.filter((machine) => machine.status === 'running').length;
   const maint = machines.filter((machine) => machine.status === 'maintenance').length;
   const manualDown = machines.filter((machine) => machine.status === 'breakdown').length;
   const currentKey = periodFilter === 'all' ? monthKey(new Date()) : periodFilter;
   const bd = aggregateBreakdownRecords(breakdowns, currentKey);
-  const pm = aggregatePMRecords(pms, currentKey);
+  const pmSummary = aggregatePMRecords(pms, currentKey);
+  const pmFromRecords = aggregateMachinePmRecords(machinePmRecords, currentKey);
   const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
+
+  // Auto-calculate from per-machine records; fall back to manual summary if no records exist
+  const plannedCount = pmFromRecords.plannedCount > 0 ? pmFromRecords.plannedCount : pmSummary.plannedCount;
+  const doneCount = pmFromRecords.plannedCount > 0 ? pmFromRecords.doneCount : pmSummary.doneCount;
+  const pendingCount = pmFromRecords.plannedCount > 0 ? pmFromRecords.pendingCount : pmSummary.pendingCount;
+  const compliance = pmFromRecords.plannedCount > 0 ? pmFromRecords.compliance : pmSummary.compliance;
 
   return {
     machineCount: machines.length,
@@ -248,20 +275,20 @@ export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
     underMaintenance: maint,
     breakdown: bd.breakdownCount,
     manualBreakdownMachines: manualDown,
-    pmDue: pm.plannedCount,
-    pmCompleted: pm.doneCount,
-    pmPending: pm.pendingCount,
-    pmOverdue: pm.pendingCount,
-    pmCompliance: pm.compliance,
+    pmDue: plannedCount,
+    pmCompleted: doneCount,
+    pmPending: pendingCount,
+    pmOverdue: pendingCount,
+    pmCompliance: compliance,
     availability: computeAvailability(breakdowns, machines.length, currentKey),
     mttr: bd.mttr,
     mtbf: bd.mtbf,
     totalDocuments: totalDocuments + machineDocs,
-    openWorkOrders: pm.pendingCount,
+    openWorkOrders: pendingCount,
     breakdownsThisMonth: bd.breakdownCount,
     downtimeThisMonth: bd.downtimeHours,
     breakdownSectionLogs: bd.sections,
-    pmSectionLogs: pm.sections,
+    pmSectionLogs: pmSummary.sections,
   };
 }
 
@@ -383,10 +410,10 @@ export function machineStatusDistribution(machines) {
   ].filter((item) => item.value > 0);
 }
 
-export function healthDistribution(machines, breakdowns, pms) {
+export function healthDistribution(machines, breakdowns, pms, machinePmRecords = []) {
   const bands = { good: 0, fair: 0, poor: 0 };
   machines.forEach((machine) => {
-    bands[healthBand(machineHealth(machine, breakdowns, pms))] += 1;
+    bands[healthBand(machineHealth(machine, breakdowns, pms, machinePmRecords))] += 1;
   });
   return [
     { label: 'Healthy (75-100%)', value: bands.good, color: '#10B981' },
@@ -423,10 +450,22 @@ export function mtbfTrend(breakdowns, machineCount, n = 6) {
 
 export function buildNotifications(state) {
   const { machines, breakdowns, pms } = state;
+  const machinePmRecords = state.machinePmRecords || [];
   const currentKey = monthKey(new Date());
   const notifications = [];
   const currentBreakdowns = breakdowns.filter((row) => summaryMonthKey(row) === currentKey && (row.breakdownCount || 0) > 0);
   const currentPMs = pms.filter((row) => summaryMonthKey(row) === currentKey && (row.pendingCount || 0) > 0);
+
+  const pmAuto = aggregateMachinePmRecords(machinePmRecords, currentKey);
+  if (pmAuto.plannedCount > 0 && pmAuto.pendingCount > 0) {
+    notifications.push({
+      id: 'pm-auto-pending',
+      type: 'warning',
+      title: 'PM Pending (Auto)',
+      detail: `${pmAuto.pendingCount} pending against ${pmAuto.plannedCount} planned from machine records for ${formatPeriodKey(currentKey, true)}`,
+      ts: new Date().toISOString(),
+    });
+  }
 
   currentPMs.forEach((row) => {
     notifications.push({
@@ -477,12 +516,15 @@ export function buildNotifications(state) {
 
 export function buildInsights(state) {
   const { machines, breakdowns, pms } = state;
+  const machinePmRecords = state.machinePmRecords || [];
   const currentKey = monthKey(new Date());
   const insights = [];
   if (!machines.length) return insights;
 
   const currentBreakdown = aggregateBreakdownRecords(breakdowns, currentKey);
-  const currentPm = aggregatePMRecords(pms, currentKey);
+  const currentPmManual = aggregatePMRecords(pms, currentKey);
+  const currentPmAuto = aggregateMachinePmRecords(machinePmRecords, currentKey);
+  const currentPm = currentPmAuto.plannedCount > 0 ? currentPmAuto : currentPmManual;
   const sections = equipmentWiseBreakdown(breakdowns);
   const worstSection = sections[0];
 

@@ -67,7 +67,7 @@ export default function Dashboard() {
   const { refreshKey, openUpload, openMasterImport } = useUI();
   const navigate = useNavigate();
   const store = useStore();
-  const { machines, breakdowns, pms, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
+  const { machines, breakdowns, pms, machinePmRecords, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -99,6 +99,9 @@ export default function Dashboard() {
     const allPeriods = new Set();
     store.breakdowns.forEach((r) => r.period && allPeriods.add(r.period));
     store.pms.forEach((r) => r.period && allPeriods.add(r.period));
+    (store.machinePmRecords || []).forEach((r) => {
+      if (r.pmDate) allPeriods.add(String(r.pmDate).slice(0, 7));
+    });
     store.machineBreakdownLogs.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
@@ -122,6 +125,10 @@ export default function Dashboard() {
   const filteredMachineBDLogs = useMemo(() =>
     periodFilter === 'all' ? store.machineBreakdownLogs : store.machineBreakdownLogs.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
     [store.machineBreakdownLogs, periodFilter]
+  );
+  const filteredMachinePmRecords = useMemo(() =>
+    periodFilter === 'all' ? (machinePmRecords || []) : (machinePmRecords || []).filter((r) => String(r.pmDate || '').slice(0, 7) === periodFilter),
+    [machinePmRecords, periodFilter]
   );
 
   const filteredDailyUtilityLog = useMemo(() =>
@@ -198,7 +205,7 @@ export default function Dashboard() {
     equipment: equipmentWiseBreakdown(filteredBreakdowns).slice(0, 8),
     pareto: paretoTop10(filteredBreakdowns),
     dept: breakdownByDepartment(filteredBreakdowns),
-    health: healthDistribution(store.machines, filteredBreakdowns, filteredPMs),
+    health: healthDistribution(store.machines, filteredBreakdowns, filteredPMs, filteredMachinePmRecords),
     machineStatus: machineStatusDistribution(store.machines),
     avail: availabilityTrend(filteredBreakdowns, store.machines.length),
     mttr: mttrTrend(filteredBreakdowns),
@@ -210,7 +217,7 @@ export default function Dashboard() {
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
     pfTrend,
     dgFuelEfficiency,
-  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
+  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, filteredMachinePmRecords, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
