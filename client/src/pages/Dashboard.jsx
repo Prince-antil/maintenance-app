@@ -17,7 +17,7 @@ import {
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey,
   computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
-  computeEnergySnapshot, formatPowerFactor,
+  computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
@@ -147,39 +147,39 @@ export default function Dashboard() {
   );
 
   const latestPf = useMemo(() => {
-    if (filteredDailyUtilityLog.length === 0) return null;
-    const deltas = computeDailyDeltas(filteredDailyUtilityLog);
-    if (deltas.length === 0) return null;
-    const last = deltas[0];
+    if (dailyUtilityLog.length === 0) return null;
+    const allDeltas = computeDailyDeltas(dailyUtilityLog);
+    const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
+    if (periodDeltas.length === 0) return null;
+    const last = periodDeltas[0];
     const u1ImportKwh = Number(last._delta?.u1ImportKwhReading) || 0;
     const u2ImportKwh = Number(last._delta?.u2ImportKwhReading) || 0;
     const u1PfRaw = last.u1Pf > 0 ? last.u1Pf : 0;
     const u2PfRaw = last.u2Pf > 0 ? last.u2Pf : 0;
-    const totalImport = u1ImportKwh + u2ImportKwh;
-    const weightedPf = totalImport > 0
-      ? ((u1ImportKwh * u1PfRaw) + (u2ImportKwh * u2PfRaw)) / totalImport
-      : 0.95;
     return {
       date: last.date,
-      u1Pf: formatPowerFactor(u1PfRaw),
-      u2Pf: formatPowerFactor(u2PfRaw),
-      avgPf: formatPowerFactor(weightedPf),
+      u1Pf: u1PfRaw > 0 ? formatPowerFactor(u1PfRaw) : null,
+      u2Pf: u2PfRaw > 0 ? formatPowerFactor(u2PfRaw) : null,
+      avgPf: formatPowerFactor(computeWeightedPf(periodDeltas.slice(0, 1))),
     };
-  }, [filteredDailyUtilityLog]);
+  }, [dailyUtilityLog, periodFilter]);
 
   const energySnapshot = useMemo(() => {
-    const deltas = computeDailyDeltas(filteredDailyUtilityLog);
-    const snapshot = computeEnergySnapshot(deltas, filteredDailySolarGeneration);
+    const allDeltas = computeDailyDeltas(dailyUtilityLog);
+    const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
+    const snapshot = computeEnergySnapshot(periodDeltas, filteredDailySolarGeneration);
     return {
-      unit1KwhMonth: Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0)),
-      unit2KwhMonth: Math.round(deltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0)),
+      unit1KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0)),
+      unit2KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0)),
       totalGridMonth: snapshot.gridKwh,
-      dg500HrsMonth: round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0)),
-      dg380HrsMonth: round1(deltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0)),
+      dg500HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0)),
+      dg380HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0)),
+      dg500KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500KwhReading) || 0), 0)),
+      dg380KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380KwhReading) || 0), 0)),
       solarMonth: snapshot.solarKwh,
       fuelMonth: snapshot.fuelLtr,
     };
-  }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
+  }, [dailyUtilityLog, periodFilter, filteredDailySolarGeneration]);
 
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
@@ -369,15 +369,15 @@ export default function Dashboard() {
             </div>
             {/* DG 500 */}
             <div className="rounded-control bg-amber-500/[0.07] border border-amber-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500 kVA</p>
-              <p className="text-amber-300 text-base font-bold tabular-nums">{energySnapshot.dg500HrsMonth}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500</p>
+              <p className="text-amber-300 text-base font-bold tabular-nums">{energySnapshot.dg500KwhMonth.toLocaleString()}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg500HrsMonth} hrs</p>
             </div>
             {/* DG 380 */}
             <div className="rounded-control bg-orange-500/[0.07] border border-orange-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380 kVA</p>
-              <p className="text-orange-300 text-base font-bold tabular-nums">{energySnapshot.dg380HrsMonth}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">hrs</p>
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380</p>
+              <p className="text-orange-300 text-base font-bold tabular-nums">{energySnapshot.dg380KwhMonth.toLocaleString()}</p>
+              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg380HrsMonth} hrs</p>
             </div>
             {/* Solar */}
             <div className="rounded-control bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-center">
@@ -394,9 +394,9 @@ export default function Dashboard() {
             {/* Power Factor */}
             <div className="rounded-control bg-teal-500/[0.07] border border-teal-500/20 p-3 text-center">
               <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
-              {latestPf ? (
+              {latestPf && latestPf.avgPf ? (
                 <>
-                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.avgPf || '—'}</p>
+                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.avgPf}</p>
                   <p className="text-slate-500 text-[10px] mt-0.5">U1 {latestPf.u1Pf || '—'} · U2 {latestPf.u2Pf || '—'}</p>
                 </>
               ) : (

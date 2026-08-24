@@ -62,9 +62,8 @@ export function computeEnergySnapshot(deltas, solarLogs) {
     totalFuel += Number(d._delta?.dg500HsdAddedLtr) || 0;
   });
 
-  // Solar fallback: prefer inverter data, fall back to meter-side utility readings
-  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || 0), 0);
-  const solarKwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : totalSolarFromUtil;
+  // Solar: always use meter-side utility readings for consistency with Energy section
+  const solarKwh = totalSolarFromUtil;
 
   const avgPf = computeWeightedPf(deltas);
 

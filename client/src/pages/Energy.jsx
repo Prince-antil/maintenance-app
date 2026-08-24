@@ -206,26 +206,28 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     const deltas = computeDailyDeltas(sorted);
     return deltas.map((d) => {
       const dd = d._delta;
-      const u1Grid = dd.u1ImportKwhReading ?? 0;
-      const u2Grid = dd.u2ImportKwhReading ?? 0;
-      const gridTotal = r1(u1Grid + u2Grid);
-      const u1Export = dd.u1ExportKwhReading ?? 0;
-      const u2Export = dd.u2ExportKwhReading ?? 0;
-      const u1Solar = dd.u1SolarKwhReading ?? 0;
-      const u2Solar = dd.u2SolarKwhReading ?? 0;
-      const solar = r1(u1Solar + u2Solar);
-      const dg380 = dd.dg380KwhReading ?? 0;
-      const dg380Hrs = dd.dg380HourmeterReading ?? 0;
+      const u1Grid = dd.u1ImportKwhReading;
+      const u2Grid = dd.u2ImportKwhReading;
+      const gridTotal = (u1Grid != null || u2Grid != null) ? r1((u1Grid ?? 0) + (u2Grid ?? 0)) : null;
+      const u1Export = dd.u1ExportKwhReading;
+      const u2Export = dd.u2ExportKwhReading;
+      const u1Solar = dd.u1SolarKwhReading;
+      const u2Solar = dd.u2SolarKwhReading;
+      const solar = (u1Solar != null || u2Solar != null) ? r1((u1Solar ?? 0) + (u2Solar ?? 0)) : null;
+      const dg380 = dd.dg380KwhReading;
+      const dg380Hrs = dd.dg380HourmeterReading;
       const dg380Fuel = dd.dg380HsdAddedLtr;
       const dg380DefPct = dd.dg380DefAddedPct;
-      const dg500 = dd.dg500KwhReading ?? 0;
-      const dg500Hrs = dd.dg500HourmeterReading ?? 0;
+      const dg500 = dd.dg500KwhReading;
+      const dg500Hrs = dd.dg500HourmeterReading;
       const dg500Fuel = dd.dg500HsdAddedLtr;
       const dg500DefPct = dd.dg500DefAddedPct;
-      const totalDg = r1(dg380 + dg500);
-      const u1Pf = dd.u1Pf;
-      const u2Pf = dd.u2Pf;
-      const total = r1(gridTotal + totalDg + solar);
+      const totalDg = (dg380 != null || dg500 != null) ? r1((dg380 ?? 0) + (dg500 ?? 0)) : null;
+      const u1Pf = d.u1Pf > 0 ? d.u1Pf : null;
+      const u2Pf = d.u2Pf > 0 ? d.u2Pf : null;
+      const total = gridTotal != null || totalDg != null || solar != null
+        ? r1((gridTotal ?? 0) + (totalDg ?? 0) + (solar ?? 0))
+        : null;
       return {
         date: d.date, u1Grid, u2Grid, gridTotal, u1Export, u2Export, u1Solar, u2Solar, solar,
         dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
@@ -243,7 +245,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     const latest = filteredDerived[0];
     const pf = computeWeightedPf([{ _delta: { u1ImportKwhReading: latest.u1Grid, u2ImportKwhReading: latest.u2Grid, u1Pf: latest.u1Pf, u2Pf: latest.u2Pf } }]);
-    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: formatPowerFactor(pf) };
+    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: pf > 0 ? formatPowerFactor(pf) : '—' };
   }, [filteredDerived]);
 
   const dgSummary = useMemo(() => {
@@ -444,8 +446,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                       <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
                       <Td value={r.solar} className="text-emerald-300 tabular-nums" />
                       <Td value={r.total} className="text-white font-bold tabular-nums" />
-                      <Td value={r.u1Pf != null ? formatPowerFactor(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.u2Pf != null ? formatPowerFactor(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPowerFactor(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPowerFactor(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
                       <Td value={r.dg380Fuel} className="text-slate-300 tabular-nums" />
                       <Td value={r.dg500Fuel} className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}
