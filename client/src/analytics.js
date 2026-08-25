@@ -257,10 +257,10 @@ export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
   const running = machines.filter((machine) => machine.status === 'running').length;
   const maint = machines.filter((machine) => machine.status === 'maintenance').length;
   const manualDown = machines.filter((machine) => machine.status === 'breakdown').length;
-  const currentKey = periodFilter === 'all' ? monthKey(new Date()) : periodFilter;
-  const bd = aggregateBreakdownRecords(breakdowns, currentKey);
-  const pmSummary = aggregatePMRecords(pms, currentKey);
-  const pmFromRecords = aggregateMachinePmRecords(machinePmRecords, currentKey);
+  const mKey = periodFilter === 'all' ? null : periodFilter;
+  const bd = aggregateBreakdownRecords(breakdowns, mKey);
+  const pmSummary = aggregatePMRecords(pms, mKey);
+  const pmFromRecords = aggregateMachinePmRecords(machinePmRecords, mKey);
   const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
 
   // Auto-calculate from per-machine records; fall back to manual summary if no records exist
@@ -280,7 +280,7 @@ export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
     pmPending: pendingCount,
     pmOverdue: pendingCount,
     pmCompliance: compliance,
-    availability: computeAvailability(breakdowns, machines.length, currentKey),
+    availability: computeAvailability(breakdowns, machines.length, mKey),
     mttr: bd.mttr,
     mtbf: bd.mtbf,
     totalDocuments: totalDocuments + machineDocs,
@@ -430,9 +430,11 @@ export function availabilityTrend(breakdowns, machineCount, n = 6) {
     const overrideRows = monthRows.filter((row) => row.availability_override != null);
     const isOverridden = overrideRows.length > 0 && overrideRows.length === monthRows.length;
     return {
+      id: month.key,
       label: month.label,
       value: computeAvailability(breakdowns, machineCount, month.key),
       overridden: isOverridden,
+      monthKey: month.key,
     };
   });
 }
@@ -1199,8 +1201,8 @@ export function computeAirCompressorPerformance(current, previous) {
 // ── Domain D: Renewable Energy Summary ───────────────────────────────────────
 
 export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energySettings, monthKey_) {
-  const deltas = computeDailyDeltas(dailyUtilityLogs || []).filter((d) => (d.date || '').slice(0, 7) === monthKey_);
-  const solarLogs = (dailySolarLogs || []).filter((l) => (l.date || '').slice(0, 7) === monthKey_);
+  const deltas = computeDailyDeltas(dailyUtilityLogs || []).filter((d) => !monthKey_ || (d.date || '').slice(0, 7) === monthKey_);
+  const solarLogs = (dailySolarLogs || []).filter((l) => !monthKey_ || (l.date || '').slice(0, 7) === monthKey_);
   const s = energySettings || {};
 
   // Solar from inverter logs
@@ -1230,7 +1232,7 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
   // Performance ratio
   const installedCapacity = Number(s.installedSolarCapacityKwp) || 0;
   const peakSunHours = Number(s.avgPeakSunHoursPerDay) || 0;
-  const daysInMonth = new Date(Number(monthKey_.split('-')[0]), Number(monthKey_.split('-')[1]), 0).getDate() || 30;
+  const daysInMonth = monthKey_ ? (new Date(Number(monthKey_.split('-')[0]), Number(monthKey_.split('-')[1]), 0).getDate() || 30) : 30;
   const expectedSolar = installedCapacity * peakSunHours * daysInMonth;
   const performanceRatio = expectedSolar > 0 ? round1((solarFromInverters / expectedSolar) * 100) : 0;
 
@@ -1277,6 +1279,7 @@ export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
       date: d.date || '',
       u1Pf: u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : null,
       u2Pf: u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null,
+      avgPf: (u1PfRaw > 0 && u2PfRaw > 0) ? Number(formatPowerFactor(round1((u1PfRaw + u2PfRaw) / 2))) : (u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : (u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null)),
       label: (d.date || '').slice(5),
     };
   });

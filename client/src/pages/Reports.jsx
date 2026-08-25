@@ -80,7 +80,7 @@ function exportPDF(title, columns, rows) {
 const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—');
 
 // Reports where rows have real store IDs and can be edited / deleted
-const EDITABLE_REPORTS = new Set(['pm', 'breakdown']);
+const EDITABLE_REPORTS = new Set(['pm', 'breakdown', 'availability']);
 
 // ---------- Edit Modal ----------
 function EditModal({ reportId, row, onSave, onDelete, onClose }) {
@@ -106,6 +106,11 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
         remarks: row.remarks || '',
       };
     }
+    if (reportId === 'availability') {
+      return {
+        availability_override: row.value != null ? String(Math.round(row.value * 10) / 10) : '',
+      };
+    }
     return {};
   }, [reportId, row]);
 
@@ -119,7 +124,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
     e.preventDefault();
     // Convert availability_override: empty string → null (auto mode)
     const payload = { ...form };
-    if (reportId === 'breakdown') {
+    if (reportId === 'breakdown' || reportId === 'availability') {
       payload.availability_override =
         payload.availability_override !== '' && payload.availability_override != null
           ? Number(payload.availability_override)
@@ -261,22 +266,50 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
             </>
           )}
 
-          <div className="flex items-center justify-between pt-1">
-            {!confirmDelete ? (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                className="btn-danger text-xs inline-flex items-center gap-1.5"
-              >
-                <Trash2 size={13} /> Delete
-              </button>
-            ) : (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-red-400">Sure?</span>
-                <button type="button" onClick={onDelete} className="btn-danger text-xs px-3 py-1">Yes, delete</button>
-                <button type="button" onClick={() => setConfirmDelete(false)} className="btn-ghost text-xs px-3 py-1">Cancel</button>
+          {/* ── Availability section ── */}
+          {reportId === 'availability' && (
+            <>
+              <div>
+                <label className={labelCls}>
+                  Availability Override %
+                  <span className="ml-1.5 text-slate-500 text-[10px] font-normal">(blank = auto-calculate from downtime)</span>
+                </label>
+                <input
+                  type="number" min="0" max="100" step="0.1"
+                  value={form.availability_override}
+                  onChange={set('availability_override')}
+                  placeholder="e.g. 95.5 — leave blank for auto"
+                  className={`${inputCls} ${form.availability_override !== '' ? 'border-amber-400/50 focus:border-amber-400/80' : ''}`}
+                />
               </div>
+              {form.availability_override !== '' && (
+                <div className="flex items-start gap-2 rounded-control border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-xs text-amber-300">
+                  <Gauge size={12} className="mt-0.5 flex-shrink-0" aria-hidden="true" />
+                  Override active — availability charts and KPIs will use <strong className="ml-1">{form.availability_override}%</strong> for this period instead of the calculated value.
+                </div>
+              )}
+            </>
+          )}
+
+          <div className="flex items-center justify-between pt-1">
+            {reportId !== 'availability' && (
+              !confirmDelete ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  className="btn-danger text-xs inline-flex items-center gap-1.5"
+                >
+                  <Trash2 size={13} /> Delete
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-400">Sure?</span>
+                  <button type="button" onClick={onDelete} className="btn-danger text-xs px-3 py-1">Yes, delete</button>
+                  <button type="button" onClick={() => setConfirmDelete(false)} className="btn-ghost text-xs px-3 py-1">Cancel</button>
+                </div>
+              )
             )}
+            {reportId === 'availability' && <div />}
             <div className="flex items-center gap-2">
               <button type="button" onClick={onClose} className="btn-ghost text-xs">Cancel</button>
               <button type="submit" className="btn-primary text-xs">Save Changes</button>
@@ -310,6 +343,10 @@ export default function Reports() {
     const { reportId, row } = editRow;
     if (reportId === 'pm') updatePM(row.id, form, userName);
     else if (reportId === 'breakdown') updateBreakdown(row.id, form, userName);
+    else if (reportId === 'availability' && row.monthKey) {
+      const monthBreakdowns = breakdowns.filter((b) => summaryMonthKey(b) === row.monthKey);
+      monthBreakdowns.forEach((b) => updateBreakdown(b.id, { availability_override: form.availability_override }, userName));
+    }
     setEditRow(null);
   };
 

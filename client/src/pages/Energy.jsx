@@ -1089,8 +1089,6 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const { dailySolarGeneration } = store;
   const sorted = useMemo(() => [...dailySolarGeneration].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailySolarGeneration]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
-  const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
-
   const withCalc = useMemo(() => sorted.map((r) => {
     const sum = r1(toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh) + toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh));
     const u1 = r1(toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh));
@@ -1098,17 +1096,20 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
     return { ...r, _sum: sum, _u1: u1, _u2: u2 };
   }), [sorted]);
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
+  const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
     if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—' };
     const latest = filteredCalc[0];
     const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === (dateFrom ? dateFrom.slice(0, 7) : currentMK));
     const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
-    const avg = monthData.length > 0 ? r1(monthTotal / monthData.length) : 0;
+    const avg = filteredCalc.length > 0 ? r1(filteredCalc.reduce((s, r) => s + r._sum, 0) / filteredCalc.length) : 0;
     const best = Math.max(...filteredCalc.map((r) => r._sum));
     const u1Total = r1(filteredCalc.reduce((s, r) => s + r._u1, 0));
     const u2Total = r1(filteredCalc.reduce((s, r) => s + r._u2, 0));
-    return { today: latest._sum, month: monthTotal, avg, best, u1: u1Total, u2: u2Total, grandTotal: r1(u1Total + u2Total) };
+    const months = new Set(filteredCalc.map(r => r.date?.slice(0, 7)).filter(Boolean));
+    const monthlyAvg = months.size > 0 ? r1(filteredCalc.reduce((s, r) => s + r._sum, 0) / months.size) : 0;
+    return { today: latest._sum, month: monthTotal, avg, best, u1: u1Total, u2: u2Total, grandTotal: r1(u1Total + u2Total), monthlyAvg };
   }, [filteredCalc, currentMK, dateFrom]);
 
   const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r._sum })), [filteredCalc]);
@@ -1153,20 +1154,23 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const cols = [
     { key: 'date', label: 'Date' }, { key: 'u1i1', label: 'U1 Inv1', className: 'text-emerald-400' },
     { key: 'u1i2', label: 'U1 Inv2', className: 'text-emerald-400' }, { key: 'u1i3', label: 'U1 Inv3', className: 'text-emerald-400' },
-    { key: 'u1i4', label: 'U1 Inv4', className: 'text-emerald-400' }, { key: 'u2i1', label: 'U2 Inv1', className: 'text-cyan-400' },
+    { key: 'u1i4', label: 'U1 Inv4', className: 'text-emerald-400' }, { key: 'u1total', label: 'U1 Total', className: 'text-emerald-300 font-semibold' },
+    { key: 'u2i1', label: 'U2 Inv1', className: 'text-cyan-400' },
     { key: 'u2i2', label: 'U2 Inv2', className: 'text-cyan-400' }, { key: 'u2i3', label: 'U2 Inv3', className: 'text-cyan-400' },
-    { key: 'total', label: 'Daily Total kWh', className: 'text-white font-semibold' },
+    { key: 'u2total', label: 'U2 Total', className: 'text-cyan-300 font-semibold' },
+    { key: 'total', label: 'Grand Total kWh', className: 'text-white font-semibold' },
   ];
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="Latest Day Generation" value={kpis.today} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Month Generation" value={kpis.month} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="Avg Daily" value={kpis.avg} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
         <KpiCard label="Best Day" value={kpis.best} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
         <KpiCard label="U1 Total (Filtered)" value={kpis.u1} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="U2 Total (Filtered)" value={kpis.u2} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
+        <KpiCard label="Avg Monthly" value={kpis.monthlyAvg} unit="kWh" color="text-violet-300" bg="bg-violet-500/[0.07] border-violet-500/20" />
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailySolar' })} onDownload={() => downloadTemplate('energyDailySolar')} label="Daily Reading" />
@@ -1189,16 +1193,18 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                   <tr key={r.id}>
                     <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
                     <Td value={r.u1Inv1Kwh} className="text-emerald-300 tabular-nums" /><Td value={r.u1Inv2Kwh} className="text-emerald-300 tabular-nums" />
-                    <Td value={r.u1Inv3Kwh} className="text-emerald-300 tabular-nums" /><Td value={r.u1Inv4Kwh} className="text-emerald-300 tabular-nums" />
+                    <Td value={r.u1Inv3Kwh} className="text-emerald-300 tabular-nums" />                    <Td value={r.u1Inv4Kwh} className="text-emerald-300 tabular-nums" />
+                    <Td value={r._u1} className="text-emerald-300 font-semibold tabular-nums" />
                     <Td value={r.u2Inv1Kwh} className="text-cyan-300 tabular-nums" /><Td value={r.u2Inv2Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.u2Inv3Kwh} className="text-cyan-300 tabular-nums" />
+                    <Td value={r._u2} className="text-cyan-300 font-semibold tabular-nums" />
                     <Td value={r.dailyTotalKwh} className="text-white font-bold tabular-nums" />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
               </table>
             </div>
-            <Pagination page={page} total={filtered.length} onChange={setPage} />
+            <Pagination page={page} total={filteredCalc.length} onChange={setPage} />
           </div>
         </>
       ) : (

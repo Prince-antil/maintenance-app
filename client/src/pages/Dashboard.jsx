@@ -15,7 +15,7 @@ import {
   paretoTop10, breakdownByDepartment, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
-  lastNMonths, monthKey,
+  lastNMonths, monthKey, monthlyPMCompletion,
   computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
   computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
@@ -29,6 +29,10 @@ import {
   Filter,
 } from 'lucide-react';
 import { ProgressGauge } from '../components/charts.jsx';
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip as RechartsTooltip, Legend,
+} from 'recharts';
 
 const MODULE_GROUPS = [
   { label: 'Module A · Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
@@ -145,6 +149,7 @@ export default function Dashboard() {
     [dailyUtilityLog, periodFilter]
   );
   const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(dailyUtilityLog, 6, periodFilter), [dailyUtilityLog, periodFilter]);
+  const pmTrend = useMemo(() => monthlyPMCompletion(pms, 6), [pms]);
 
   const currentMonthKey = useMemo(() => {
     const now = new Date();
@@ -153,7 +158,7 @@ export default function Dashboard() {
 
   const renewableSummary = useMemo(
     () => {
-      const mk = periodFilter === 'all' ? currentMonthKey : periodFilter;
+      const mk = periodFilter === 'all' ? null : periodFilter;
       return computeRenewableSummary(
         dailyUtilityLog,
         dailySolarGeneration,
@@ -174,7 +179,7 @@ export default function Dashboard() {
     const u2ImportKwh = Number(last._delta?.u2ImportKwhReading) || 0;
     const u1PfRaw = last.u1Pf > 0 ? last.u1Pf : 0;
     const u2PfRaw = last.u2Pf > 0 ? last.u2Pf : 0;
-    const avgRaw = computeWeightedPf(periodDeltas.slice(0, 1));
+    const avgRaw = computeWeightedPf(periodDeltas);
     return {
       date: last.date,
       u1Pf: u1PfRaw > 0 ? formatPowerFactor(u1PfRaw) : null,
@@ -491,10 +496,15 @@ export default function Dashboard() {
         <ChartCard title="Machine Running Status" subtitle="Running vs maintenance vs breakdown" empty={!store.machines.length}>
           <PieDonutChart data={charts.machineStatus} donut centerLabel={kpi.machineCount} centerSub="Machines" />
         </ChartCard>
-        <ChartCard title="Monthly PM Completion Rate" subtitle="Current month completion gauge from aggregate PM logs" empty={noPMs} height={280} raw>
-          <div className="flex h-full items-center justify-center">
-            <ProgressGauge value={kpi.pmCompliance} label="PM Compliance" />
-          </div>
+        <ChartCard title="Monthly PM Completion" subtitle="Planned vs Done vs Pending" empty={noPMs}>
+          <GroupedBarChart
+            data={pmTrend}
+            bars={[
+              { dataKey: 'planned', name: 'Planned', color: '#06B6D4' },
+              { dataKey: 'completed', name: 'Done', color: '#10B981' },
+              { dataKey: 'pending', name: 'Pending', color: '#F59E0B' },
+            ]}
+          />
         </ChartCard>
         <ChartCard title="Section-wise Breakdowns" subtitle="Failure count per plant section" empty={noBDs}>
           <HorizontalBarChart data={charts.equipment} color="#06B6D4" />
@@ -505,20 +515,22 @@ export default function Dashboard() {
         <ChartCard title="Breakdown by Section" subtitle="Failure distribution across plant" empty={noBDs}>
           <PieDonutChart data={charts.dept} />
         </ChartCard>
-        <ChartCard title="Power Factor Trend" subtitle="Unit 1 & Unit 2 daily power factor" empty={noDailyUtility} height={260} raw>
+        <ChartCard title="Power Factor Trend" subtitle="Unit 1, Unit 2 & Average daily power factor" empty={noDailyUtility} height={260} raw>
           {noDailyUtility ? (
             <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
           ) : (
-            <div className="space-y-3 h-full">
-              <div className="flex-1 min-h-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 px-1">Unit 1 PF</p>
-                <TrendChart data={charts.pfTrend} dataKey="u1Pf" color="#14B8A6" unit="" yDomain={[0, 1]} />
-              </div>
-              <div className="flex-1 min-h-0">
-                <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1 px-1">Unit 2 PF</p>
-                <TrendChart data={charts.pfTrend} dataKey="u2Pf" color="#8B5CF6" unit="" yDomain={[0, 1]} />
-              </div>
-            </div>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={charts.pfTrend} margin={{ top: 8, right: 12, left: 4, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(148,163,184,0.08)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 1]} width={48} />
+                <RechartsTooltip contentStyle={{ backgroundColor: '#0F172A', border: '1px solid rgba(148,163,184,0.2)', borderRadius: '10px', fontSize: '12px', color: '#E2E8F0', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }} cursor={{ fill: 'rgba(148,163,184,0.06)' }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#94A3B8' }} iconType="circle" iconSize={8} />
+                <Line type="monotone" dataKey="u1Pf" name="U1 PF" stroke="#14B8A6" strokeWidth={2.5} dot={{ r: 3, fill: '#14B8A6', strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="u2Pf" name="U2 PF" stroke="#8B5CF6" strokeWidth={2.5} dot={{ r: 3, fill: '#8B5CF6', strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
+                <Line type="monotone" dataKey="avgPf" name="Avg PF" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: '#F59E0B', strokeWidth: 0 }} activeDot={{ r: 5 }} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
           )}
         </ChartCard>
         <ChartCard title="DG Fuel Efficiency" subtitle="kWh per litre — DG 500 vs DG 380" empty={noDailyUtility}>
