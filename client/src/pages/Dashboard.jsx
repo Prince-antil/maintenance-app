@@ -15,7 +15,7 @@ import {
   paretoTop10, breakdownByDepartment, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
-  lastNMonths, monthKey, monthlyPMCompletion,
+  lastNMonths, monthKey, monthlyPMCompletion, monthlyPMCompletionFromRecords,
   computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
   computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
@@ -149,7 +149,7 @@ export default function Dashboard() {
     [dailyUtilityLog, periodFilter]
   );
   const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(dailyUtilityLog, 6, periodFilter), [dailyUtilityLog, periodFilter]);
-  const pmTrend = useMemo(() => monthlyPMCompletion(pms, 6), [pms]);
+  const pmTrend = useMemo(() => monthlyPMCompletionFromRecords(machinePmRecords, 6), [machinePmRecords]);
 
   const currentMonthKey = useMemo(() => {
     const now = new Date();
@@ -496,7 +496,7 @@ export default function Dashboard() {
         <ChartCard title="Machine Running Status" subtitle="Running vs maintenance vs breakdown" empty={!store.machines.length}>
           <PieDonutChart data={charts.machineStatus} donut centerLabel={kpi.machineCount} centerSub="Machines" />
         </ChartCard>
-        <ChartCard title="Monthly PM Completion" subtitle="Planned vs Done vs Pending" empty={noPMs}>
+        <ChartCard title="Monthly PM Completion" subtitle="Planned vs Done vs Pending (from machine records)" empty={noPMs}>
           <GroupedBarChart
             data={pmTrend}
             bars={[
@@ -546,12 +546,12 @@ export default function Dashboard() {
             />
           )}
         </ChartCard>
-        <ChartCard title="Solar Performance" subtitle="Inverter total vs meter-side generation" empty={noSolar && noDailyUtility} height={260} raw>
+        <ChartCard title="Solar Performance" subtitle="Inverter total vs meter-side import & export" empty={noSolar && noDailyUtility} height={260} raw>
           {(noSolar && noDailyUtility) ? (
             <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-5 px-6">
-              <div className="flex items-end gap-8 w-full max-w-xs">
+              <div className="flex items-end gap-6 w-full max-w-md">
                 <div className="flex-1 text-center">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Inverter Total</p>
                   <div className="rounded-t-md bg-emerald-500/20 border border-emerald-500/30 pt-3 pb-2 px-2">
@@ -560,10 +560,17 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Side</p>
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Import</p>
                   <div className="rounded-t-md bg-cyan-500/20 border border-cyan-500/30 pt-3 pb-2 px-2">
-                    <p className="text-cyan-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolar.toLocaleString()}</p>
+                    <p className="text-cyan-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarImport.toLocaleString()}</p>
                     <p className="text-cyan-400/60 text-[10px]">kWh</p>
+                  </div>
+                </div>
+                <div className="flex-1 text-center">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Export</p>
+                  <div className="rounded-t-md bg-violet-500/20 border border-violet-500/30 pt-3 pb-2 px-2">
+                    <p className="text-violet-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarExport.toLocaleString()}</p>
+                    <p className="text-violet-400/60 text-[10px]">kWh</p>
                   </div>
                 </div>
               </div>

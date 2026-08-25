@@ -318,6 +318,23 @@ export function monthlyPMCompletion(pms, n = 6) {
   });
 }
 
+export function monthlyPMCompletionFromRecords(machinePmRecords, n = 6) {
+  return lastNMonths(n).map((month) => {
+    const rows = (machinePmRecords || []).filter((r) => (r.pmDate || '').slice(0, 7) === month.key);
+    const planned = rows.length;
+    const completed = rows.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
+    const pending = planned - completed;
+    const compliance = planned > 0 ? round1((completed / planned) * 100) : 0;
+    return {
+      label: month.label,
+      planned,
+      completed,
+      pending,
+      compliance,
+    };
+  });
+}
+
 export function equipmentWiseBreakdown(breakdowns) {
   const counts = {};
   breakdowns.forEach((row) => {
@@ -1210,9 +1227,12 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
     solarLogs.reduce((sum, l) => sum + (Number(l.dailyTotalKwh) || 0), 0)
   );
 
-  // Meter-side solar from daily utility (using deltas)
-  const meterSideSolar = round1(
+  // Meter-side solar from daily utility (using deltas) - import and export
+  const meterSideSolarImport = round1(
     deltas.reduce((sum, d) => sum + (Number(d._delta?.u1SolarKwhReading) || 0) + (Number(d._delta?.u2SolarKwhReading) || 0), 0)
+  );
+  const meterSideSolarExport = round1(
+    deltas.reduce((sum, d) => sum + (Number(d._delta?.u1ExportKwhReading) || 0) + (Number(d._delta?.u2ExportKwhReading) || 0), 0)
   );
 
   // Total plant consumption from utility (using deltas)
@@ -1241,8 +1261,8 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
   const co2AvoidedKg = round1(solarFromInverters * gridCo2EmissionFactor);
 
   // Cross-check
-  const solarCrossCheck = meterSideSolar > 0
-    ? round1(Math.abs(solarFromInverters - meterSideSolar) / meterSideSolar * 100)
+  const solarCrossCheck = meterSideSolarImport > 0
+    ? round1(Math.abs(solarFromInverters - meterSideSolarImport) / meterSideSolarImport * 100)
     : 0;
   const warnings = [];
   if (solarCrossCheck > 10) {
@@ -1251,7 +1271,8 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
 
   return {
     solarFromInverters,
-    meterSideSolar,
+    meterSideSolarImport,
+    meterSideSolarExport,
     totalPlantConsumption,
     renewableSharePct,
     performanceRatio,
