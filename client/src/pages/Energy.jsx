@@ -254,23 +254,6 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     return { dg380Total, dg500Total, totalDg, totalHsd };
   }, [filteredDerived]);
 
-  const u1EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Import, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
-  const u2EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Import, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
-  const plantTotalData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.gridTotal, Solar: d.solar, Export: r1(d.u1Export + d.u2Export) })), [filteredDerived]);
-  const dgGenData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380': d.dg380, 'DG 500': d.dg500 })), [filteredDerived]);
-  const dgHoursData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380 Hrs': d.dg380Hrs, 'DG 500 Hrs': d.dg500Hrs })), [filteredDerived]);
-  const dgHsdData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 HSD (L)': d.dg380Fuel, 'DG500 HSD (L)': d.dg500Fuel })), [filteredDerived]);
-  const dgDefData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG380 DEF%': d.dg380DefPct, 'DG500 DEF%': d.dg500DefPct })), [filteredDerived]);
-  const pieData = useMemo(() => {
-    if (filteredDerived.length === 0) return [];
-    const latest = filteredDerived[0];
-    const data = [];
-    if (latest.gridTotal > 0) data.push({ name: 'Grid', value: latest.gridTotal, color: C.grid });
-    if (latest.totalDg > 0) data.push({ name: 'DG', value: latest.totalDg, color: C.dg500 });
-    if (latest.solar > 0) data.push({ name: 'Solar', value: latest.solar, color: C.solar });
-    return data;
-  }, [filteredDerived]);
-
   const fields = useMemo(() => [
     { key: 'date', label: 'Date', type: 'date', required: true },
     nf('u1ImportKwhReading', 'U1 Import kWh'), nf('u1ImportKvahReading', 'U1 Import kVAh'),
@@ -387,98 +370,87 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
         {isAdmin && dailyUtilityLog.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
       </div>
       {filteredDerived.length > 0 ? (        <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Unit 1 Daily Energy">
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={u1EnergyData}>
+          <div className="space-y-4">
+            <ChartCard title="Unit 1 & Unit 2 Daily Energy">
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="u1Import" name="U1 Import" stroke={C.grid} fill={C.grid} fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u1Solar" name="U1 Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u1Export" name="U1 Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u2Import" name="U2 Import" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="u2Solar" name="U2 Solar" stroke="#34D399" fill="#34D399" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="u2Export" name="U2 Export" stroke="#A78BFA" fill="#A78BFA" fillOpacity={0.15} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Unit 2 Daily Energy">
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={u2EnergyData}>
+            <ChartCard title="Total Plant Energy (Grid Net + Solar)">
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="gridTotal" name="Grid Net" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="solar" name="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="totalDg" name="DG" stroke={C.dg500} fill={C.dg500} fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="Total Plant Energy">
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={plantTotalData}>
+            <ChartCard title="DG Generation (kWh)">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="Import" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartCard>
-            <ChartCard title="DG Generation">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgGenData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                  <Tooltip {...TTIP} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="DG 380" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="DG 500" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380" name="DG 380" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500" name="DG 500" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="DG Running Hours">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgHoursData}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="DG 380 Hrs" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="DG 500 Hrs" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Hrs" name="DG 380 Hrs" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Hrs" name="DG 500 Hrs" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
-            <ChartCard title="DG HSD Consumption">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgHsdData}>
+            <ChartCard title="DG HSD Consumption (Litres)">
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} label={{ value: 'Litres', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="DG380 HSD (L)" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="DG500 HSD (L)" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Fuel" name="DG 380 HSD" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Fuel" name="DG 500 HSD" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
             <ChartCard title="DG DEF Percentage">
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={dgDefData}>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={filteredDerived.slice().reverse()}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
-                  <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} label={{ value: '%', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10 }} />
+                  <XAxis dataKey={(d) => d.date?.slice(5) || d.date} tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="DG380 DEF%" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="DG500 DEF%" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380DefPct" name="DG 380 DEF%" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500DefPct" name="DG 500 DEF%" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -650,9 +622,9 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
       </div>
       {filteredCalc.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Monthly Consumption (kWh)"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Feeder-wise Consumption (Latest Month)"><ResponsiveContainer width="100%" height={260}><BarChart data={feederChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={100} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.solar} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+          <div className="space-y-4">
+            <ChartCard title="Monthly Consumption (kWh)"><ResponsiveContainer width="100%" height={300}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Feeder-wise Consumption (Latest Month)"><ResponsiveContainer width="100%" height={300}><BarChart data={feederChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={100} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.solar} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -791,13 +763,13 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
       </div>
       {filtered.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Monthly Consumption (kWh)"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Feeder-wise (Latest Month)"><ResponsiveContainer width="100%" height={260}><BarChart data={feederChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={90} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.grid} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Top 5 Feeders"><ResponsiveContainer width="100%" height={260}><BarChart data={top5Chart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={90} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.solar} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+          <div className="space-y-4">
+            <ChartCard title="Monthly Consumption (kWh)"><ResponsiveContainer width="100%" height={300}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="kWh" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Feeder-wise (Latest Month)"><ResponsiveContainer width="100%" height={300}><BarChart data={feederChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={90} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.grid} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Top 5 Feeders"><ResponsiveContainer width="100%" height={300}><BarChart data={top5Chart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={90} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.solar} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
             <ChartCard title="Feeder Trend">
               <div className="flex gap-2 mb-3 flex-wrap">{FEEDER_LABELS_INSECT.map((l, i) => <button key={i} onClick={() => setSelIdx(i)} className={`text-[10px] px-2 py-0.5 rounded border ${i === selIdx ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'text-slate-400 border-transparent hover:text-white'}`}>{l}</button>)}</div>
-              <ResponsiveContainer width="100%" height={220}><LineChart data={feederTrend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Line type="monotone" dataKey={FEEDER_LABELS_INSECT[selIdx]} stroke={C.grid} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer>
+              <ResponsiveContainer width="100%" height={300}><LineChart data={feederTrend}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Line type="monotone" dataKey={FEEDER_LABELS_INSECT[selIdx]} stroke={C.grid} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer>
             </ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
@@ -898,11 +870,11 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
       </div>
       {filtered.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Monthly Consumption (KL)"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="KL" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Meter-wise (Latest Month)"><ResponsiveContainer width="100%" height={260}><BarChart data={meterChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={80} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.grid} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Water Trend"><ResponsiveContainer width="100%" height={260}><LineChart data={trendChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="STP" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="RO Inlet" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="RO Rejected" stroke={C.dg500} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="PIAU" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Latest Month Comparison"><ResponsiveContainer width="100%" height={260}><BarChart data={latestCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="STP" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="RO" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="RORej" fill={C.dg500} radius={[4, 4, 0, 0]} /><Bar dataKey="PIAU" fill="#8b5cf6" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+          <div className="space-y-4">
+            <ChartCard title="Monthly Consumption (KL)"><ResponsiveContainer width="100%" height={300}><BarChart data={monthlyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="KL" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Meter-wise (Latest Month)"><ResponsiveContainer width="100%" height={300}><BarChart data={meterChart} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis type="category" dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} width={80} /><Tooltip {...TTIP} /><Bar dataKey="value" fill={C.grid} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Water Trend"><ResponsiveContainer width="100%" height={300}><LineChart data={trendChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="STP" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="RO Inlet" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="RO Rejected" stroke={C.dg500} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="PIAU" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Latest Month Comparison"><ResponsiveContainer width="100%" height={300}><BarChart data={latestCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="STP" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="RO" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="RORej" fill={C.dg500} radius={[4, 4, 0, 0]} /><Bar dataKey="PIAU" fill="#8b5cf6" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -1050,11 +1022,11 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
       </div>
       {filtered.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Run vs Load Hours (Latest)"><ResponsiveContainer width="100%" height={260}><BarChart data={runLoadChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="Run" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="Load" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Compressor Load %"><ResponsiveContainer width="100%" height={260}><BarChart data={loadPctChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="Load %" fill={C.dg500} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Unload Hours"><ResponsiveContainer width="100%" height={260}><BarChart data={unloadChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="Unload" fill={C.dg380} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Monthly Performance Trend"><ResponsiveContainer width="100%" height={260}><LineChart data={trendChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="Comp 1" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Comp 2" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Comp 3" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+          <div className="space-y-4">
+            <ChartCard title="Run vs Load Hours (Latest)"><ResponsiveContainer width="100%" height={300}><BarChart data={runLoadChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="Run" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="Load" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Compressor Load %"><ResponsiveContainer width="100%" height={300}><BarChart data={loadPctChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="Load %" fill={C.dg500} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Unload Hours"><ResponsiveContainer width="100%" height={300}><BarChart data={unloadChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="Unload" fill={C.dg380} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Monthly Performance Trend"><ResponsiveContainer width="100%" height={300}><LineChart data={trendChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="Comp 1" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Comp 2" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Comp 3" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -1202,12 +1174,12 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
       </div>
       {filteredCalc.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Daily Solar Generation"><ResponsiveContainer width="100%" height={260}><AreaChart data={dailyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Area type="monotone" dataKey="kWh" stroke={C.solar} fill={C.solar} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="Monthly Solar Generation"><ResponsiveContainer width="100%" height={260}><BarChart data={monthlyCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="U1 Total" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="U2 Total" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="Grand Total" fill={C.dg500} radius={[4, 4, 0, 0]} />                </BarChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="U1 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u1InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} />                <Line type="monotone" dataKey="U1 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv4" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="U2 Inverter Generation"><ResponsiveContainer width="100%" height={260}><LineChart data={u2InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} />                <Line type="monotone" dataKey="U2 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
-            <ChartCard title="U1 vs U2 vs Grand Total"><ResponsiveContainer width="100%" height={260}><LineChart data={u1u2GrandChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="U1 Total" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Total" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Grand Total" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+          <div className="space-y-4">
+            <ChartCard title="Daily Solar Generation"><ResponsiveContainer width="100%" height={300}><AreaChart data={dailyChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Area type="monotone" dataKey="kWh" stroke={C.solar} fill={C.solar} fillOpacity={0.3} /></AreaChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Monthly Solar Generation"><ResponsiveContainer width="100%" height={300}><BarChart data={monthlyCompChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="U1 Total" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="U2 Total" fill={C.grid} radius={[4, 4, 0, 0]} /><Bar dataKey="Grand Total" fill={C.dg500} radius={[4, 4, 0, 0]} />                </BarChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U1 Inverter Generation"><ResponsiveContainer width="100%" height={300}><LineChart data={u1InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} />                <Line type="monotone" dataKey="U1 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U1 Inv4" stroke="#8b5cf6" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U2 Inverter Generation"><ResponsiveContainer width="100%" height={300}><LineChart data={u2InvChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} />                <Line type="monotone" dataKey="U2 Inv1" stroke="#10B981" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv2" stroke="#06B6D4" dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Inv3" stroke="#F59E0B" dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="U1 vs U2 vs Grand Total"><ResponsiveContainer width="100%" height={300}><LineChart data={u1u2GrandChart}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} interval="preserveStartEnd" /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Line type="monotone" dataKey="U1 Total" stroke={C.solar} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="U2 Total" stroke={C.grid} dot={false} strokeWidth={2} /><Line type="monotone" dataKey="Grand Total" stroke={C.dg500} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
           </div>
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
@@ -1311,12 +1283,12 @@ function RenewableTab({ store, currentMK, dateFrom, dateTo }) {
         <KpiCard label="Performance Ratio" value={`${data.performanceRatio}%`} color="text-white" />
       </div>
       {monthlyData.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Renewable Share Trend"><ResponsiveContainer width="100%" height={260}><LineChart data={trendData}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Line type="monotone" dataKey="Share %" stroke={C.solar} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
-          <ChartCard title="Solar vs Plant Consumption"><ResponsiveContainer width="100%" height={260}><BarChart data={solarVsCons}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="Solar" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="Consumption" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
-          <ChartCard title="CO2 Avoided Trend"><ResponsiveContainer width="100%" height={260}><BarChart data={co2Data}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="CO2" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+        <div className="space-y-4">
+          <ChartCard title="Renewable Share Trend"><ResponsiveContainer width="100%" height={300}><LineChart data={trendData}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Line type="monotone" dataKey="Share %" stroke={C.solar} dot={false} strokeWidth={2} /></LineChart></ResponsiveContainer></ChartCard>
+          <ChartCard title="Solar vs Plant Consumption"><ResponsiveContainer width="100%" height={300}><BarChart data={solarVsCons}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="Solar" fill={C.solar} radius={[4, 4, 0, 0]} /><Bar dataKey="Consumption" fill={C.grid} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
+          <ChartCard title="CO2 Avoided Trend"><ResponsiveContainer width="100%" height={300}><BarChart data={co2Data}><CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" /><XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} /><YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} /><Tooltip {...TTIP} /><Bar dataKey="CO2" fill={C.solar} radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></ChartCard>
           {pieData.length > 0 && (
-            <ChartCard title="Grid vs DG vs Solar"><ResponsiveContainer width="100%" height={260}><PieChart><Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>{pieData.map((e, i) => <Cell key={i} fill={e.color} />)}</Pie><Tooltip {...TTIP} /></PieChart></ResponsiveContainer></ChartCard>
+            <ChartCard title="Grid vs DG vs Solar"><ResponsiveContainer width="100%" height={300}><PieChart><Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>{pieData.map((e, i) => <Cell key={i} fill={e.color} />)}</Pie><Tooltip {...TTIP} /></PieChart></ResponsiveContainer></ChartCard>
           )}
         </div>
       )}
