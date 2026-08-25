@@ -201,36 +201,30 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const [purgeLoading, setPurgeLoading] = useState(false);
 
   const derived = useMemo(() => {
-    const deltas = computeDailyDeltas(sorted);
-    return deltas.map((d) => {
-      const dd = d._delta;
-      const u1Import = dd.u1ImportKwhReading;
-      const u2Import = dd.u2ImportKwhReading;
-      const u1Export = dd.u1ExportKwhReading;
-      const u2Export = dd.u2ExportKwhReading;
-      const u1Solar = dd.u1SolarKwhReading;
-      const u2Solar = dd.u2SolarKwhReading;
-      const u1Net = (u1Import != null || u1Export != null) ? (u1Import ?? 0) - (u1Export ?? 0) : null;
-      const u2Net = (u2Import != null || u2Export != null) ? (u2Import ?? 0) - (u2Export ?? 0) : null;
-      const gridTotal = (u1Net != null || u2Net != null) ? r1((u1Net ?? 0) + (u2Net ?? 0)) : null;
-      const solar = (u1Solar != null || u2Solar != null) ? r1((u1Solar ?? 0) + (u2Solar ?? 0)) : null;
-      const dg380 = dd.dg380KwhReading;
-      const dg380Hrs = dd.dg380HourmeterReading;
-      const dg380Fuel = dd.dg380HsdAddedLtr;
-      const dg380DefPct = dd.dg380DefAddedPct;
-      const dg500 = dd.dg500KwhReading;
-      const dg500Hrs = dd.dg500HourmeterReading;
-      const dg500Fuel = dd.dg500HsdAddedLtr;
-      const dg500DefPct = dd.dg500DefAddedPct;
-      const totalDg = (dg380 != null || dg500 != null) ? r1((dg380 ?? 0) + (dg500 ?? 0)) : null;
-      const u1Pf = d.u1Pf > 0 ? d.u1Pf : null;
-      const u2Pf = d.u2Pf > 0 ? d.u2Pf : null;
+    return sorted.map((row) => {
+      const u1Import = toN(row.u1ImportKwhReading);
+      const u1Export = toN(row.u1ExportKwhReading);
+      const u2Import = toN(row.u2ImportKwhReading);
+      const u2Export = toN(row.u2ExportKwhReading);
+      const u1Solar = toN(row.u1SolarKwhReading);
+      const u2Solar = toN(row.u2SolarKwhReading);
+      const gridTotal = r1((u1Import - u1Export) + (u2Import - u2Export));
+      const solar = r1(u1Solar + u2Solar);
+      const dg380 = toN(row.dg380KwhReading);
+      const dg380Hrs = toN(row.dg380HourmeterReading);
+      const dg380Fuel = toN(row.dg380HsdAddedLtr);
+      const dg380DefPct = toN(row.dg380DefAddedPct);
+      const dg500 = toN(row.dg500KwhReading);
+      const dg500Hrs = toN(row.dg500HourmeterReading);
+      const dg500Fuel = toN(row.dg500HsdAddedLtr);
+      const dg500DefPct = toN(row.dg500DefAddedPct);
+      const totalDg = r1(dg380 + dg500);
+      const u1Pf = toN(row.u1Pf) > 0 ? toN(row.u1Pf) : null;
+      const u2Pf = toN(row.u2Pf) > 0 ? toN(row.u2Pf) : null;
       const avgPf = (u1Pf != null && u2Pf != null) ? r1((u1Pf + u2Pf) / 2) : (u1Pf ?? u2Pf ?? null);
-      const total = gridTotal != null || totalDg != null || solar != null
-        ? r1((gridTotal ?? 0) + (totalDg ?? 0) + (solar ?? 0))
-        : null;
+      const total = r1(gridTotal + totalDg + solar);
       return {
-        date: d.date, u1Import, u2Import, u1Export, u2Export, u1Solar, u2Solar, gridTotal, solar,
+        date: row.date, u1Import, u2Import, u1Export, u2Export, u1Solar, u2Solar, gridTotal, solar,
         dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
         totalDg, u1Pf, u2Pf, avgPf, total,
         gridPct: total > 0 ? r1((gridTotal / total) * 100) : 0,
@@ -252,10 +246,11 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
 
   const dgSummary = useMemo(() => {
     if (filteredDerived.length === 0) return { dg380Total: 0, dg500Total: 0, totalDg: 0, totalHsd: 0 };
-    const dg380Total = r1(filteredDerived.reduce((s, d) => s + d.dg380, 0));
-    const dg500Total = r1(filteredDerived.reduce((s, d) => s + d.dg500, 0));
+    const latest = filteredDerived[0];
+    const dg380Total = r1(latest.dg380);
+    const dg500Total = r1(latest.dg500);
     const totalDg = r1(dg380Total + dg500Total);
-    const totalHsd = r1(filteredDerived.reduce((s, d) => s + d.dg380Fuel + d.dg500Fuel, 0));
+    const totalHsd = r1(filteredDerived.reduce((s, d) => s + (d.dg380Fuel || 0) + (d.dg500Fuel || 0), 0));
     return { dg380Total, dg500Total, totalDg, totalHsd };
   }, [filteredDerived]);
 
