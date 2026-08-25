@@ -198,7 +198,6 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const { dailyUtilityLog } = store;
   const sorted = useMemo(() => [...dailyUtilityLog].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailyUtilityLog]);
   const filtered = useMemo(() => registerMonth ? sorted.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : sorted, [sorted, registerMonth]);
-  const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
@@ -206,13 +205,15 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     const deltas = computeDailyDeltas(sorted);
     return deltas.map((d) => {
       const dd = d._delta;
-      const u1Grid = dd.u1ImportKwhReading;
-      const u2Grid = dd.u2ImportKwhReading;
-      const gridTotal = (u1Grid != null || u2Grid != null) ? r1((u1Grid ?? 0) + (u2Grid ?? 0)) : null;
+      const u1Import = dd.u1ImportKwhReading;
+      const u2Import = dd.u2ImportKwhReading;
       const u1Export = dd.u1ExportKwhReading;
       const u2Export = dd.u2ExportKwhReading;
       const u1Solar = dd.u1SolarKwhReading;
       const u2Solar = dd.u2SolarKwhReading;
+      const u1Net = (u1Import != null || u1Export != null) ? (u1Import ?? 0) - (u1Export ?? 0) : null;
+      const u2Net = (u2Import != null || u2Export != null) ? (u2Import ?? 0) - (u2Export ?? 0) : null;
+      const gridTotal = (u1Net != null || u2Net != null) ? r1((u1Net ?? 0) + (u2Net ?? 0)) : null;
       const solar = (u1Solar != null || u2Solar != null) ? r1((u1Solar ?? 0) + (u2Solar ?? 0)) : null;
       const dg380 = dd.dg380KwhReading;
       const dg380Hrs = dd.dg380HourmeterReading;
@@ -225,13 +226,14 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       const totalDg = (dg380 != null || dg500 != null) ? r1((dg380 ?? 0) + (dg500 ?? 0)) : null;
       const u1Pf = d.u1Pf > 0 ? d.u1Pf : null;
       const u2Pf = d.u2Pf > 0 ? d.u2Pf : null;
+      const avgPf = (u1Pf != null && u2Pf != null) ? r1((u1Pf + u2Pf) / 2) : (u1Pf ?? u2Pf ?? null);
       const total = gridTotal != null || totalDg != null || solar != null
         ? r1((gridTotal ?? 0) + (totalDg ?? 0) + (solar ?? 0))
         : null;
       return {
-        date: d.date, u1Grid, u2Grid, gridTotal, u1Export, u2Export, u1Solar, u2Solar, solar,
+        date: d.date, u1Import, u2Import, u1Export, u2Export, u1Solar, u2Solar, gridTotal, solar,
         dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
-        totalDg, u1Pf, u2Pf, total,
+        totalDg, u1Pf, u2Pf, avgPf, total,
         gridPct: total > 0 ? r1((gridTotal / total) * 100) : 0,
         dgPct: total > 0 ? r1((totalDg / total) * 100) : 0,
         solarPct: total > 0 ? r1((solar / total) * 100) : 0,
@@ -240,6 +242,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   }, [sorted]);
 
   const filteredDerived = useMemo(() => registerMonth ? derived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : derived, [derived, registerMonth]);
+  const pageData = useMemo(() => filteredDerived.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredDerived, page]);
 
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
@@ -311,11 +314,17 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   };
 
   const cols = [
-    { key: 'date', label: 'Date' }, { key: 'grid', label: 'Grid kWh', className: 'text-cyan-400' },
-    { key: 'dg', label: 'DG kWh', className: 'text-amber-400' }, { key: 'solar', label: 'Solar kWh', className: 'text-emerald-400' },
-    { key: 'total', label: 'Total', className: 'text-white font-semibold' },
+    { key: 'date', label: 'Date' },
+    { key: 'u1Import', label: 'U1 Import kWh' }, { key: 'u1Export', label: 'U1 Export kWh' },
+    { key: 'u2Import', label: 'U2 Import kWh' }, { key: 'u2Export', label: 'U2 Export kWh' },
+    { key: 'gridTotal', label: 'Grid Net kWh', className: 'text-cyan-400' },
+    { key: 'solar', label: 'Solar kWh', className: 'text-emerald-400' },
+    { key: 'totalDg', label: 'DG kWh', className: 'text-amber-400' },
+    { key: 'total', label: 'Total kWh', className: 'text-white font-semibold' },
     { key: 'u1Pf', label: 'U1 PF' }, { key: 'u2Pf', label: 'U2 PF' },
-    { key: 'dg380Fuel', label: 'DG380 Fuel (L)' }, { key: 'dg500Fuel', label: 'DG500 Fuel (L)' },
+    { key: 'avgPf', label: 'Avg PF', className: 'text-teal-400' },
+    { key: 'dg380Fuel', label: 'DG 380 Fuel (L)' }, { key: 'dg500Fuel', label: 'DG 500 Fuel (L)' },
+    { key: 'dg380DefPct', label: 'DG 380 DEF%' }, { key: 'dg500DefPct', label: 'DG 500 DEF%' },
   ];
 
   const activeMonth = registerMonth || (monthTabs.length > 0 ? monthTabs[0].key : '');
@@ -383,8 +392,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
         <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailyUtility' })} onDownload={() => downloadTemplate('energyDailyUtility')} label="Daily Reading" />
         {isAdmin && dailyUtilityLog.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
       </div>
-      {filteredDerived.length > 0 ? (
-        <>
+      {filteredDerived.length > 0 ? (        <>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <ChartCard title="Unit 1 Daily Energy">
               <ResponsiveContainer width="100%" height={260}>
@@ -489,21 +497,28 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   {pageData.map((r) => (
                     <tr key={r.date}>
                       <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
-                      <Td value={r.gridTotal} className="text-cyan-300 tabular-nums" />
-                      <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
+                      <Td value={r.u1Import} className="text-slate-300 tabular-nums" />
+                      <Td value={r.u1Export} className="text-slate-300 tabular-nums" />
+                      <Td value={r.u2Import} className="text-slate-300 tabular-nums" />
+                      <Td value={r.u2Export} className="text-slate-300 tabular-nums" />
+                      <Td value={r.gridTotal} className="text-cyan-300 font-bold tabular-nums" />
                       <Td value={r.solar} className="text-emerald-300 tabular-nums" />
+                      <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
                       <Td value={r.total} className="text-white font-bold tabular-nums" />
                       <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPowerFactor(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
                       <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPowerFactor(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.avgPf != null && r.avgPf > 0 ? formatPowerFactor(r.avgPf) : '—'} className="text-teal-300 tabular-nums" />
                       <Td value={r.dg380Fuel} className="text-slate-300 tabular-nums" />
                       <Td value={r.dg500Fuel} className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg380DefPct} className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg500DefPct} className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <Pagination page={page} total={filtered.length} onChange={setPage} />
+            <Pagination page={page} total={filteredDerived.length} onChange={setPage} />
           </div>
         </>
       ) : (
