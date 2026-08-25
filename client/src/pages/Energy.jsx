@@ -197,7 +197,6 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { dailyUtilityLog } = store;
   const sorted = useMemo(() => [...dailyUtilityLog].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailyUtilityLog]);
-  const filtered = useMemo(() => registerMonth ? sorted.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : sorted, [sorted, registerMonth]);
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
@@ -247,7 +246,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     const latest = filteredDerived[0];
-    const pf = computeWeightedPf([{ _delta: { u1ImportKwhReading: latest.u1Grid, u2ImportKwhReading: latest.u2Grid, u1Pf: latest.u1Pf, u2Pf: latest.u2Pf } }]);
+    const pf = computeWeightedPf([{ _delta: { u1ImportKwhReading: latest.u1Import, u2ImportKwhReading: latest.u2Import, u1Pf: latest.u1Pf, u2Pf: latest.u2Pf } }]);
     return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: pf > 0 ? formatPowerFactor(pf) : '—' };
   }, [filteredDerived]);
 
@@ -260,8 +259,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     return { dg380Total, dg500Total, totalDg, totalHsd };
   }, [filteredDerived]);
 
-  const u1EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Grid, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
-  const u2EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Grid, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
+  const u1EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u1Import, Solar: d.u1Solar, Export: d.u1Export })), [filteredDerived]);
+  const u2EnergyData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.u2Import, Solar: d.u2Solar, Export: d.u2Export })), [filteredDerived]);
   const plantTotalData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, Import: d.gridTotal, Solar: d.solar, Export: r1(d.u1Export + d.u2Export) })), [filteredDerived]);
   const dgGenData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380': d.dg380, 'DG 500': d.dg500 })), [filteredDerived]);
   const dgHoursData = useMemo(() => filteredDerived.slice().reverse().map((d) => ({ name: d.date?.slice(5) || d.date, 'DG 380 Hrs': d.dg380Hrs, 'DG 500 Hrs': d.dg500Hrs })), [filteredDerived]);

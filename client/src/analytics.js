@@ -965,8 +965,9 @@ export function monthlyPMComplianceTrendFromRecords(machinePmRecords, n = 12) {
 
 const READING_KEYS = [
   'u1ImportKwhReading', 'u1ImportKvahReading', 'u1ExportKwhReading', 'u1ExportKvahReading',
-  'u1SolarKwhReading', 'u2ImportKwhReading', 'u2ImportKvahReading', 'u2ExportKwhReading',
-  'u2ExportKvahReading', 'u2SolarKwhReading',
+  'u1SolarKwhReading', 'u1SolarKvahReading',
+  'u2ImportKwhReading', 'u2ImportKvahReading', 'u2ExportKwhReading', 'u2ExportKvahReading',
+  'u2SolarKwhReading', 'u2SolarKvahReading',
   'dg380KwhReading', 'dg380HourmeterReading', 'dg500KwhReading', 'dg500HourmeterReading',
 ];
 
