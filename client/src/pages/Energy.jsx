@@ -192,12 +192,12 @@ function PurgeModal({ domain, totalRecords, periodLabel, onPurgePeriod, onPurgeA
   );
 }
 
-function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, todayStr, currentMK, pushToast }) {
+function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo, registerMonth, setRegisterMonth, monthTabs, onAdd, onEdit, onUpload, formOpen, editRow, formValues, setForm, closeForm, page, setPage, todayStr, currentMK, pushToast }) {
   const formTitle = editRow ? 'Edit Daily Utility' : 'Add Daily Utility';
   const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
   const { dailyUtilityLog } = store;
   const sorted = useMemo(() => [...dailyUtilityLog].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailyUtilityLog]);
-  const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
+  const filtered = useMemo(() => registerMonth ? sorted.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : sorted, [sorted, registerMonth]);
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
@@ -239,7 +239,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     });
   }, [sorted]);
 
-  const filteredDerived = useMemo(() => derived.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [derived, dateFrom, dateTo]);
+  const filteredDerived = useMemo(() => registerMonth ? derived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : derived, [derived, registerMonth]);
 
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
@@ -318,8 +318,55 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     { key: 'dg380Fuel', label: 'DG380 Fuel (L)' }, { key: 'dg500Fuel', label: 'DG500 Fuel (L)' },
   ];
 
+  const activeMonth = registerMonth || (monthTabs.length > 0 ? monthTabs[0].key : '');
+
   return (
-    <div className="space-y-5">
+    <div className="grid grid-cols-12 gap-5">
+      {/* Sidebar */}
+      <div className="col-span-12 lg:col-span-3">
+        <div className="glass-card p-3">
+          <p className="text-xs text-slate-400 uppercase tracking-wider mb-2 px-1">Select Month</p>
+          <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
+            <button
+              onClick={() => { setRegisterMonth(''); setPage(0); }}
+              className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
+                !registerMonth
+                  ? 'bg-cyan-400/15 text-cyan-300 border border-cyan-400/30 font-semibold'
+                  : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
+              }`}
+            >
+              <span className="truncate">All Months</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth ? 'bg-cyan-400/20 text-cyan-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                {dailyUtilityLog.length}
+              </span>
+            </button>
+            {monthTabs.map((tab) => {
+              const [y, m] = tab.key.split('-').map(Number);
+              const label = new Date(y, m - 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+              const isActive = registerMonth === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => { setRegisterMonth(tab.key); setPage(0); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
+                    isActive
+                      ? 'bg-cyan-400/15 text-cyan-300 border border-cyan-400/30 font-semibold'
+                      : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
+                  }`}
+                >
+                  <span className="truncate">{label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive ? 'bg-cyan-400/20 text-cyan-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="col-span-12 lg:col-span-9 space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="Latest Grid" value={kpis.grid} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
         <KpiCard label="Latest DG" value={kpis.dg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
@@ -467,12 +514,17 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
         <PurgeModal
           domain="Daily Utility"
           totalRecords={dailyUtilityLog.length}
-          periodLabel={dateFrom || dateTo ? `${dateFrom || '...'} to ${dateTo || '...'}` : null}
+          periodLabel={registerMonth || null}
           onPurgePeriod={async () => {
+            const monthStart = registerMonth + '-01';
+            const [y, m] = registerMonth.split('-').map(Number);
+            const lastDay = new Date(y, m, 0).getDate();
+            const monthEnd = registerMonth + '-' + String(lastDay).padStart(2, '0');
             setPurgeLoading(true);
             try {
-              const r = await purgeDailyUtilityLog(userName, dateFrom || undefined, dateTo || undefined);
+              const r = await purgeDailyUtilityLog(userName, monthStart, monthEnd);
               setConfirmPurge(false);
+              setRegisterMonth('');
               pushToast({ type: 'success', message: `${r.purged} daily utility records purged` });
             } catch (err) {
               pushToast({ type: 'error', message: `Purge failed: ${err.message}` });
@@ -492,6 +544,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
           loading={purgeLoading}
         />
       )}
+      </div>
     </div>
   );
 }
@@ -1352,12 +1405,12 @@ export default function Energy() {
   const [filterPreset, setFilterPreset] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [registerMonth, setRegisterMonth] = useState('');
 
   const setForm = useCallback((k, v) => setFormValues((p) => ({ ...p, [k]: v })), []);
   const openAddForm = useCallback((d) => { setEditRow(null); setFormValues(d || {}); setFormOpen(true); }, []);
   const openEditForm = useCallback((r) => { setEditRow(r); setFormValues({ ...r }); setFormOpen(true); }, []);
   const closeForm = useCallback(() => { setFormOpen(false); setEditRow(null); setFormValues({}); }, []);
-  const switchTab = useCallback((k) => { setActiveTab(k); setPage(0); }, []);
 
   const applyPreset = useCallback((label) => {
     const p = FILTER_PRESETS.find((x) => x.label === label);
@@ -1373,6 +1426,19 @@ export default function Energy() {
 
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const currentMK = useMemo(() => mk(new Date()), []);
+
+  const monthTabs = useMemo(() => {
+    const counts = {};
+    dailyUtilityLog.forEach((r) => {
+      const m = String(r.date || '').slice(0, 7);
+      if (m) counts[m] = (counts[m] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .map(([key, count]) => ({ key, count }))
+      .sort((a, b) => b.key.localeCompare(a.key));
+  }, [dailyUtilityLog]);
+
+  const switchTab = useCallback((k) => { setActiveTab(k); setPage(0); setRegisterMonth(''); }, []);
 
   const formTitle = editRow ? 'Edit ' + activeTab : 'Add ' + activeTab.replace(/([A-Z])/g, ' $1').trim();
   const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
@@ -1399,7 +1465,7 @@ export default function Energy() {
         })}
       </div>
 
-      {activeTab !== 'settings' && (
+      {activeTab !== 'settings' && activeTab !== 'dailyUtility' && (
         <div className="glass-card px-4 py-3 flex items-center gap-3 flex-wrap">
           <Calendar size={14} className="text-slate-400 flex-shrink-0" />
           <span className="text-xs text-slate-400 font-medium">Period:</span>
@@ -1424,7 +1490,8 @@ export default function Energy() {
 
       {activeTab === 'dailyUtility' && (
         <DailyUtilityTab store={store} settings={energySettings} userName={userName} isAdmin={isAdmin}
-          dateFrom={dateFrom} dateTo={dateTo} onAdd={openAddForm} onEdit={openEditForm} onUpload={openUpload}
+          dateFrom={dateFrom} dateTo={dateTo} registerMonth={registerMonth} setRegisterMonth={setRegisterMonth} monthTabs={monthTabs}
+          onAdd={openAddForm} onEdit={openEditForm} onUpload={openUpload}
           formOpen={formOpen} editRow={editRow} formValues={formValues} setForm={setForm} closeForm={closeForm}
           page={page} setPage={setPage} todayStr={todayStr} currentMK={currentMK} pushToast={pushToast} />
       )}

@@ -2437,16 +2437,19 @@ function _purgeDomain(entityKey, tableName, records, dateFrom, dateTo, isMonthly
 export async function purgeDailyUtilityLog(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('dailyUtilityLog', 'daily_utility_log', state.dailyUtilityLog, dateFrom, dateTo, false);
   if (count === 0) return { purged: 0 };
+  // Clear local state FIRST to prevent Realtime from re-adding
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, dailyUtilityLog: state.dailyUtilityLog.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, dailyUtilityLog: [] }; }
+  commit('dailyUtilityLog'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailyUtilityLog'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.dailyUtilityLog = Date.now() + 5000;
+  // Then delete from Supabase
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('daily_utility_log').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on daily_utility_log:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, dailyUtilityLog: state.dailyUtilityLog.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, dailyUtilityLog: [] }; }
-  commit('dailyUtilityLog'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailyUtilityLog'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Daily Utility (period)' : 'purged all Daily Utility', count + ' records removed', 'energy');
   return { purged: count };
 }
@@ -2454,16 +2457,17 @@ export async function purgeDailyUtilityLog(userName, dateFrom, dateTo) {
 export async function purgeMonthlyHerbicide(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('monthlyHerbicide', 'monthly_herbicide_section', state.monthlyHerbicide, dateFrom, dateTo, true);
   if (count === 0) return { purged: 0 };
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyHerbicide: state.monthlyHerbicide.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, monthlyHerbicide: [] }; }
+  commit('monthlyHerbicide'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyHerbicide'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.monthlyHerbicide = Date.now() + 5000;
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('monthly_herbicide_section').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on monthly_herbicide_section:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyHerbicide: state.monthlyHerbicide.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, monthlyHerbicide: [] }; }
-  commit('monthlyHerbicide'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyHerbicide'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Herbicide (period)' : 'purged all Herbicide', count + ' records removed', 'energy');
   return { purged: count };
 }
@@ -2471,16 +2475,17 @@ export async function purgeMonthlyHerbicide(userName, dateFrom, dateTo) {
 export async function purgeMonthlyInsecticide(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('monthlyInsecticide', 'monthly_insecticide_section', state.monthlyInsecticide, dateFrom, dateTo, true);
   if (count === 0) return { purged: 0 };
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyInsecticide: state.monthlyInsecticide.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, monthlyInsecticide: [] }; }
+  commit('monthlyInsecticide'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyInsecticide'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.monthlyInsecticide = Date.now() + 5000;
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('monthly_insecticide_section').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on monthly_insecticide_section:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyInsecticide: state.monthlyInsecticide.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, monthlyInsecticide: [] }; }
-  commit('monthlyInsecticide'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyInsecticide'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Insecticide (period)' : 'purged all Insecticide', count + ' records removed', 'energy');
   return { purged: count };
 }
@@ -2488,16 +2493,17 @@ export async function purgeMonthlyInsecticide(userName, dateFrom, dateTo) {
 export async function purgeMonthlyWater(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('monthlyWater', 'monthly_water_stp', state.monthlyWater, dateFrom, dateTo, true);
   if (count === 0) return { purged: 0 };
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyWater: state.monthlyWater.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, monthlyWater: [] }; }
+  commit('monthlyWater'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyWater'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.monthlyWater = Date.now() + 5000;
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('monthly_water_stp').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on monthly_water_stp:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyWater: state.monthlyWater.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, monthlyWater: [] }; }
-  commit('monthlyWater'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyWater'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Water (period)' : 'purged all Water', count + ' records removed', 'energy');
   return { purged: count };
 }
@@ -2505,16 +2511,17 @@ export async function purgeMonthlyWater(userName, dateFrom, dateTo) {
 export async function purgeMonthlyAirCompressor(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('monthlyAirCompressor', 'monthly_air_compressor', state.monthlyAirCompressor, dateFrom, dateTo, true);
   if (count === 0) return { purged: 0 };
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyAirCompressor: state.monthlyAirCompressor.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, monthlyAirCompressor: [] }; }
+  commit('monthlyAirCompressor'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyAirCompressor'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.monthlyAirCompressor = Date.now() + 5000;
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('monthly_air_compressor').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on monthly_air_compressor:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, monthlyAirCompressor: state.monthlyAirCompressor.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, monthlyAirCompressor: [] }; }
-  commit('monthlyAirCompressor'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'monthlyAirCompressor'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Air Compressor (period)' : 'purged all Air Compressor', count + ' records removed', 'energy');
   return { purged: count };
 }
@@ -2522,16 +2529,17 @@ export async function purgeMonthlyAirCompressor(userName, dateFrom, dateTo) {
 export async function purgeDailySolarGeneration(userName, dateFrom, dateTo) {
   const { isRange, targets, count } = _purgeDomain('dailySolarGeneration', 'daily_solar_generation', state.dailySolarGeneration, dateFrom, dateTo, false);
   if (count === 0) return { purged: 0 };
+  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, dailySolarGeneration: state.dailySolarGeneration.filter((r) => !rm.has(r.id)) }; }
+  else { state = { ...state, dailySolarGeneration: [] }; }
+  commit('dailySolarGeneration'); notifyStoreUpdate();
+  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailySolarGeneration'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
+  localImportSuppressUntil.dailySolarGeneration = Date.now() + 5000;
   if (supabase && isSupabaseConfigured) {
     let q = supabase.from('daily_solar_generation').delete();
     q = isRange ? q.in('id', targets.map((r) => r.id)) : q.neq('id', '00000000-0000-0000-0000-000000000000');
     const { error } = await q;
     if (error) { rtLog('error', 'PURGE failed on daily_solar_generation:', error.message); throw error; }
   }
-  if (isRange) { const rm = new Set(targets.map((r) => r.id)); state = { ...state, dailySolarGeneration: state.dailySolarGeneration.filter((r) => !rm.has(r.id)) }; }
-  else { state = { ...state, dailySolarGeneration: [] }; }
-  commit('dailySolarGeneration'); notifyStoreUpdate();
-  const queue = loadPendingCloudOps().filter((op) => op.entity !== 'dailySolarGeneration'); savePendingCloudOps(queue); updateSyncState({ pending: queue.length });
   logActivity(userName, isRange ? 'purged Solar (period)' : 'purged all Solar', count + ' records removed', 'energy');
   return { purged: count };
 }
