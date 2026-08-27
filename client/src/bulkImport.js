@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { processUtilityRow, processSolarRow } from './lib/energyEngine.js';
 
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
@@ -716,49 +717,38 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
 
-    const u1ImportKwhReading = parseNumber(getCell(row, mapping, 'u1ImportKwhReading'));
-    const u1ImportKvahReading = parseNumber(getCell(row, mapping, 'u1ImportKvahReading'));
-    const u2ImportKwhReading = parseNumber(getCell(row, mapping, 'u2ImportKwhReading'));
-    const u2ImportKvahReading = parseNumber(getCell(row, mapping, 'u2ImportKvahReading'));
-    let u1Pf = parseNumber(getCell(row, mapping, 'u1Pf'));
-    let u2Pf = parseNumber(getCell(row, mapping, 'u2Pf'));
-
-    if ((!u1Pf || u1Pf === 0) && u1ImportKvahReading > 0) {
-      u1Pf = Math.round((u1ImportKwhReading / u1ImportKvahReading) * 100000) / 100000;
-    }
-    if ((!u2Pf || u2Pf === 0) && u2ImportKvahReading > 0) {
-      u2Pf = Math.round((u2ImportKwhReading / u2ImportKvahReading) * 100000) / 100000;
-    }
-
-    return {
+    const rawRow = {
       date,
-      u1ImportKwhReading,
-      u1ImportKvahReading,
-      u1ExportKwhReading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
-      u1ExportKvahReading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
-      u1SolarKwhReading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
-      u1SolarKvahReading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
-      u1Pf,
-      u2ImportKwhReading,
-      u2ImportKvahReading,
-      u2ExportKwhReading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
-      u2ExportKvahReading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
-      u2SolarKwhReading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
-      u2SolarKvahReading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
-      u2Pf,
-      dg380KwhReading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
-      dg380HourmeterReading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
-      dg380HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),
-      dg380HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg380HsdAddedLtr')),
-      dg380DefOpeningPct: parseNumber(getCell(row, mapping, 'dg380DefOpeningPct')),
-      dg380DefAddedPct: parseNumber(getCell(row, mapping, 'dg380DefAddedPct')),
-      dg500KwhReading: parseNumber(getCell(row, mapping, 'dg500KwhReading')),
-      dg500HourmeterReading: parseNumber(getCell(row, mapping, 'dg500HourmeterReading')),
-      dg500HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg500HsdOpeningLtr')),
-      dg500HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg500HsdAddedLtr')),
-      dg500DefOpeningPct: parseNumber(getCell(row, mapping, 'dg500DefOpeningPct')),
-      dg500DefAddedPct: parseNumber(getCell(row, mapping, 'dg500DefAddedPct')),
+      u1_import_kwh_reading: parseNumber(getCell(row, mapping, 'u1ImportKwhReading')),
+      u1_import_kvah_reading: parseNumber(getCell(row, mapping, 'u1ImportKvahReading')),
+      u2_import_kwh_reading: parseNumber(getCell(row, mapping, 'u2ImportKwhReading')),
+      u2_import_kvah_reading: parseNumber(getCell(row, mapping, 'u2ImportKvahReading')),
+      u1_export_kwh_reading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
+      u1_export_kvah_reading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
+      u1_solar_kwh_reading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
+      u1_solar_kvah_reading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
+      u1_pf: parseNumber(getCell(row, mapping, 'u1Pf')),
+      u2_pf: parseNumber(getCell(row, mapping, 'u2Pf')),
+      u2_export_kwh_reading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
+      u2_export_kvah_reading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
+      u2_solar_kwh_reading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
+      u2_solar_kvah_reading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
+      dg380_kwh_reading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
+      dg380_hourmeter_reading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
+      dg380_hsd_opening_ltr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),
+      dg380_hsd_added_ltr: parseNumber(getCell(row, mapping, 'dg380HsdAddedLtr')),
+      dg380_def_opening_pct: parseNumber(getCell(row, mapping, 'dg380DefOpeningPct')),
+      dg380_def_added_pct: parseNumber(getCell(row, mapping, 'dg380DefAddedPct')),
+      dg500_kwh_reading: parseNumber(getCell(row, mapping, 'dg500KwhReading')),
+      dg500_hourmeter_reading: parseNumber(getCell(row, mapping, 'dg500HourmeterReading')),
+      dg500_hsd_opening_ltr: parseNumber(getCell(row, mapping, 'dg500HsdOpeningLtr')),
+      dg500_hsd_added_ltr: parseNumber(getCell(row, mapping, 'dg500HsdAddedLtr')),
+      dg500_def_opening_pct: parseNumber(getCell(row, mapping, 'dg500DefOpeningPct')),
+      dg500_def_added_pct: parseNumber(getCell(row, mapping, 'dg500DefAddedPct')),
     };
+
+    // Use energy engine to auto-compute PF, totals, etc.
+    return processUtilityRow(rawRow);
   }
 
   if (moduleId === 'energyMonthlyHerbicide') {
@@ -828,17 +818,20 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
 
-    return {
+    const rawRow = {
       date,
-      u1Inv1Kwh: parseNumber(getCell(row, mapping, 'u1Inv1Kwh')),
-      u1Inv2Kwh: parseNumber(getCell(row, mapping, 'u1Inv2Kwh')),
-      u1Inv3Kwh: parseNumber(getCell(row, mapping, 'u1Inv3Kwh')),
-      u1Inv4Kwh: parseNumber(getCell(row, mapping, 'u1Inv4Kwh')),
-      u2Inv1Kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
-      u2Inv2Kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
-      u2Inv3Kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
-      dailyTotalKwh: parseNumber(getCell(row, mapping, 'dailyTotalKwh')),
+      u1_inv1_kwh: parseNumber(getCell(row, mapping, 'u1Inv1Kwh')),
+      u1_inv2_kwh: parseNumber(getCell(row, mapping, 'u1Inv2Kwh')),
+      u1_inv3_kwh: parseNumber(getCell(row, mapping, 'u1Inv3Kwh')),
+      u1_inv4_kwh: parseNumber(getCell(row, mapping, 'u1Inv4Kwh')),
+      u2_inv1_kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
+      u2_inv2_kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
+      u2_inv3_kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
+      daily_total_kwh: parseNumber(getCell(row, mapping, 'dailyTotalKwh')),
     };
+
+    // Use energy engine to auto-compute totals (fixes grand total = 0 bug)
+    return processSolarRow(rawRow);
   }
 
   // ── Machines (fallback) ───────────────────────────────────────────────────

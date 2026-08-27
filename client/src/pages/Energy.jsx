@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import {
@@ -11,7 +11,17 @@ import {
   addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
   upsertEnergySettings,
 } from '../store.js';
-import { computeRenewableSummary, computeDailyDeltas, formatPowerFactor, computeWeightedPf } from '../analytics.js';
+import { 
+  computeRenewableSummary, 
+  computeDailyDeltas, 
+  formatPowerFactor, 
+  computeWeightedPf,
+  computeEnergySummaryFromRows,
+  computeDynamicPowerFactors,
+  computeEnergySnapshot
+} from '../analytics.js';
+import { useEnergyStore } from '../hooks/useEnergyStore.js';
+import { processSolarRow } from '../lib/energyEngine.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
@@ -200,6 +210,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
+  // Use new energy engine for derived calculations with dynamic PF
   const derived = useMemo(() => {
     return sorted.map((row) => {
       const u1Import = toN(row.u1ImportKwhReading);
@@ -219,9 +230,16 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       const dg500Fuel = toN(row.dg500HsdAddedLtr);
       const dg500DefPct = toN(row.dg500DefAddedPct);
       const totalDg = r1(dg380 + dg500);
-      const u1Pf = toN(row.u1Pf) > 0 ? toN(row.u1Pf) : null;
-      const u2Pf = toN(row.u2Pf) > 0 ? toN(row.u2Pf) : null;
-      const avgPf = (u1Pf != null && u2Pf != null) ? r1((u1Pf + u2Pf) / 2) : (u1Pf ?? u2Pf ?? null);
+      
+      // Use dynamic PF calculation from energy engine
+      const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
+        u1Import, toN(row.u1ImportKvahReading),
+        u2Import, toN(row.u2ImportKvahReading)
+      );
+      const u1Pf = u1_pf > 0 ? u1_pf : null;
+      const u2Pf = u2_pf > 0 ? u2_pf : null;
+      const avgPf = combined_pf > 0 ? combined_pf : (u1Pf ?? u2Pf ?? null);
+      
       const total = r1(gridTotal + totalDg + solar);
       return {
         date: row.date, u1Import, u2Import, u1Export, u2Export, u1Solar, u2Solar, gridTotal, solar,
@@ -239,9 +257,35 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
 
   const kpis = useMemo(() => {
     if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
-    const latest = filteredDerived[0];
-    const pf = computeWeightedPf([{ _delta: { u1ImportKwhReading: latest.u1Import, u2ImportKwhReading: latest.u2Import, u1Pf: latest.u1Pf, u2Pf: latest.u2Pf } }]);
-    return { grid: latest.gridTotal, dg: latest.totalDg, solar: latest.solar, pf: pf > 0 ? formatPowerFactor(pf) : '—' };
+    
+    // Use new energy engine for summary across all filtered data
+    const summary = computeEnergySummaryFromRows(
+      filteredDerived.map(d => ({
+        date: d.date,
+        u1_import_kwh_reading: d.u1Import,
+        u1_import_kvah_reading: toN(d.u1Import) * (toN(d.u1Pf) > 0 ? 1/0.99 : 1), // approx
+        u2_import_kwh_reading: d.u2Import,
+        u2_import_kvah_reading: toN(d.u2Import) * (toN(d.u2Pf) > 0 ? 1/0.99 : 1),
+        u1_solar_kwh_reading: d.u1Solar,
+        u2_solar_kwh_reading: d.u2Solar,
+        dg380_kwh_reading: d.dg380,
+        dg500_kwh_reading: d.dg500,
+        dg380_hourmeter_reading: d.dg380Hrs,
+        dg500_hourmeter_reading: d.dg500Hrs,
+        dg380_hsd_added_ltr: d.dg380Fuel,
+        dg500_hsd_added_ltr: d.dg500Fuel,
+        u1_pf: d.u1Pf,
+        u2_pf: d.u2Pf
+      }))
+    );
+    
+    const pf = summary.avg_combined_pf;
+    return { 
+      grid: summary.total_grid_kwh, 
+      dg: summary.total_dg_kwh, 
+      solar: summary.total_solar_kwh, 
+      pf: pf > 0 ? formatPowerFactor(pf) : '—' 
+    };
   }, [filteredDerived]);
 
   const dgSummary = useMemo(() => {
@@ -1089,12 +1133,21 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const { dailySolarGeneration } = store;
   const sorted = useMemo(() => [...dailySolarGeneration].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailySolarGeneration]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
+  
+  // Use energy engine to process solar rows (fixes grand total = 0 bug)
   const withCalc = useMemo(() => sorted.map((r) => {
-    const sum = r1(toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh) + toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh));
-    const u1 = r1(toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh));
-    const u2 = r1(toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh));
-    return { ...r, _sum: sum, _u1: u1, _u2: u2 };
+    const processed = processSolarRow(r);
+    return { 
+      ...r, 
+      _sum: processed.grand_total, 
+      _u1: processed.u1_total, 
+      _u2: processed.u2_total,
+      u1_total: processed.u1_total,
+      u2_total: processed.u2_total,
+      grand_total: processed.grand_total
+    };
   }), [sorted]);
+  
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 

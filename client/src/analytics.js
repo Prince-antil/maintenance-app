@@ -16,7 +16,28 @@ export function formatPowerFactor(pfVal) {
   const num = Number(pfVal);
   if (!Number.isFinite(num) || num <= 0) return null;
   if (num >= 1.0) return '0.99';
+  if (num >= 0.99) return '0.99';
   return num.toFixed(2);
+}
+
+/**
+ * Dynamic Power Factor calculation for a single row
+ * U1 PF = U1_kWh / U1_kVAh
+ * U2 PF = U2_kWh / U2_kVAh
+ * Combined PF = (U1_kWh + U2_kWh) / (U1_kVAh + U2_kVAh)
+ * All capped at 0.99
+ */
+export function computeDynamicPowerFactors(u1_kwh, u1_kvah, u2_kwh, u2_kvah) {
+  const u1 = Number(u1_kwh || 0);
+  const u1_kva = Number(u1_kvah || 0);
+  const u2 = Number(u2_kwh || 0);
+  const u2_kva = Number(u2_kvah || 0);
+  
+  const u1_pf = u1_kva > 0 ? Math.min(0.99, Number((u1 / u1_kva).toFixed(4))) : 0;
+  const u2_pf = u2_kva > 0 ? Math.min(0.99, Number((u2 / u2_kva).toFixed(4))) : 0;
+  const combined_pf = (u1_kva + u2_kva) > 0 ? Math.min(0.99, Number(((u1 + u2) / (u1_kva + u2_kva)).toFixed(4))) : 0;
+  
+  return { u1_pf, u2_pf, combined_pf };
 }
 
 /**
@@ -35,12 +56,13 @@ export function computeWeightedPf(deltas) {
     if (u1Import > 0 && u1Pf > 0) { weightedSum += u1Import * u1Pf; totalImport += u1Import; }
     if (u2Import > 0 && u2Pf > 0) { weightedSum += u2Import * u2Pf; totalImport += u2Import; }
   });
-  return totalImport > 0 ? weightedSum / totalImport : 0;
+return totalImport > 0 ? weightedSum / totalImport : 0;
 }
 
 /**
  * Compute energy snapshot from daily utility deltas.
  * Returns { gridKwh, solarKwh, dgKwh, totalKwh, avgPowerFactor, fuelLtr, chartData }
+ * Updated to use dynamic PF and fix zero values in summary cards.
  */
 export function computeEnergySnapshot(deltas, solarLogs) {
   let totalGrid = 0;
@@ -63,9 +85,10 @@ export function computeEnergySnapshot(deltas, solarLogs) {
   });
 
   // Solar: use inverter data from dailySolarGeneration (Solar section), fall back to meter-side utility
-  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || 0), 0);
+  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || Number(curr.grand_total) || 0), 0);
   const solarKwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : totalSolarFromUtil;
 
+  // Use dynamic PF calculation for more accurate results
   const avgPf = computeWeightedPf(deltas);
 
   const chartData = (deltas || []).map((d) => ({
@@ -84,6 +107,109 @@ export function computeEnergySnapshot(deltas, solarLogs) {
     avgPowerFactor: formatPowerFactor(avgPf),
     fuelLtr: Math.round(totalFuel),
     chartData,
+  };
+}
+
+/**
+ * Compute energy summary directly from utility rows (not deltas)
+ * Use this for summary cards across all date range filters
+ * Fixes zero values in Daily Utility summary cards
+ */
+export function computeEnergySummaryFromRows(utilityRows, solarRows = []) {
+  if (!utilityRows || utilityRows.length === 0) {
+    return {
+      total_grid_kwh: 0,
+      total_solar_kwh: 0,
+      total_dg_kwh: 0,
+      total_hsd_litres: 0,
+      avg_u1_pf: 0,
+      avg_u2_pf: 0,
+      avg_combined_pf: 0,
+      dg380_kwh: 0,
+      dg500_kwh: 0,
+      dg380_hours: 0,
+      dg500_hours: 0,
+      daily_avg_generation: 0
+    };
+  }
+
+  // Process rows through dynamic PF calculation
+  const processed = utilityRows.map(row => {
+    const u1_import_kwh = Number(row.u1_import_kwh_reading || row.u1_import_kwh || 0);
+    const u1_import_kvah = Number(row.u1_import_kvah_reading || row.u1_import_kvah || 0);
+    const u2_import_kwh = Number(row.u2_import_kwh_reading || row.u2_import_kwh || 0);
+    const u2_import_kvah = Number(row.u2_import_kvah_reading || row.u2_import_kvah || 0);
+    const u1_solar_kwh = Number(row.u1_solar_kwh_reading || row.u1_solar_kwh || 0);
+    const u2_solar_kwh = Number(row.u2_solar_kwh_reading || row.u2_solar_kwh || 0);
+    const dg380_kwh = Number(row.dg380_kwh_reading || row.dg380_kwh || 0);
+    const dg500_kwh = Number(row.dg500_kwh_reading || row.dg500_kwh || 0);
+    const dg380_hours = Number(row.dg380_hourmeter_reading || row.dg380_hours || 0);
+    const dg500_hours = Number(row.dg500_hourmeter_reading || row.dg500_hours || 0);
+    const dg380_hsd = Number(row.dg380_hsd_added_ltr || row.dg380_hsd || 0);
+    const dg500_hsd = Number(row.dg500_hsd_added_ltr || row.dg500_hsd || 0);
+
+    const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
+      u1_import_kwh, u1_import_kvah, u2_import_kwh, u2_import_kvah
+    );
+
+    return {
+      u1_import_kwh,
+      u2_import_kwh,
+      u1_solar_kwh,
+      u2_solar_kwh,
+      dg380_kwh,
+      dg500_kwh,
+      dg380_hours,
+      dg500_hours,
+      dg380_hsd,
+      dg500_hsd,
+      u1_pf,
+      u2_pf,
+      combined_pf
+    };
+  });
+
+  // Aggregate totals
+  const total_grid_kwh = processed.reduce((sum, r) => sum + r.u1_import_kwh + r.u2_import_kwh, 0);
+  const total_solar_kwh = processed.reduce((sum, r) => sum + r.u1_solar_kwh + r.u2_solar_kwh, 0);
+  const total_dg_kwh = processed.reduce((sum, r) => sum + r.dg380_kwh + r.dg500_kwh, 0);
+  const total_hsd_litres = processed.reduce((sum, r) => sum + r.dg380_hsd + r.dg500_hsd, 0);
+  const dg380_kwh = processed.reduce((sum, r) => sum + r.dg380_kwh, 0);
+  const dg500_kwh = processed.reduce((sum, r) => sum + r.dg500_kwh, 0);
+  const dg380_hours = processed.reduce((sum, r) => sum + r.dg380_hours, 0);
+  const dg500_hours = processed.reduce((sum, r) => sum + r.dg500_hours, 0);
+
+  // Solar from inverter logs (Solar section)
+  const dedicatedSolarTotal = (solarRows || []).reduce((acc, curr) => 
+    acc + (Number(curr.dailyTotalKwh) || Number(curr.grand_total) || 0), 0);
+  const final_solar_kwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : total_solar_kwh;
+
+  // Weighted average PF using import kWh as weights
+  const u1_pf_weighted = processed.reduce((sum, r) => sum + (r.u1_pf * r.u1_import_kwh), 0);
+  const u1_import_total = processed.reduce((sum, r) => sum + r.u1_import_kwh, 0);
+  const u2_pf_weighted = processed.reduce((sum, r) => sum + (r.u2_pf * r.u2_import_kwh), 0);
+  const u2_import_total = processed.reduce((sum, r) => sum + r.u2_import_kwh, 0);
+  const combined_pf_weighted = processed.reduce((sum, r) => sum + (r.combined_pf * (r.u1_import_kwh + r.u2_import_kwh)), 0);
+  const total_import_total = u1_import_total + u2_import_total;
+
+  // Daily average generation
+  const daily_avg_generation = processed.length > 0 
+    ? Number((final_solar_kwh / processed.length).toFixed(2)) 
+    : 0;
+
+  return {
+    total_grid_kwh: Number(total_grid_kwh.toFixed(2)),
+    total_solar_kwh: Number(final_solar_kwh.toFixed(2)),
+    total_dg_kwh: Number(total_dg_kwh.toFixed(2)),
+    total_hsd_litres: Number(total_hsd_litres.toFixed(2)),
+    dg380_kwh: Number(dg380_kwh.toFixed(2)),
+    dg500_kwh: Number(dg500_kwh.toFixed(2)),
+    dg380_hours: Number(dg380_hours.toFixed(2)),
+    dg500_hours: Number(dg500_hours.toFixed(2)),
+    avg_u1_pf: u1_import_total > 0 ? Number((u1_pf_weighted / u1_import_total).toFixed(4)) : 0,
+    avg_u2_pf: u2_import_total > 0 ? Number((u2_pf_weighted / u2_import_total).toFixed(4)) : 0,
+    avg_combined_pf: total_import_total > 0 ? Number((combined_pf_weighted / total_import_total).toFixed(4)) : 0,
+    daily_avg_generation
   };
 }
 
@@ -1222,9 +1348,26 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
   const solarLogs = (dailySolarLogs || []).filter((l) => !monthKey_ || (l.date || '').slice(0, 7) === monthKey_);
   const s = energySettings || {};
 
-  // Solar from inverter logs
+  // Process solar logs through energy engine to fix grand total = 0 bug
+  const processedSolarLogs = solarLogs.map(l => {
+    const u1_inv1 = Number(l.u1_inv1_kwh || l.u1_inv1 || 0);
+    const u1_inv2 = Number(l.u1_inv2_kwh || l.u1_inv2 || 0);
+    const u1_inv3 = Number(l.u1_inv3_kwh || l.u1_inv3 || 0);
+    const u1_inv4 = Number(l.u1_inv4_kwh || l.u1_inv4 || 0);
+    const u2_inv1 = Number(l.u2_inv1_kwh || l.u2_inv1 || 0);
+    const u2_inv2 = Number(l.u2_inv2_kwh || l.u2_inv2 || 0);
+    const u2_inv3 = Number(l.u2_inv3_kwh || l.u2_inv3 || 0);
+    
+    const u1_total = Number((u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4).toFixed(2));
+    const u2_total = Number((u2_inv1 + u2_inv2 + u2_inv3).toFixed(2));
+    const grand_total = Number((u1_total + u2_total).toFixed(2));
+    
+    return { ...l, u1_total, u2_total, grand_total, daily_total_kwh: grand_total };
+  });
+
+  // Solar from inverter logs - use grand_total (fixed)
   const solarFromInverters = round1(
-    solarLogs.reduce((sum, l) => sum + (Number(l.dailyTotalKwh) || 0), 0)
+    processedSolarLogs.reduce((sum, l) => sum + (Number(l.grand_total) || 0), 0)
   );
 
   // Meter-side solar from daily utility (using deltas) - import and export
@@ -1294,13 +1437,17 @@ export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
     const u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
     const u2ImportKwh = Number(d._delta?.u2ImportKwhReading) || 0;
     const u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
-    const u1PfRaw = d.u1Pf > 0 ? d.u1Pf : (u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0);
-    const u2PfRaw = d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0);
+    
+    // Use dynamic PF calculation
+    const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
+      u1ImportKwh, u1ImportKvah, u2ImportKwh, u2ImportKvah
+    );
+    
     return {
       date: d.date || '',
-      u1Pf: u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : null,
-      u2Pf: u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null,
-      avgPf: (u1PfRaw > 0 && u2PfRaw > 0) ? Number(formatPowerFactor(round1((u1PfRaw + u2PfRaw) / 2))) : (u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : (u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null)),
+      u1Pf: u1_pf > 0 ? Number(formatPowerFactor(u1_pf)) : null,
+      u2Pf: u2_pf > 0 ? Number(formatPowerFactor(u2_pf)) : null,
+      avgPf: combined_pf > 0 ? Number(formatPowerFactor(combined_pf)) : null,
       label: (d.date || '').slice(5),
     };
   });
