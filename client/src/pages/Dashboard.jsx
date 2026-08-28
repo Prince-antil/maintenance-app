@@ -180,6 +180,10 @@ export default function Dashboard() {
   // ---- everything below auto-recomputes when store data changes ----
   const kpi = useMemo(() => computeKPIs(store, totalFiles, periodFilter), [store, totalFiles, periodFilter]);
 
+  // Effective rows: prefer store data, fallback to hydrated localStorage/supabase cache
+  const effectiveUtilityLog = useMemo(() => (dailyUtilityLog.length > 0 ? dailyUtilityLog : hydratedUtility), [dailyUtilityLog, hydratedUtility]);
+  const effectiveSolarLog = useMemo(() => (dailySolarGeneration.length > 0 ? dailySolarGeneration : hydratedSolar), [dailySolarGeneration, hydratedSolar]);
+
   // Period filter for charts (uses effective logs so fallback hydration is included)
   const availablePeriods = useMemo(() => {
     const allPeriods = new Set();
@@ -216,10 +220,6 @@ export default function Dashboard() {
     periodFilter === 'all' ? (machinePmRecords || []) : (machinePmRecords || []).filter((r) => String(r.pmDate || '').slice(0, 7) === periodFilter),
     [machinePmRecords, periodFilter]
   );
-
-  // Effective rows: prefer store data (same hook/context as EnergyManagement.jsx), fallback to hydrated localStorage/supabase cache if store still loading
-  const effectiveUtilityLog = useMemo(() => (dailyUtilityLog.length > 0 ? dailyUtilityLog : hydratedUtility), [dailyUtilityLog, hydratedUtility]);
-  const effectiveSolarLog = useMemo(() => (dailySolarGeneration.length > 0 ? dailySolarGeneration : hydratedSolar), [dailySolarGeneration, hydratedSolar]);
 
   const filteredDailyUtilityLog = useMemo(() =>
     periodFilter === 'all' ? effectiveUtilityLog : effectiveUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
