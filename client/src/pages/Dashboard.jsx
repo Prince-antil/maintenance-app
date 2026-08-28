@@ -22,13 +22,33 @@ import {
 import { computeEnergySnapshot } from '../lib/energyEngine.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
-import {
-  Factory, Activity, Wrench, AlertOctagon, ClipboardCheck, ClipboardList,
-  FolderArchive, Timer, TimerReset, Gauge, ListChecks, Clock, ChevronRight,
-  FileText, User, Zap, BrainCircuit, AlertTriangle, Info, CalendarDays,
-  Sparkles, ArrowRight, Upload, FileSpreadsheet, ShieldCheck, AlertCircle,
-  Filter,
-} from 'lucide-react';
+import Factory from 'lucide-react/dist/esm/icons/factory';
+import Activity from 'lucide-react/dist/esm/icons/activity';
+import Wrench from 'lucide-react/dist/esm/icons/wrench';
+import AlertOctagon from 'lucide-react/dist/esm/icons/alert-octagon';
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check';
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list';
+import FolderArchive from 'lucide-react/dist/esm/icons/folder-archive';
+import Timer from 'lucide-react/dist/esm/icons/timer';
+import TimerReset from 'lucide-react/dist/esm/icons/timer-reset';
+import Gauge from 'lucide-react/dist/esm/icons/gauge';
+import ListChecks from 'lucide-react/dist/esm/icons/list-checks';
+import Clock from 'lucide-react/dist/esm/icons/clock';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
+import FileText from 'lucide-react/dist/esm/icons/file-text';
+import User from 'lucide-react/dist/esm/icons/user';
+import Zap from 'lucide-react/dist/esm/icons/zap';
+import BrainCircuit from 'lucide-react/dist/esm/icons/brain-circuit';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import Info from 'lucide-react/dist/esm/icons/info';
+import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days';
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
+import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right';
+import Upload from 'lucide-react/dist/esm/icons/upload';
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet';
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle';
+import Filter from 'lucide-react/dist/esm/icons/filter';
 import { ProgressGauge } from '../components/charts.jsx';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -108,10 +128,9 @@ export default function Dashboard() {
             if (Array.isArray(parsed) && parsed.length > 0) utilityData = parsed;
           }
         } catch {}
-        const { supabase: supaClient } = await import('../lib/supabaseClient.js').catch(() => ({ supabase: null }));
-        if (supaClient) {
+        if (typeof window !== 'undefined' && window.supabase) {
           try {
-            const { data: uData } = await supaClient.from('daily_utility_log').select('*');
+            const { data: uData } = await window.supabase.from('daily_utility_log').select('*');
             if (uData && uData.length > 0) utilityData = uData;
           } catch {}
         }
@@ -124,9 +143,9 @@ export default function Dashboard() {
             if (Array.isArray(parsed) && parsed.length > 0) solarData = parsed;
           }
         } catch {}
-        if (supaClient) {
+        if (typeof window !== 'undefined' && window.supabase) {
           try {
-            const { data: sData } = await supaClient.from('daily_solar_generation').select('*');
+            const { data: sData } = await window.supabase.from('daily_solar_generation').select('*');
             if (sData && sData.length > 0) solarData = sData;
           } catch {}
         }
@@ -746,4 +765,3 @@ export default function Dashboard() {
     </div>
   );
 }
-

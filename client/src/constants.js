@@ -1,10 +1,16 @@
 // ================================================================
 // CCPL CMMS — Shared Domain Constants
 // ================================================================
-import {
-  BookOpen, ClipboardCheck, AlertTriangle, CheckSquare,
-  Zap, Sun, Activity, Lightbulb, TrendingUp, ShieldCheck,
-} from 'lucide-react';
+import BookOpen from 'lucide-react/dist/esm/icons/book-open';
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import CheckSquare from 'lucide-react/dist/esm/icons/check-square';
+import Zap from 'lucide-react/dist/esm/icons/zap';
+import Sun from 'lucide-react/dist/esm/icons/sun';
+import Activity from 'lucide-react/dist/esm/icons/activity';
+import Lightbulb from 'lucide-react/dist/esm/icons/lightbulb';
+import TrendingUp from 'lucide-react/dist/esm/icons/trending-up';
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
 
 // Report categories (must match backend whitelist — do not modify)
 export const CATEGORIES = [
