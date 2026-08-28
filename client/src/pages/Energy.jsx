@@ -23,10 +23,20 @@ import {
 } from '../analytics.js';
 import { 
   processUtilityRow, 
-  processSolarRow, 
-  computeUtilitySummary,
-  computeSolarSummary 
+  processSolarRow 
 } from '../lib/energyEngine.js';
+import { 
+  getSolarDerived, 
+  processSolarRowForSave, 
+  computeSolarSummary,
+  getCurrentMonthSolarTotal,
+  formatEnergy,
+  getUtilityDerived,
+  computeUtilitySummary,
+  getCurrentMonthUtilityTotals,
+  formatPowerFactor as formatPf,
+  formatEnergy as formatEnergyUtil
+} from '../lib/energyCalculations.js';
 import { useEnergyCache, memoizedAggregations } from '../hooks/useEnergyCache.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
@@ -216,70 +226,30 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
-  // Use energy engine for derived calculations with dynamic PF
-  const derived = useMemo(() => {
-    return sorted.map((row) => {
-      const u1Import = toN(row.u1ImportKwhReading);
-      const u1Export = toN(row.u1ExportKwhReading);
-      const u2Import = toN(row.u2ImportKwhReading);
-      const u2Export = toN(row.u2ExportKwhReading);
-      const u1Solar = toN(row.u1SolarKwhReading);
-      const u2Solar = toN(row.u2SolarKwhReading);
-      const gridTotal = r1((u1Import - u1Export) + (u2Import - u2Export));
-      const solar = r1(u1Solar + u2Solar);
-      const dg380 = toN(row.dg380KwhReading);
-      const dg380Hrs = toN(row.dg380HourmeterReading);
-      const dg380Fuel = toN(row.dg380HsdAddedLtr);
-      const dg380DefPct = toN(row.dg380DefAddedPct);
-      const dg500 = toN(row.dg500KwhReading);
-      const dg500Hrs = toN(row.dg500HourmeterReading);
-      const dg500Fuel = toN(row.dg500HsdAddedLtr);
-      const dg500DefPct = toN(row.dg500DefAddedPct);
-      const totalDg = r1(dg380 + dg500);
-      
-      // Use dynamic PF calculation from energy engine
-      const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
-        u1Import, toN(row.u1ImportKvahReading),
-        u2Import, toN(row.u2ImportKvahReading)
-      );
-      const u1Pf = u1_pf > 0 ? u1_pf : null;
-      const u2Pf = u2_pf > 0 ? u2_pf : null;
-      const avgPf = combined_pf > 0 ? combined_pf : (u1Pf ?? u2Pf ?? null);
-      
-      const total = r1(gridTotal + totalDg + solar);
-      return {
-        date: row.date, u1Import, u2Import, u1Export, u2Export, u1Solar, u2Solar, gridTotal, solar,
-        dg380, dg380Hrs, dg380Fuel, dg380DefPct, dg500, dg500Hrs, dg500Fuel, dg500DefPct,
-        totalDg, u1Pf, u2Pf, avgPf, total,
-        gridPct: total > 0 ? r1((gridTotal / total) * 100) : 0,
-        dgPct: total > 0 ? r1((totalDg / total) * 100) : 0,
-        solarPct: total > 0 ? r1((solar / total) * 100) : 0,
-      };
-    });
-  }, [sorted]);
-
-  const filteredDerived = useMemo(() => registerMonth ? derived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : derived, [derived, registerMonth]);
+  // Use canonical utility calculations - single source of truth
+  const withDerived = useMemo(() => sorted.map((row) => ({ ...row, ...getUtilityDerived(row) })), [sorted]);
+  const filteredDerived = useMemo(() => registerMonth ? withDerived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : withDerived, [withDerived, registerMonth]);
   const pageData = useMemo(() => filteredDerived.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredDerived, page]);
 
-  // Use energy engine for KPIs - works on raw store data, handles all date range filters
-  const filteredRaw = useMemo(() => registerMonth ? sorted.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : sorted, [sorted, registerMonth]);
-  
+  // KPIs using canonical utility summary - works on filtered data
   const kpis = useMemo(() => {
-    if (filteredRaw.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
+    if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     
-    // Use energy engine computeUtilitySummary on raw data - handles all field name variations
-    const summary = computeUtilitySummary(filteredRaw);
+    // Use canonical utility summary on filtered data
+    const summary = computeUtilitySummary(filteredDerived);
     
-    const pf = summary.avg_combined_pf;
+    // Latest values from most recent row in filtered data
+    const latest = filteredDerived[0];
+    
     return { 
-      grid: summary.total_grid_kwh, 
-      dg: summary.total_dg_kwh, 
-      solar: summary.total_solar_kwh, 
-      pf: pf > 0 ? formatPowerFactor(pf) : '—' 
+      grid: formatEnergy(latest?.gridNet || 0), 
+      dg: formatEnergy(latest?.dgTotal || 0), 
+      solar: formatEnergy(latest?.solarTotal || 0), 
+      pf: latest?.combinedPf > 0 ? formatPf(latest.combinedPf) : '—' 
     };
-  }, [filteredRaw]);
+  }, [filteredDerived]);
 
-  // Use memoized aggregations for DG summary - better performance on tab switches
+  // DG Summary using memoized aggregations - sums across filtered period
   const dgSummary = useMemo(() => {
     if (filteredDerived.length === 0) return { dg380Total: 0, dg500Total: 0, totalDg: 0, totalHsd: 0 };
     const totals = memoizedAggregations.dgTotals(filteredDerived);
@@ -311,17 +281,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
 
   const handleSave = () => {
     if (!formValues.date) { pushToast({ type: 'error', message: 'Date is required' }); return; }
-    const u1ImportKwh = toN(formValues.u1ImportKwhReading);
-    const u1ImportKvah = toN(formValues.u1ImportKvahReading);
-    const u2ImportKwh = toN(formValues.u2ImportKwhReading);
-    const u2ImportKvah = toN(formValues.u2ImportKvahReading);
-    let u1Pf = toN(formValues.u1Pf);
-    let u2Pf = toN(formValues.u2Pf);
-    if ((!u1Pf || u1Pf === 0) && u1ImportKvah > 0) u1Pf = Math.round((u1ImportKwh / u1ImportKvah) * 100000) / 100000;
-    if ((!u2Pf || u2Pf === 0) && u2ImportKvah > 0) u2Pf = Math.round((u2ImportKwh / u2ImportKvah) * 100000) / 100000;
-    u1Pf = Math.min(u1Pf, 0.99);
-    u2Pf = Math.min(u2Pf, 0.99);
-    const payload = { ...formValues, u1Pf, u2Pf };
+    const payload = processUtilityRowForSave(formValues);
     if (editRow) updateDailyUtilityLog(editRow.id, payload, userName);
     else addDailyUtilityLog(payload, userName);
     closeForm();
@@ -329,16 +289,16 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
 
   const cols = [
     { key: 'date', label: 'Date' },
-    { key: 'u1Import', label: 'U1 Import kWh' }, { key: 'u1Export', label: 'U1 Export kWh' },
-    { key: 'u2Import', label: 'U2 Import kWh' }, { key: 'u2Export', label: 'U2 Export kWh' },
-    { key: 'gridTotal', label: 'Grid Net kWh', className: 'text-cyan-400' },
-    { key: 'solar', label: 'Solar kWh', className: 'text-emerald-400' },
-    { key: 'totalDg', label: 'DG kWh', className: 'text-amber-400' },
-    { key: 'total', label: 'Total kWh', className: 'text-white font-semibold' },
+    { key: 'u1ImportKwhReading', label: 'U1 Import kWh' }, { key: 'u1ExportKwhReading', label: 'U1 Export kWh' },
+    { key: 'u2ImportKwhReading', label: 'U2 Import kWh' }, { key: 'u2ExportKwhReading', label: 'U2 Export kWh' },
+    { key: 'gridNet', label: 'Grid Net kWh', className: 'text-cyan-400' },
+    { key: 'solarTotal', label: 'Solar kWh', className: 'text-emerald-400' },
+    { key: 'dgTotal', label: 'DG kWh', className: 'text-amber-400' },
+    { key: 'totalPlant', label: 'Total kWh', className: 'text-white font-semibold' },
     { key: 'u1Pf', label: 'U1 PF' }, { key: 'u2Pf', label: 'U2 PF' },
-    { key: 'avgPf', label: 'Avg PF', className: 'text-teal-400' },
-    { key: 'dg380Fuel', label: 'DG 380 Fuel (L)' }, { key: 'dg500Fuel', label: 'DG 500 Fuel (L)' },
-    { key: 'dg380DefPct', label: 'DG 380 DEF%' }, { key: 'dg500DefPct', label: 'DG 500 DEF%' },
+    { key: 'combinedPf', label: 'Avg PF', className: 'text-teal-400' },
+    { key: 'dg380Hsd', label: 'DG 380 Fuel (L)' }, { key: 'dg500Hsd', label: 'DG 500 Fuel (L)' },
+    { key: 'dg380Def', label: 'DG 380 DEF%' }, { key: 'dg500Def', label: 'DG 500 DEF%' },
   ];
 
   const activeMonth = registerMonth || (monthTabs.length > 0 ? monthTabs[0].key : '');
@@ -500,21 +460,21 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   {pageData.map((r) => (
                     <tr key={r.date}>
                       <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
-                      <Td value={r.u1Import} className="text-slate-300 tabular-nums" />
-                      <Td value={r.u1Export} className="text-slate-300 tabular-nums" />
-                      <Td value={r.u2Import} className="text-slate-300 tabular-nums" />
-                      <Td value={r.u2Export} className="text-slate-300 tabular-nums" />
-                      <Td value={r.gridTotal} className="text-cyan-300 font-bold tabular-nums" />
-                      <Td value={r.solar} className="text-emerald-300 tabular-nums" />
-                      <Td value={r.totalDg} className="text-amber-300 tabular-nums" />
-                      <Td value={r.total} className="text-white font-bold tabular-nums" />
-                      <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPowerFactor(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPowerFactor(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.avgPf != null && r.avgPf > 0 ? formatPowerFactor(r.avgPf) : '—'} className="text-teal-300 tabular-nums" />
-                      <Td value={r.dg380Fuel} className="text-slate-300 tabular-nums" />
-                      <Td value={r.dg500Fuel} className="text-slate-300 tabular-nums" />
-                      <Td value={r.dg380DefPct} className="text-slate-300 tabular-nums" />
-                      <Td value={r.dg500DefPct} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.u1ImportKwhReading)} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.u1ExportKwhReading)} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.u2ImportKwhReading)} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.u2ExportKwhReading)} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.gridNet)} className="text-cyan-300 font-bold tabular-nums" />
+                      <Td value={formatEnergy(r.solarTotal)} className="text-emerald-300 tabular-nums" />
+                      <Td value={formatEnergy(r.dgTotal)} className="text-amber-300 tabular-nums" />
+                      <Td value={formatEnergy(r.totalPlant)} className="text-white font-bold tabular-nums" />
+                      <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPf(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPf(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.combinedPf != null && r.combinedPf > 0 ? formatPf(r.combinedPf) : '—'} className="text-teal-300 tabular-nums" />
+                      <Td value={formatEnergy(r.dg380Hsd)} className="text-slate-300 tabular-nums" />
+                      <Td value={formatEnergy(r.dg500Hsd)} className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg380Def != null && r.dg380Def > 0 ? r.dg380Def.toFixed(1) : '—'} className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg500Def != null && r.dg500Def > 0 ? r.dg500Def.toFixed(1) : '—'} className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}
                     </tr>
                   ))}
@@ -1127,69 +1087,60 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const sorted = useMemo(() => [...dailySolarGeneration].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailySolarGeneration]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
   
-  // Use energy engine to process solar rows (fixes grand total = 0 bug)
-  const withCalc = useMemo(() => sorted.map((r) => {
-    const processed = processSolarRow(r);
-    return { 
-      ...r, 
-      _sum: processed.grand_total, 
-      _u1: processed.u1_total, 
-      _u2: processed.u2_total,
-      u1_total: processed.u1_total,
-      u2_total: processed.u2_total,
-      grand_total: processed.grand_total
-    };
-  }), [sorted]);
-  
+  // Use canonical solar calculations - single source of truth
+  const withCalc = useMemo(() => sorted.map((r) => ({ ...r, ...getSolarDerived(r) })), [sorted]);
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
     if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—', monthlyAvg: '—' };
     
-    // Use energy engine for solar summary
+    // Use canonical solar summary - single source of truth
     const summary = computeSolarSummary(filteredCalc);
     
-    const latest = filteredCalc[0];
-    const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === (dateFrom ? dateFrom.slice(0, 7) : currentMK));
-    const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
-    const best = Math.max(...filteredCalc.map((r) => r._sum));
+    // Month Generation: CURRENT calendar month from FULL dataset (not filtered)
+    const monthGeneration = getCurrentMonthSolarTotal(sorted);
     
-    // Use memoized aggregations for U1/U2 totals - better performance
-    const solarTotals = memoizedAggregations.solarTotals(filteredCalc);
+    const latest = filteredCalc[0];
+    const best = Math.max(...filteredCalc.map((r) => r.grandTotal || 0));
     
     return { 
-      today: latest._sum, 
-      month: monthTotal, 
-      avg: summary.daily_avg, 
+      today: latest.grandTotal || 0, 
+      month: monthGeneration, 
+      avg: summary.dailyAvg, 
       best, 
-      u1: solarTotals.u1Total, 
-      u2: solarTotals.u2Total, 
-      grandTotal: summary.grand_total, 
-      monthlyAvg: summary.monthly_avg 
+      u1: summary.u1Total, 
+      u2: summary.u2Total, 
+      grandTotal: summary.grandTotal, 
+      monthlyAvg: summary.monthlyAvg 
     };
-  }, [filteredCalc, currentMK, dateFrom]);
+  }, [filteredCalc, sorted, currentMK, dateFrom]);
 
-  const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r._sum })), [filteredCalc]);
+  // Chart data using canonical derived values
+  const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r.grandTotal })), [filteredCalc]);
   const monthlyChart = useMemo(() => {
     const byMonth = {};
-    filteredCalc.forEach((r) => { const m = r.date?.slice(0, 7); if (m) byMonth[m] = (byMonth[m] || 0) + r._sum; });
+    filteredCalc.forEach((r) => { const m = r.date?.slice(0, 7); if (m) byMonth[m] = (byMonth[m] || 0) + (r.grandTotal || 0); });
     return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => ({ name: m, kWh: r1(v) }));
   }, [filteredCalc]);
   const u1InvChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U1 Inv1': toN(r.u1Inv1Kwh), 'U1 Inv2': toN(r.u1Inv2Kwh), 'U1 Inv3': toN(r.u1Inv3Kwh), 'U1 Inv4': toN(r.u1Inv4Kwh) })), [filteredCalc]);
   const u2InvChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U2 Inv1': toN(r.u2Inv1Kwh), 'U2 Inv2': toN(r.u2Inv2Kwh), 'U2 Inv3': toN(r.u2Inv3Kwh) })), [filteredCalc]);
-  const u1u2GrandChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U1 Total': r._u1, 'U2 Total': r._u2, 'Grand Total': r._sum })), [filteredCalc]);
+  
+  // Monthly comparison using canonical aggregation
   const monthlyCompChart = useMemo(() => {
     const byMonth = {};
     filteredCalc.forEach((r) => {
       const m = r.date?.slice(0, 7);
       if (!m) return;
       if (!byMonth[m]) byMonth[m] = { u1: 0, u2: 0 };
-      byMonth[m].u1 += r._u1;
-      byMonth[m].u2 += r._u2;
+      byMonth[m].u1 += r.u1Total || 0;
+      byMonth[m].u2 += r.u2Total || 0;
     });
     return Object.entries(byMonth).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => ({ name: m, 'U1 Total': r1(v.u1), 'U2 Total': r1(v.u2), 'Grand Total': r1(v.u1 + v.u2) }));
   }, [filteredCalc]);
+  
+  // U1 vs U2 vs Grand Total chart
+  const u1u2GrandChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, 'U1 Total': r.u1Total, 'U2 Total': r.u2Total, 'Grand Total': r.grandTotal })), [filteredCalc]);
 
   const fields = useMemo(() => [
     { key: 'date', label: 'Date', type: 'date', required: true },
@@ -1199,7 +1150,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
 
   const handleSave = () => {
     if (!formValues.date) { pushToast({ type: 'error', message: 'Date is required' }); return; }
-    const payload = processSolarRow(formValues);
+    const payload = processSolarRowForSave(formValues);
     if (editRow) updateDailySolarGeneration(editRow.id, payload, userName);
     else addDailySolarGeneration(payload, userName);
     closeForm();
@@ -1211,11 +1162,11 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const cols = [
     { key: 'date', label: 'Date' }, { key: 'u1i1', label: 'U1 Inv1', className: 'text-emerald-400' },
     { key: 'u1i2', label: 'U1 Inv2', className: 'text-emerald-400' }, { key: 'u1i3', label: 'U1 Inv3', className: 'text-emerald-400' },
-    { key: 'u1i4', label: 'U1 Inv4', className: 'text-emerald-400' }, { key: 'u1total', label: 'U1 Total', className: 'text-emerald-300 font-semibold' },
+    { key: 'u1i4', label: 'U1 Inv4', className: 'text-emerald-400' }, { key: 'u1Total', label: 'U1 Total', className: 'text-emerald-300 font-semibold' },
     { key: 'u2i1', label: 'U2 Inv1', className: 'text-cyan-400' },
     { key: 'u2i2', label: 'U2 Inv2', className: 'text-cyan-400' }, { key: 'u2i3', label: 'U2 Inv3', className: 'text-cyan-400' },
-    { key: 'u2total', label: 'U2 Total', className: 'text-cyan-300 font-semibold' },
-    { key: 'total', label: 'Grand Total kWh', className: 'text-white font-semibold' },
+    { key: 'u2Total', label: 'U2 Total', className: 'text-cyan-300 font-semibold' },
+    { key: 'grandTotal', label: 'Grand Total kWh', className: 'text-white font-semibold' },
   ];
 
   return (
@@ -1249,13 +1200,13 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
                     <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
-                    <Td value={r.u1Inv1Kwh} className="text-emerald-300 tabular-nums" /><Td value={r.u1Inv2Kwh} className="text-emerald-300 tabular-nums" />
-                    <Td value={r.u1Inv3Kwh} className="text-emerald-300 tabular-nums" />                    <Td value={r.u1Inv4Kwh} className="text-emerald-300 tabular-nums" />
-                    <Td value={r.u1_total} className="text-emerald-300 font-semibold tabular-nums" />
-                    <Td value={r.u2Inv1Kwh} className="text-cyan-300 tabular-nums" /><Td value={r.u2Inv2Kwh} className="text-cyan-300 tabular-nums" />
-                    <Td value={r.u2Inv3Kwh} className="text-cyan-300 tabular-nums" />
-                    <Td value={r.u2_total} className="text-cyan-300 font-semibold tabular-nums" />
-                    <Td value={r.grand_total} className="text-white font-bold tabular-nums" />
+                    <Td value={formatEnergy(r.u1Inv1Kwh)} className="text-emerald-300 tabular-nums" /><Td value={formatEnergy(r.u1Inv2Kwh)} className="text-emerald-300 tabular-nums" />
+                    <Td value={formatEnergy(r.u1Inv3Kwh)} className="text-emerald-300 tabular-nums" />                    <Td value={formatEnergy(r.u1Inv4Kwh)} className="text-emerald-300 tabular-nums" />
+                    <Td value={formatEnergy(r.u1Total)} className="text-emerald-300 font-semibold tabular-nums" />
+                    <Td value={formatEnergy(r.u2Inv1Kwh)} className="text-cyan-300 tabular-nums" /><Td value={formatEnergy(r.u2Inv2Kwh)} className="text-cyan-300 tabular-nums" />
+                    <Td value={formatEnergy(r.u2Inv3Kwh)} className="text-cyan-300 tabular-nums" />
+                    <Td value={formatEnergy(r.u2Total)} className="text-cyan-300 font-semibold tabular-nums" />
+                    <Td value={formatEnergy(r.grandTotal)} className="text-white font-bold tabular-nums" />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
