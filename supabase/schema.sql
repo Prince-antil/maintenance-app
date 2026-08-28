@@ -340,6 +340,100 @@ create table if not exists public.energy_settings (
 
 insert into public.energy_settings (id) values ('default') on conflict (id) do nothing;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 16. TESTING CERTIFICATES — Statutory Safety Certificates per machine
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.testing_certificates (
+    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    machine_id TEXT NOT NULL,
+    cert_type TEXT NOT NULL,
+    cert_number TEXT,
+    agency_name TEXT,
+    issue_date DATE,
+    expiry_date DATE NOT NULL,
+    frequency_months INTEGER DEFAULT 12,
+    document_url TEXT,
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Compatibility columns for client store (TEXT ids, extended fields)
+alter table public.testing_certificates add column if not exists machine_code TEXT DEFAULT '';
+alter table public.testing_certificates add column if not exists machine_name TEXT DEFAULT '';
+alter table public.testing_certificates add column if not exists plant_section TEXT DEFAULT '';
+alter table public.testing_certificates add column if not exists certificate_type TEXT;
+alter table public.testing_certificates add column if not exists certificate_number TEXT;
+alter table public.testing_certificates add column if not exists frequency TEXT;
+alter table public.testing_certificates add column if not exists document JSONB;
+alter table public.testing_certificates add column if not exists document_name TEXT;
+alter table public.testing_certificates add column if not exists document_path TEXT;
+alter table public.testing_certificates add column if not exists remarks TEXT DEFAULT '';
+
+-- Backfill compatibility columns from spec columns where needed
+-- (no data migration needed; columns default to empty)
+
+-- Notification settings table (for safety alerts dispatch)
+create table if not exists public.notification_settings (
+  id          text primary key default 'default',
+  recipients  jsonb not null default '[]'::jsonb,
+  enabled     boolean not null default true,
+  amc_expiry_30d  boolean not null default true,
+  amc_expiry_15d  boolean not null default true,
+  amc_expiry_7d   boolean not null default true,
+  amc_expiry_today boolean not null default true,
+  amc_visit_overdue boolean not null default true,
+  pm_overdue    boolean not null default true,
+  breakdown_open_hours integer not null default 24,
+  reminder_days jsonb not null default '[30,15,7]'::jsonb,
+  created_at   timestamptz not null default timezone('utc', now()),
+  updated_at   timestamptz not null default timezone('utc', now())
+);
+
+alter table public.notification_settings enable row level security;
+drop policy if exists "public notification settings access" on public.notification_settings;
+create policy "public notification settings access" on public.notification_settings for all to anon, authenticated using (true) with check (true);
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notification_settings'
+  ) then
+    alter publication supabase_realtime add table public.notification_settings;
+  end if;
+end
+$$;
+alter table public.notification_settings replica identity full;
+
+-- Enable RLS & set public access policies (per spec)
+alter table public.testing_certificates enable row level security;
+drop policy if exists "Allow read access for authenticated users" on public.testing_certificates;
+create policy "Allow read access for authenticated users" on public.testing_certificates for select using (true);
+drop policy if exists "Allow insert/update/delete access" on public.testing_certificates for all using (true);
+create policy "Allow insert/update/delete access" on public.testing_certificates for all using (true);
+drop policy if exists "public testing certificates access" on public.testing_certificates;
+create policy "public testing certificates access" on public.testing_certificates for all to anon, authenticated using (true) with check (true);
+
+-- Ensure notification_settings table supports safety alerts (per spec)
+alter table if exists public.notification_settings add column if not exists notif_safety_expiry BOOLEAN DEFAULT true;
+alter table if exists public.notification_settings add column if not exists notif_safety_expired BOOLEAN DEFAULT true;
+-- Legacy safety columns for backwards compat (from previous migration)
+alter table if exists public.notification_settings add column if not exists safety_expiry_warning BOOLEAN DEFAULT true;
+alter table if exists public.notification_settings add column if not exists safety_expired BOOLEAN DEFAULT true;
+
+-- Enable Supabase Realtime for testing_certificates (per spec)
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'testing_certificates'
+  ) then
+    alter publication supabase_realtime add table public.testing_certificates;
+  end if;
+end
+$$;
+alter table public.testing_certificates replica identity full;
+
 -- =============================================================================
 -- ROW LEVEL SECURITY — Enable RLS on all tables and create permissive policies
 -- =============================================================================

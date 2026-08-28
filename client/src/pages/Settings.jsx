@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
+import { useUI } from '../context/UIContext.jsx';
 import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData, getEnergySettings, upsertEnergySettings } from '../store.js';
 import { clearReportVault, listReportMetadata } from '../reportVault.js';
 import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
+import { sendTestNotification } from '../lib/notificationService.js';
 import {
   Settings as SettingsIcon, Factory, User, Shield, Database,
   DownloadCloud, UploadCloud, CheckCircle2, AlertCircle, Info,
@@ -14,6 +16,7 @@ const NOTIF_STORAGE_KEY = 'ccpl_notification_settings';
 
 export default function Settings() {
   const { user } = useAuth();
+  const { pushToast } = useUI();
   const store = useStore();
   const [plantName, setPlantName] = useState(store.settings.plantName || '');
   const [saved, setSaved] = useState(false);
@@ -637,9 +640,25 @@ export default function Settings() {
               <CheckCircle2 size={13} aria-hidden="true" /> Save Settings
             </button>
             <button
-              onClick={() => {
-                setNotifTestMsg({ ok: true, text: 'Test notification queued. Check your configured channels.' });
-                setTimeout(() => setNotifTestMsg(null), 4000);
+              onClick={async () => {
+                const settings = {
+                  notifEnabled,
+                  notifInApp,
+                  notifEmail,
+                  notifWhatsApp,
+                  notifPrimaryEmail,
+                  notifAdditionalEmails,
+                  notifWhatsAppNumbers,
+                  notifReminderDays,
+                };
+                setNotifTestMsg({ ok: true, text: 'Dispatching test notification...' });
+                try {
+                  await sendTestNotification(settings, { pushToast });
+                  setNotifTestMsg({ ok: true, text: 'Test notification queued. Check your configured channels.' });
+                } catch (err) {
+                  setNotifTestMsg({ ok: false, text: `Test failed: ${err.message || 'Unknown error'}` });
+                }
+                setTimeout(() => setNotifTestMsg(null), 5000);
               }}
               className="btn-ghost text-xs inline-flex items-center gap-2"
             >

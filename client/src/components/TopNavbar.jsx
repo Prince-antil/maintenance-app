@@ -45,9 +45,31 @@ export default function TopNavbar() {
 
   // Notifications
   const [uploadNotifs, setUploadNotifs] = useState([]);
+  const [testNotifs, setTestNotifs] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [seenAt, setSeenAt] = useState(() => loadLS(NOTIF_SEEN_KEY, 0));
   const notifRef = useRef(null);
+
+  // Listen for test notification events (In-App fallback)
+  useEffect(() => {
+    const handler = (e) => {
+      const ts = e.detail?.ts || new Date().toISOString();
+      setTestNotifs((prev) => [
+        ...prev,
+        {
+          id: `test-${Date.now()}`,
+          type: 'info',
+          title: 'Test Notification Delivered',
+          detail: `Test sent at ${new Date(ts).toLocaleTimeString('en-GB')} — In-App channel confirmed`,
+          ts,
+        },
+      ]);
+      // Auto-clear after 8s
+      setTimeout(() => setTestNotifs((prev) => prev.slice(1)), 8000);
+    };
+    window.addEventListener('ccpl:test-notification', handler);
+    return () => window.removeEventListener('ccpl:test-notification', handler);
+  }, []);
 
   // Profile dropdown
   const [profileOpen, setProfileOpen] = useState(false);
@@ -77,7 +99,7 @@ export default function TopNavbar() {
   }, [refreshKey]);
 
   // Derived notification centre: pending PM summaries, monthly
-  // breakdown logs, low health/availability (live) + new uploads
+  // breakdown logs, low health/availability (live) + new uploads + test notifs
   const notifications = useMemo(() => {
     const derived = buildNotifications(store);
     const uploads = uploadNotifs.slice(0, 6).map((n) => ({
@@ -87,8 +109,8 @@ export default function TopNavbar() {
       detail: `${n.uploader_name || 'System'} uploaded ${n.filename} · ${n.category_name}${n.localOnly ? ' · saved in local vault' : ''}`,
       ts: (n.uploaded_at || '').endsWith('Z') ? n.uploaded_at : n.uploaded_at + 'Z',
     }));
-    return [...derived, ...uploads].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 12);
-  }, [store, uploadNotifs]);
+    return [...derived, ...uploads, ...testNotifs].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 12);
+  }, [store, uploadNotifs, testNotifs]);
 
   const unread = notifications.filter((n) => new Date(n.ts).getTime() > seenAt).length;
 

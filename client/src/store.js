@@ -1121,6 +1121,19 @@ function plantSectionToCloudRow(record) {
 }
 
 // ── Testing Certificates (Safety & Statutory) ───────────────────────────────
+function frequencyToMonths(freq) {
+  if (typeof freq === 'number' && Number.isFinite(freq)) return freq;
+  const s = String(freq || '').toLowerCase();
+  if (s.includes('6 month')) return 6;
+  if (s.includes('1 year') || s === '12' || s.includes('12 month')) return 12;
+  if (s.includes('2 year')) return 24;
+  if (s.includes('3 year')) return 36;
+  if (s.includes('5 year')) return 60;
+  if (s.includes('custom')) return 12;
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0) return n;
+  return 12;
+}
 function normalizeTestingCertificate(fields) {
   return {
     id: fields.id || uid('tcert'),
@@ -1128,17 +1141,19 @@ function normalizeTestingCertificate(fields) {
     machineCode: fields.machineCode || fields.machine_code || '',
     machineName: fields.machineName || fields.machine_name || '',
     plantSection: fields.plantSection || fields.plant_section || '',
-    certificateType: String(fields.certificateType || fields.certificate_type || '').trim(),
-    certificateNumber: String(fields.certificateNumber || fields.certificate_number || fields.licenseNumber || '').trim(),
+    certificateType: String(fields.certificateType || fields.certificate_type || fields.cert_type || '').trim(),
+    certificateNumber: String(fields.certificateNumber || fields.certificate_number || fields.cert_number || fields.licenseNumber || '').trim(),
     agencyName: String(fields.agencyName || fields.agency_name || fields.inspectorName || '').trim(),
     issueDate: fields.issueDate || fields.issue_date || '',
     expiryDate: fields.expiryDate || fields.expiry_date || '',
     frequency: String(fields.frequency || '').trim(),
-    document: fields.document && typeof fields.document === 'object' ? fields.document : (fields.documentUrl ? { filename: fields.documentName || 'certificate.pdf', publicUrl: fields.documentUrl, storagePath: fields.documentPath || '' } : null),
-    documentName: fields.documentName || fields.document?.filename || '',
-    documentUrl: fields.documentUrl || fields.document?.publicUrl || '',
-    documentPath: fields.documentPath || fields.document?.storagePath || '',
-    remarks: String(fields.remarks || '').trim(),
+    frequencyMonths: fields.frequencyMonths || fields.frequency_months || frequencyToMonths(fields.frequency),
+    document: fields.document && typeof fields.document === 'object' ? fields.document : (fields.documentUrl || fields.document_url ? { filename: fields.documentName || 'certificate.pdf', publicUrl: fields.documentUrl || fields.document_url, storagePath: fields.documentPath || fields.document_path || '' } : null),
+    documentName: fields.documentName || fields.document_name || fields.document?.filename || '',
+    documentUrl: fields.documentUrl || fields.document_url || fields.document?.publicUrl || '',
+    documentPath: fields.documentPath || fields.document_path || fields.document?.storagePath || '',
+    remarks: String(fields.remarks || fields.notes || '').trim(),
+    notes: String(fields.notes || fields.remarks || '').trim(),
     createdAt: fields.createdAt || fields.created_at || now(),
     updatedAt: fields.updatedAt || fields.updated_at || now(),
   };
@@ -1151,17 +1166,19 @@ function normalizeTestingCertificateCloudRow(row) {
     machineCode: row.machine_code,
     machineName: row.machine_name,
     plantSection: row.plant_section,
-    certificateType: row.certificate_type,
-    certificateNumber: row.certificate_number,
+    certificateType: row.certificate_type || row.cert_type,
+    certificateNumber: row.certificate_number || row.cert_number,
     agencyName: row.agency_name,
     issueDate: row.issue_date,
     expiryDate: row.expiry_date,
     frequency: row.frequency,
+    frequencyMonths: row.frequency_months,
     document: row.document || (row.document_url ? { filename: row.document_name, publicUrl: row.document_url, storagePath: row.document_path } : null),
     documentName: row.document_name,
     documentUrl: row.document_url,
     documentPath: row.document_path,
-    remarks: row.remarks,
+    remarks: row.remarks || row.notes,
+    notes: row.notes || row.remarks,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -1174,17 +1191,24 @@ function testingCertificateToCloudRow(record) {
     machine_code: record.machineCode,
     machine_name: record.machineName,
     plant_section: record.plantSection,
-    certificate_type: record.certificateType,
-    certificate_number: record.certificateNumber,
+    // Spec columns
+    cert_type: record.certificateType,
+    cert_number: record.certificateNumber,
     agency_name: record.agencyName,
     issue_date: record.issueDate || null,
     expiry_date: record.expiryDate || null,
+    frequency_months: frequencyToMonths(record.frequency),
+    document_url: record.documentUrl || record.document?.publicUrl || null,
+    notes: record.remarks || record.notes || '',
+    // Extended columns for backward compat
+    certificate_type: record.certificateType,
+    certificate_number: record.certificateNumber,
     frequency: record.frequency,
     document: record.document || null,
     document_name: record.documentName || record.document?.filename || null,
-    document_url: record.documentUrl || record.document?.publicUrl || null,
     document_path: record.documentPath || record.document?.storagePath || null,
     remarks: record.remarks,
+    created_at: record.createdAt,
     updated_at: now(),
   };
 }
