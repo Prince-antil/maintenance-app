@@ -204,12 +204,23 @@ export function getUtilityDerived(row) {
   const dg500Hsd = Number(row.dg500HsdAddedLtr || 0);
   const dg500Def = Number(row.dg500DefAddedPct || 0);
 
-  // PF calculations (capped at 0.99)
-  const u1Pf = u1ImportKvah > 0 ? Math.min(0.99, Number((u1ImportKwh / u1ImportKvah).toFixed(4))) : 0;
-  const u2Pf = u2ImportKvah > 0 ? Math.min(0.99, Number((u2ImportKwh / u2ImportKvah).toFixed(4))) : 0;
+  // PF calculations — fully dynamic (kWh/kVAh), no hardcoded fallback
+  // If kVAh missing but PF present in raw row, derive kVAh = kWh / PF
+  let _u1Kvah = u1ImportKvah;
+  if (_u1Kvah === 0 && u1ImportKwh > 0) {
+    const pf = Number(row.u1Pf ?? row.u1_pf ?? row['U1 PF'] ?? 0);
+    if (pf > 0) _u1Kvah = u1ImportKwh / pf;
+  }
+  let _u2Kvah = u2ImportKvah;
+  if (_u2Kvah === 0 && u2ImportKwh > 0) {
+    const pf2 = Number(row.u2Pf ?? row.u2_pf ?? row['U2 PF'] ?? 0);
+    if (pf2 > 0) _u2Kvah = u2ImportKwh / pf2;
+  }
+  const u1Pf = _u1Kvah > 0 ? Number((u1ImportKwh / _u1Kvah).toFixed(4)) : 0;
+  const u2Pf = _u2Kvah > 0 ? Number((u2ImportKwh / _u2Kvah).toFixed(4)) : 0;
   const totalImportKwh = u1ImportKwh + u2ImportKwh;
-  const totalImportKvah = u1ImportKvah + u2ImportKvah;
-  const combinedPf = totalImportKvah > 0 ? Math.min(0.99, Number((totalImportKwh / totalImportKvah).toFixed(4))) : 0;
+  const totalImportKvah = _u1Kvah + _u2Kvah;
+  const combinedPf = totalImportKvah > 0 ? Number((totalImportKwh / totalImportKvah).toFixed(4)) : 0;
 
   const u1Net = u1ImportKwh - u1ExportKwh;
   const u2Net = u2ImportKwh - u2ExportKwh;
@@ -220,12 +231,12 @@ export function getUtilityDerived(row) {
   const totalPlant = gridNet + solarTotal + dgTotal;
 
   return {
-    // Raw readings
-    u1ImportKwh, u1ImportKvah, u1ExportKwh, u1ExportKvah, u1SolarKwh, u1SolarKvah,
-    u2ImportKwh, u2ImportKvah, u2ExportKwh, u2ExportKvah, u2SolarKwh, u2SolarKvah,
+    // Raw readings (kVAh dynamically derived if missing but PF present)
+    u1ImportKwh, u1ImportKvah: _u1Kvah, u1ExportKwh, u1ExportKvah, u1SolarKwh, u1SolarKvah,
+    u2ImportKwh, u2ImportKvah: _u2Kvah, u2ExportKwh, u2ExportKvah, u2SolarKwh, u2SolarKvah,
     dg380Kwh, dg380Hours, dg380Hsd, dg380Def: Number(row.dg380DefAddedPct || 0),
     dg500Kwh, dg500Hours, dg500Hsd, dg500Def: Number(row.dg500DefAddedPct || 0),
-    // PF
+    // PF — fully dynamic
     u1Pf, u2Pf, combinedPf,
     // Derived
     u1Net, u2Net, gridNet, solarTotal, dgTotal, totalHsd, totalPlant,
@@ -284,25 +295,20 @@ export function computeUtilitySummary(rows) {
   const dg380Hsd = withDerived.reduce((sum, r) => sum + (r.dg380Hsd || 0), 0);
   const dg500Hsd = withDerived.reduce((sum, r) => sum + (r.dg500Hsd || 0), 0);
 
-  // Weighted PF
-  let u1PfWeighted = 0, u1ImportTotal = 0;
-  let u2PfWeighted = 0, u2ImportTotal = 0;
-  let combinedPfWeighted = 0, totalImportTotal = 0;
-
+  // Weighted PF — fully dynamic (ΣkWh / ΣkVAh)
+  let u1KwhSum = 0, u1KvahSum = 0;
+  let u2KwhSum = 0, u2KvahSum = 0;
   withDerived.forEach(r => {
-    const u1Import = Number(r.u1ImportKwh || 0);
-    const u2Import = Number(r.u2ImportKwh || 0);
-    const u1Pf = r.u1Pf || 0;
-    const u2Pf = r.u2Pf || 0;
-    const combinedPf = r.combinedPf || 0;
-    
-    if (u1Import > 0 && u1Pf > 0) { u1PfWeighted += u1Import * u1Pf; u1ImportTotal += u1Import; }
-    if (u2Import > 0 && u2Pf > 0) { u2PfWeighted += u2Import * u2Pf; u2ImportTotal += u2Import; }
-    if ((u1Import + u2Import) > 0 && combinedPf > 0) { 
-      combinedPfWeighted += (u1Import + u2Import) * combinedPf; 
-      totalImportTotal += (u1Import + u2Import); 
-    }
+    u1KwhSum += Number(r.u1ImportKwh || 0);
+    u1KvahSum += Number(r.u1ImportKvah || 0);
+    u2KwhSum += Number(r.u2ImportKwh || 0);
+    u2KvahSum += Number(r.u2ImportKvah || 0);
   });
+  const _u1Pf = u1KvahSum > 0 ? u1KwhSum / u1KvahSum : 0;
+  const _u2Pf = u2KvahSum > 0 ? u2KwhSum / u2KvahSum : 0;
+  const _totalKwh = u1KwhSum + u2KwhSum;
+  const _totalKvah = u1KvahSum + u2KvahSum;
+  const _combinedPf = _totalKvah > 0 ? _totalKwh / _totalKvah : 0;
 
   const latest = sorted[0];
   const latestGrid = latest ? latest.gridNet : 0;
@@ -322,9 +328,9 @@ export function computeUtilitySummary(rows) {
     dg500Hours: Number(dg500Hours.toFixed(2)),
     dg380Hsd: Number(dg380Hsd.toFixed(2)),
     dg500Hsd: Number(dg500Hsd.toFixed(2)),
-    avgU1Pf: u1ImportTotal > 0 ? Number((u1PfWeighted / u1ImportTotal).toFixed(4)) : 0,
-    avgU2Pf: u2ImportTotal > 0 ? Number((u2PfWeighted / u2ImportTotal).toFixed(4)) : 0,
-    avgCombinedPf: totalImportTotal > 0 ? Number((combinedPfWeighted / totalImportTotal).toFixed(4)) : 0,
+    avgU1Pf: _u1Pf > 0 ? Number(_u1Pf.toFixed(4)) : 0,
+    avgU2Pf: _u2Pf > 0 ? Number(_u2Pf.toFixed(4)) : 0,
+    avgCombinedPf: _combinedPf > 0 ? Number(_combinedPf.toFixed(4)) : 0,
     latestGrid,
     latestDg,
     latestSolar,
@@ -391,8 +397,7 @@ export function aggregateUtilityByMonth(rows) {
 export function formatPowerFactor(pfVal) {
   const num = Number(pfVal);
   if (!Number.isFinite(num) || num <= 0) return null;
-  if (num >= 1.0) return '0.99';
-  if (num >= 0.99) return '0.99';
+  if (num > 1) return '1.00';
   return num.toFixed(2);
 }
 

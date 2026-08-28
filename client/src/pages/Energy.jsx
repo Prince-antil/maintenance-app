@@ -231,21 +231,18 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const filteredDerived = useMemo(() => registerMonth ? withDerived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : withDerived, [withDerived, registerMonth]);
   const pageData = useMemo(() => filteredDerived.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredDerived, page]);
 
-  // KPIs using canonical utility summary - works on filtered data
+  // KPIs — fully dynamic PF from raw data (no hardcoded fallbacks)
   const kpis = useMemo(() => {
-    if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
-    
-    // Use canonical utility summary on filtered data
+    if (filteredDerived.length === 0) return { grid: '0', dg: '0', solar: '0', pf: '0.00' };
     const summary = computeUtilitySummary(filteredDerived);
-    
-    // Latest values from most recent row in filtered data
     const latest = filteredDerived[0];
-    
-    return { 
-      grid: formatEnergy(latest?.gridNet || 0), 
-      dg: formatEnergy(latest?.dgTotal || 0), 
-      solar: formatEnergy(latest?.solarTotal || 0), 
-      pf: latest?.combinedPf > 0 ? formatPf(latest.combinedPf) : '—' 
+    // PF dynamically calculated as ΣkWh/ΣkVAh across filtered period; fallback to latest's PF if summary is 0
+    const dynamicPf = summary.avgCombinedPf > 0 ? summary.avgCombinedPf : (latest?.combinedPf || 0);
+    return {
+      grid: formatEnergy(latest?.gridNet || 0),
+      dg: formatEnergy(latest?.dgTotal || 0),
+      solar: formatEnergy(latest?.solarTotal || 0),
+      pf: dynamicPf > 0 ? (formatPf(dynamicPf) ?? '0.00') : '0.00'
     };
   }, [filteredDerived]);
 

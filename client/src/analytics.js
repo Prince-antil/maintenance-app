@@ -11,63 +11,63 @@ const energyTotal = (entry) => (entry.source ? (entry.kwh || 0) : (entry.solarGe
 const round1 = (value) => Math.round((Number(value) || 0) * 10) / 10;
 
 // ── Power Factor Utilities ────────────────────────────────────────────────────
-// Strict PF formatting: never round to 1.00; cap at 0.99 for display.
+// Fully dynamic PF formatting — returns true value toFixed(2), capped at 1.00
 export function formatPowerFactor(pfVal) {
   const num = Number(pfVal);
   if (!Number.isFinite(num) || num <= 0) return null;
-  if (num >= 1.0) return '0.99';
-  if (num >= 0.99) return '0.99';
+  if (num > 1) return '1.00';
   return num.toFixed(2);
 }
 
 /**
- * Dynamic Power Factor calculation for a single row
+ * Dynamic Power Factor calculation for a single row — fully dynamic, no hardcoded fallback
  * U1 PF = U1_kWh / U1_kVAh
  * U2 PF = U2_kWh / U2_kVAh
  * Combined PF = (U1_kWh + U2_kWh) / (U1_kVAh + U2_kVAh)
- * All capped at 0.99
+ * Returns 0 when kVAh is 0 (no static fallback)
  */
 export function computeDynamicPowerFactors(u1_kwh, u1_kvah, u2_kwh, u2_kvah) {
   const u1 = Number(u1_kwh || 0);
   const u1_kva = Number(u1_kvah || 0);
   const u2 = Number(u2_kwh || 0);
   const u2_kva = Number(u2_kvah || 0);
-  
-  const u1_pf = u1_kva > 0 ? Math.min(0.99, Number((u1 / u1_kva).toFixed(4))) : 0;
-  const u2_pf = u2_kva > 0 ? Math.min(0.99, Number((u2 / u2_kva).toFixed(4))) : 0;
-  const combined_pf = (u1_kva + u2_kva) > 0 ? Math.min(0.99, Number(((u1 + u2) / (u1_kva + u2_kva)).toFixed(4))) : 0;
-  
+  const u1_pf = u1_kva > 0 ? Number((u1 / u1_kva).toFixed(4)) : 0;
+  const u2_pf = u2_kva > 0 ? Number((u2 / u2_kva).toFixed(4)) : 0;
+  const combined_pf = (u1_kva + u2_kva) > 0 ? Number(((u1 + u2) / (u1_kva + u2_kva)).toFixed(4)) : 0;
   return { u1_pf, u2_pf, combined_pf };
 }
 
 /**
- * Compute weighted Power Factor across an array of delta rows.
- * Uses standard electrical formulation:
- *   PF_weighted = Σ(kWh_i) / Σ(kWh_i / PF_i)  for individual units
- *   Combined PF = Total_kWh / sqrt(Total_kWh² + Total_kVARh²)
- * This replaces simple arithmetic averaging with energy-weighted calculation.
+ * Compute weighted Power Factor across an array of delta rows — fully dynamic
+ * PF = ΣkWh / ΣkVAh (true weighted). If kVAh missing but PF present, derive kVAh = kWh / PF.
+ * No hardcoded fallbacks (e.g. 0.98); returns 0 when no data.
  */
 export function computeWeightedPf(deltas) {
-  let u1KwhSum = 0, u1KvarhSum = 0;
-  let u2KwhSum = 0, u2KvarhSum = 0;
+  if (!Array.isArray(deltas) || deltas.length === 0) return 0;
+  let u1KwhSum = 0, u1KvahSum = 0;
+  let u2KwhSum = 0, u2KvahSum = 0;
   (deltas || []).forEach((d) => {
-    const u1Import = Number(d._delta?.u1ImportKwhReading) || 0;
-    const u1Pf = Math.min(1, Math.max(0.1, Number(d._delta?.u1Pf) || Number(d.u1Pf) || 0.98));
-    if (u1Import > 0) {
-      u1KwhSum += u1Import;
-      u1KvarhSum += u1Import * Math.tan(Math.acos(u1Pf));
+    const u1Kwh = Number(d._delta?.u1ImportKwhReading) || 0;
+    let u1Kvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    if (u1Kvah === 0 && u1Kwh > 0) {
+      const pf = Number(d._delta?.u1Pf ?? d.u1Pf ?? 0);
+      if (pf > 0) u1Kvah = u1Kwh / pf;
     }
-    const u2Import = Number(d._delta?.u2ImportKwhReading) || 0;
-    const u2Pf = Math.min(1, Math.max(0.1, Number(d._delta?.u2Pf) || Number(d.u2Pf) || 0.98));
-    if (u2Import > 0) {
-      u2KwhSum += u2Import;
-      u2KvarhSum += u2Import * Math.tan(Math.acos(u2Pf));
+    u1KwhSum += u1Kwh;
+    u1KvahSum += u1Kvah;
+    const u2Kwh = Number(d._delta?.u2ImportKwhReading) || 0;
+    let u2Kvah = Number(d._delta?.u2ImportKvahReading) || 0;
+    if (u2Kvah === 0 && u2Kwh > 0) {
+      const pf2 = Number(d._delta?.u2Pf ?? d.u2Pf ?? 0);
+      if (pf2 > 0) u2Kvah = u2Kwh / pf2;
     }
+    u2KwhSum += u2Kwh;
+    u2KvahSum += u2Kvah;
   });
   const totalKwh = u1KwhSum + u2KwhSum;
-  const totalKvarh = u1KvarhSum + u2KvarhSum;
-  if (totalKwh === 0) return 0;
-  return totalKwh / Math.sqrt(totalKwh * totalKwh + totalKvarh * totalKvarh);
+  const totalKvah = u1KvahSum + u2KvahSum;
+  if (totalKvah === 0) return 0;
+  return totalKwh / totalKvah;
 }
 
 /**
@@ -1445,11 +1445,18 @@ export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
 
   return last.map((d) => {
     const u1ImportKwh = Number(d._delta?.u1ImportKwhReading) || 0;
-    const u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    let u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    if (u1ImportKvah === 0 && u1ImportKwh > 0) {
+      const pf = Number(d._delta?.u1Pf ?? 0);
+      if (pf > 0) u1ImportKvah = u1ImportKwh / pf;
+    }
     const u2ImportKwh = Number(d._delta?.u2ImportKwhReading) || 0;
-    const u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
-    
-    // Use dynamic PF calculation
+    let u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
+    if (u2ImportKvah === 0 && u2ImportKwh > 0) {
+      const pf2 = Number(d._delta?.u2Pf ?? 0);
+      if (pf2 > 0) u2ImportKvah = u2ImportKwh / pf2;
+    }
+    // Use fully dynamic PF calculation (kWh/kVAh)
     const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
       u1ImportKwh, u1ImportKvah, u2ImportKwh, u2ImportKvah
     );

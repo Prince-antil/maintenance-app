@@ -50,7 +50,7 @@ export function computeEnergySnapshot(utilityRows = [], solarRows = []) {
     const direct = Number(row?.total_solar_kwh ?? row?.solar_kwh ?? row?.total_generation ?? row?.dailyTotalKwh ?? row?.daily_total_kwh ?? row?.grand_total ?? 0);
     return acc + (u1 + u2 > 0 ? (u1 + u2) : (Number.isFinite(direct) ? direct : 0));
   }, 0);
-  // 5. Power Factor — weighted by energy consumption (standard electrical formulation)
+  // 5. Power Factor — fully dynamic (no hardcoded fallbacks, kWh/kVAh weighted)
   const pfResult = calculateWeightedPF(safeUtility);
   const avgU1Pf = pfResult.u1Pf;
   const avgU2Pf = pfResult.u2Pf;
@@ -71,50 +71,85 @@ export function computeEnergySnapshot(utilityRows = [], solarRows = []) {
     avgU2Pf,
     overallPf,
     u1Pct,
-    u2Pct
+    u2Pct,
+    // Expose raw PF engine values for Explore modal (no extra calc needed)
+    u1Kwh: pfResult.u1Kwh,
+    u1Kvah: pfResult.u1Kvah,
+    u2Kwh: pfResult.u2Kwh,
+    u2Kvah: pfResult.u2Kvah,
+    totalKwh: pfResult.totalKwh,
+    totalKvah: pfResult.totalKvah
   };
 }
 
 // ---------------------------------------------------------------------------
-// Weighted Power Factor Calculation (Standard Electrical Engineering)
-// PF_weighted = Σ(kWh_i) / Σ(kWh_i / PF_i)
-// Combined PF from U1 + U2: PF = Total_kWh / sqrt(Total_kWh^2 + Total_kVARh^2)
+// Weighted Power Factor Calculation — Fully Dynamic, Zero Hardcoded Fallbacks
+// PF = kWh / kVAh (true weighted: ΣkWh / ΣkVAh)
+// If kVAh missing but PF present, derive kVAh = kWh / PF dynamically
+// Returns 0.00 when no data — no static 0.98 fallback
 // ---------------------------------------------------------------------------
 
 export function calculateWeightedPF(rows) {
-  if (!rows || rows.length === 0) return { overallPf: '0.98', u1Pf: '0.98', u2Pf: '0.98' };
-  let u1KwhSum = 0, u1KvarhSum = 0;
-  let u2KwhSum = 0, u2KvarhSum = 0;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      overallPf: '0.00',
+      u1Pf: '0.00',
+      u2Pf: '0.00',
+      u1Kwh: 0,
+      u1Kvah: 0,
+      u2Kwh: 0,
+      u2Kvah: 0,
+      totalKwh: 0,
+      totalKvah: 0
+    };
+  }
+  let u1KwhSum = 0, u1KvahSum = 0;
+  let u2KwhSum = 0, u2KvahSum = 0;
   rows.forEach(row => {
-    const u1Kwh = Number(row.u1_import_kwh ?? row.u1_import ?? row.u1ImportKwh ?? row.u1_import_kwh_reading ?? row.u1ImportKwhReading ?? 0);
-    const u1Pf = Math.min(1, Math.max(0.1, Number(row.u1_pf ?? row.u1Pf ?? 0.98)));
-    if (u1Kwh > 0) {
-      u1KwhSum += u1Kwh;
-      u1KvarhSum += u1Kwh * Math.tan(Math.acos(u1Pf));
+    const u1KwhRaw = Number(row.u1_import_kwh ?? row.u1_import ?? row['U1 Import KWh Reading'] ?? row.u1_import_kwh_reading ?? row.u1ImportKwhReading ?? row.u1ImportKwh ?? 0);
+    const u1KwhVal = Number.isFinite(u1KwhRaw) ? u1KwhRaw : 0;
+    let u1Kvah = Number(row.u1_import_kvah ?? row.u1_kvah ?? row['U1 Import kVAh Reading'] ?? row.u1_import_kvah_reading ?? row.u1ImportKvahReading ?? row.u1_kvah_reading ?? 0);
+    if (u1Kvah === 0 && u1KwhVal > 0 && row.u1_pf != null && Number(row.u1_pf) > 0) {
+      u1Kvah = u1KwhVal / Number(row.u1_pf);
+    } else if (u1Kvah === 0 && u1KwhVal > 0 && row.u1Pf != null && Number(row.u1Pf) > 0) {
+      u1Kvah = u1KwhVal / Number(row.u1Pf);
     }
-    const u2Kwh = Number(row.u2_import_kwh ?? row.u2_import ?? row.u2ImportKwh ?? row.u2_import_kwh_reading ?? row.u2ImportKwhReading ?? 0);
-    const u2Pf = Math.min(1, Math.max(0.1, Number(row.u2_pf ?? row.u2Pf ?? 0.98)));
-    if (u2Kwh > 0) {
-      u2KwhSum += u2Kwh;
-      u2KvarhSum += u2Kwh * Math.tan(Math.acos(u2Pf));
+    const u2KwhRaw = Number(row.u2_import_kwh ?? row.u2_import ?? row['U2 Import KWh Reading'] ?? row.u2_import_kwh_reading ?? row.u2ImportKwhReading ?? row.u2ImportKwh ?? 0);
+    const u2KwhVal = Number.isFinite(u2KwhRaw) ? u2KwhRaw : 0;
+    let u2Kvah = Number(row.u2_import_kvah ?? row.u2_kvah ?? row['U2 Import kVAh Reading'] ?? row.u2_import_kvah_reading ?? row.u2ImportKvahReading ?? row.u2_kvah_reading ?? 0);
+    if (u2Kvah === 0 && u2KwhVal > 0 && row.u2_pf != null && Number(row.u2_pf) > 0) {
+      u2Kvah = u2KwhVal / Number(row.u2_pf);
+    } else if (u2Kvah === 0 && u2KwhVal > 0 && row.u2Pf != null && Number(row.u2Pf) > 0) {
+      u2Kvah = u2KwhVal / Number(row.u2Pf);
     }
+    u1KwhSum += u1KwhVal;
+    u1KvahSum += u1Kvah;
+    u2KwhSum += u2KwhVal;
+    u2KvahSum += u2Kvah;
   });
-  const calcUnitPf = (kwh, kvarh) => {
-    if (kwh === 0) return '0.98';
-    const pf = kwh / Math.sqrt(Math.pow(kwh, 2) + Math.pow(kvarh, 2));
-    return (Math.round(pf * 100) / 100).toFixed(2);
-  };
+  const u1PfVal = u1KvahSum > 0 ? (u1KwhSum / u1KvahSum) : 0;
+  const u2PfVal = u2KvahSum > 0 ? (u2KwhSum / u2KvahSum) : 0;
   const totalKwh = u1KwhSum + u2KwhSum;
-  const totalKvarh = u1KvarhSum + u2KvarhSum;
-  const overallPf = totalKwh === 0 ? '0.98' : calcUnitPf(totalKwh, totalKvarh);
+  const totalKvah = u1KvahSum + u2KvahSum;
+  const overallPfVal = totalKvah > 0 ? (totalKwh / totalKvah) : 0;
   return {
-    overallPf,
-    u1Pf: calcUnitPf(u1KwhSum, u1KvarhSum),
-    u2Pf: calcUnitPf(u2KwhSum, u2KvarhSum),
-    u1KwhSum,
-    u2KwhSum,
-    u1KvarhSum,
-    u2KvarhSum
+    overallPf: overallPfVal > 0 ? overallPfVal.toFixed(2) : '0.00',
+    u1Pf: u1PfVal > 0 ? u1PfVal.toFixed(2) : '0.00',
+    u2Pf: u2PfVal > 0 ? u2PfVal.toFixed(2) : '0.00',
+    u1Kwh: u1KwhSum,
+    u1Kvah: u1KvahSum,
+    u2Kwh: u2KwhSum,
+    u2Kvah: u2KvahSum,
+    totalKwh,
+    totalKvah,
+    // Backwards-compat aliases for previous callers
+    u1KwhSum: u1KwhSum,
+    u1KvahSum: u1KvahSum,
+    u1KvarhSum: u1KvahSum,
+    u2KwhSum: u2KwhSum,
+    u2KvahSum: u2KvahSum,
+    u2KvarhSum: u2KvahSum,
+    totalKvarh: totalKvah
   };
 }
 
