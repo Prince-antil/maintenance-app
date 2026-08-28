@@ -2,7 +2,6 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-ro
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from './context/AuthContext.jsx';
 import { useUI } from './context/UIContext.jsx';
-import Dashboard from './pages/Dashboard.jsx';
 import CategoryView from './pages/CategoryView.jsx';
 import WelcomePage from './pages/WelcomePage.jsx';
 import Machines from './pages/Machines.jsx';
@@ -19,6 +18,7 @@ import MasterImportModal from './components/MasterImportModal.jsx';
 import ToastViewport from './components/ToastViewport.jsx';
 
 // Lazily loaded CMMS modules — keeps the initial bundle lean
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const Breakdowns = lazy(() => import('./pages/Breakdowns.jsx'));
 const PreventiveMaintenance = lazy(() => import('./pages/PreventiveMaintenance.jsx'));
 const Energy = lazy(() => import('./pages/Energy.jsx'));
