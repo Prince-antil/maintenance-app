@@ -16,7 +16,7 @@ import {
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey, monthlyPMCompletion, monthlyPMCompletionFromRecords,
-  computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
+  computePfTrend, computeDgFuelEfficiency, computeDailyDeltas,
   computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
@@ -33,6 +33,11 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, Legend,
 } from 'recharts';
+
+// New Dashboard components
+import { SolarPerformanceCard } from '../components/dashboard/SolarPerformanceCard.jsx';
+import { RenewableEnergyCard } from '../components/dashboard/RenewableEnergyCard.jsx';
+import { computeDashboardMetrics } from '../components/dashboard/DashboardAnalyticsEngine.js';
 
 const MODULE_GROUPS = [
   { label: 'Module A · Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
@@ -143,6 +148,11 @@ export default function Dashboard() {
     periodFilter === 'all' ? dailySolarGeneration : dailySolarGeneration.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
     [dailySolarGeneration, periodFilter]
   );
+
+  // Dashboard metrics using canonical calculations from canonical data sources
+  const dashboardMetrics = useMemo(() => {
+    return computeDashboardMetrics(filteredDailySolarGeneration, filteredDailyUtilityLog);
+  }, [filteredDailySolarGeneration, filteredDailyUtilityLog]);
 
   const pfTrend = useMemo(() =>
     computePfTrend(dailyUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
@@ -546,77 +556,8 @@ export default function Dashboard() {
             />
           )}
         </ChartCard>
-        <ChartCard title="Solar Performance" subtitle="Inverter total vs meter-side import & export" empty={noSolar && noDailyUtility} height={260} raw>
-          {(noSolar && noDailyUtility) ? (
-            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-5 px-6">
-              <div className="flex items-end gap-6 w-full max-w-md">
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Inverter Total</p>
-                  <div className="rounded-t-md bg-emerald-500/20 border border-emerald-500/30 pt-3 pb-2 px-2">
-                    <p className="text-emerald-300 text-lg font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
-                    <p className="text-emerald-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Import</p>
-                  <div className="rounded-t-md bg-cyan-500/20 border border-cyan-500/30 pt-3 pb-2 px-2">
-                    <p className="text-cyan-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarImport.toLocaleString()}</p>
-                    <p className="text-cyan-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Export</p>
-                  <div className="rounded-t-md bg-violet-500/20 border border-violet-500/30 pt-3 pb-2 px-2">
-                    <p className="text-violet-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarExport.toLocaleString()}</p>
-                    <p className="text-violet-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-              </div>
-              {renewableSummary.solarCrossCheck > 0 && (
-                <p className="text-[11px] text-amber-400/80">Cross-check deviation: {renewableSummary.solarCrossCheck}%</p>
-              )}
-            </div>
-          )}
-        </ChartCard>
-        <ChartCard title="Renewable Energy & CO₂ Avoided" subtitle="This month's sustainability metrics" empty={noSolar && noDailyUtility} height={260} raw>
-          {(noSolar && noDailyUtility) ? (
-            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4 h-full items-center px-4">
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Solar Generation</p>
-                <p className="text-emerald-300 text-2xl font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
-                <p className="text-emerald-400/60 text-[10px] mt-0.5">kWh</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Renewable Share</p>
-                <p className="text-cyan-300 text-2xl font-bold tabular-nums">{renewableSummary.renewableSharePct}%</p>
-                <p className="text-cyan-400/60 text-[10px] mt-0.5">of total consumption</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">CO₂ Avoided</p>
-                <p className="text-teal-300 text-2xl font-bold tabular-nums">{renewableSummary.co2AvoidedKg.toLocaleString()}</p>
-                <p className="text-teal-400/60 text-[10px] mt-0.5">kg</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Performance Ratio</p>
-                <p className="text-amber-300 text-2xl font-bold tabular-nums">{renewableSummary.performanceRatio}%</p>
-                <p className="text-amber-400/60 text-[10px] mt-0.5">of expected output</p>
-              </div>
-              {renewableSummary.warnings.length > 0 && (
-                <div className="col-span-2 mt-2">
-                  {renewableSummary.warnings.map((w, i) => (
-                    <p key={i} className="text-[11px] text-amber-400/80 flex items-center gap-1.5">
-                      <AlertTriangle size={11} aria-hidden="true" /> {w}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </ChartCard>
+        <SolarPerformanceCard metrics={dashboardMetrics} />
+        <RenewableEnergyCard metrics={dashboardMetrics} />
         <ChartCard title="Machine Health Distribution" subtitle="Fleet condition derived from failures & PM" empty={!store.machines.length}>
           <PieDonutChart data={charts.health} donut centerLabel={kpi.machineCount} centerSub="Machines" />
         </ChartCard>
