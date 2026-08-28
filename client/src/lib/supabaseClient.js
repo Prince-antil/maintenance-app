@@ -23,6 +23,11 @@ export const SUPABASE_AMC_BUCKET =
   import.meta.env.NEXT_PUBLIC_SUPABASE_AMC_BUCKET ||
   FALLBACK_AMC_BUCKET;
 
+export const SUPABASE_CERT_BUCKET =
+  import.meta.env.VITE_SUPABASE_CERT_BUCKET ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_CERT_BUCKET ||
+  'testing-certificates';
+
 const hasRealSupabaseConfig =
   Boolean(import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL) &&
   Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) &&

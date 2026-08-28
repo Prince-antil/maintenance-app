@@ -14,7 +14,7 @@ import {
   computeKPIs, monthlyBreakdownTrend, equipmentWiseBreakdown,
   paretoTop10, breakdownByDepartment, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
-  machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
+  machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications, buildTestingCertificateNotifications,
   lastNMonths, monthKey, monthlyPMCompletion, monthlyPMCompletionFromRecords,
   computePfTrend, computeDgFuelEfficiency, computeDailyDeltas,
   formatPowerFactor, computeWeightedPf,
@@ -49,6 +49,7 @@ import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet';
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
 import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle';
 import Filter from 'lucide-react/dist/esm/icons/filter';
+import Award from 'lucide-react/dist/esm/icons/award';
 import { ProgressGauge } from '../components/charts.jsx';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -299,9 +300,10 @@ export default function Dashboard() {
     monthlyRegister: machineBreakdownRegister(filteredMachineBDLogs),
     activeBreakdowns: currentlyUnderBreakdown(store.machineBreakdownLogs),
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
+    certNotifications: buildTestingCertificateNotifications(store.testingCertificates, store.machines),
     pfTrend,
     dgFuelEfficiency,
-  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, filteredMachinePmRecords, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
+  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, filteredMachinePmRecords, store.machines, store.machineBreakdownLogs, store.amc, store.testingCertificates, pfTrend, dgFuelEfficiency]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
@@ -690,6 +692,44 @@ export default function Dashboard() {
                     <p className="text-xs font-semibold">{n.title}</p>
                     <p className="text-[11px] opacity-80">{n.detail}</p>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Safety & Testing Certificate Alerts */}
+      {charts.certNotifications.length > 0 && (
+        <section aria-label="Safety certificate alerts">
+          <div className="glass-card p-5">
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-control bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">
+                <Award size={17} className="text-amber-400" aria-hidden="true" />
+              </div>
+              <div>
+                <h3 className="text-card-title">Safety & Testing Certificate Alerts</h3>
+                <p className="text-meta">Certificates expiring within 30 days or already expired</p>
+              </div>
+              <span className="badge bg-amber-500/15 text-amber-300 border border-amber-500/30 ml-auto">{charts.certNotifications.length} alert{charts.certNotifications.length!==1?'s':''}</span>
+            </div>
+            <div className="space-y-2">
+              {charts.certNotifications.slice(0, 8).map((n) => (
+                <div
+                  key={n.id}
+                  onClick={() => n.machineId && navigate(`/machines/${n.machineId}`)}
+                  className={`flex items-center gap-3 rounded-control border px-4 py-2.5 cursor-pointer hover:bg-white/[0.04] transition-colors ${
+                    n.type === 'danger' ? 'bg-red-500/10 border-red-500/25 text-red-300' :
+                    n.type === 'warning' ? 'bg-amber-500/10 border-amber-500/25 text-amber-300' :
+                    'bg-cyan-500/10 border-cyan-500/25 text-cyan-300'
+                  }`}
+                >
+                  <Award size={14} className="shrink-0" aria-hidden="true" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold">{n.title}</p>
+                    <p className="text-[11px] opacity-80">{n.detail}</p>
+                  </div>
+                  <ChevronRight size={13} className="opacity-60 shrink-0" aria-hidden="true" />
                 </div>
               ))}
             </div>

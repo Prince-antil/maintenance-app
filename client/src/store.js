@@ -23,6 +23,7 @@ const KEYS = {
   monthlyAirCompressor: 'CCPL_MONTHLY_AIR_COMPRESSOR_V1',
   dailySolarGeneration: 'CCPL_DAILY_SOLAR_GENERATION_V1',
   energySettings: 'CCPL_ENERGY_SETTINGS_V1',
+  testingCertificates: 'CCPL_TESTING_CERTIFICATES_V1',
 };
 
 const LEGACY_KEYS = {
@@ -43,6 +44,7 @@ const LEGACY_KEYS = {
   monthlyAirCompressor: [],
   dailySolarGeneration: [],
   energySettings: [],
+  testingCertificates: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -73,7 +75,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -1118,6 +1120,85 @@ function plantSectionToCloudRow(record) {
   };
 }
 
+// ── Testing Certificates (Safety & Statutory) ───────────────────────────────
+function normalizeTestingCertificate(fields) {
+  return {
+    id: fields.id || uid('tcert'),
+    machineId: fields.machineId || fields.machine_id || '',
+    machineCode: fields.machineCode || fields.machine_code || '',
+    machineName: fields.machineName || fields.machine_name || '',
+    plantSection: fields.plantSection || fields.plant_section || '',
+    certificateType: String(fields.certificateType || fields.certificate_type || '').trim(),
+    certificateNumber: String(fields.certificateNumber || fields.certificate_number || fields.licenseNumber || '').trim(),
+    agencyName: String(fields.agencyName || fields.agency_name || fields.inspectorName || '').trim(),
+    issueDate: fields.issueDate || fields.issue_date || '',
+    expiryDate: fields.expiryDate || fields.expiry_date || '',
+    frequency: String(fields.frequency || '').trim(),
+    document: fields.document && typeof fields.document === 'object' ? fields.document : (fields.documentUrl ? { filename: fields.documentName || 'certificate.pdf', publicUrl: fields.documentUrl, storagePath: fields.documentPath || '' } : null),
+    documentName: fields.documentName || fields.document?.filename || '',
+    documentUrl: fields.documentUrl || fields.document?.publicUrl || '',
+    documentPath: fields.documentPath || fields.document?.storagePath || '',
+    remarks: String(fields.remarks || '').trim(),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeTestingCertificateCloudRow(row) {
+  return normalizeTestingCertificate({
+    id: row.id,
+    machineId: row.machine_id,
+    machineCode: row.machine_code,
+    machineName: row.machine_name,
+    plantSection: row.plant_section,
+    certificateType: row.certificate_type,
+    certificateNumber: row.certificate_number,
+    agencyName: row.agency_name,
+    issueDate: row.issue_date,
+    expiryDate: row.expiry_date,
+    frequency: row.frequency,
+    document: row.document || (row.document_url ? { filename: row.document_name, publicUrl: row.document_url, storagePath: row.document_path } : null),
+    documentName: row.document_name,
+    documentUrl: row.document_url,
+    documentPath: row.document_path,
+    remarks: row.remarks,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function testingCertificateToCloudRow(record) {
+  return {
+    id: record.id,
+    machine_id: record.machineId,
+    machine_code: record.machineCode,
+    machine_name: record.machineName,
+    plant_section: record.plantSection,
+    certificate_type: record.certificateType,
+    certificate_number: record.certificateNumber,
+    agency_name: record.agencyName,
+    issue_date: record.issueDate || null,
+    expiry_date: record.expiryDate || null,
+    frequency: record.frequency,
+    document: record.document || null,
+    document_name: record.documentName || record.document?.filename || null,
+    document_url: record.documentUrl || record.document?.publicUrl || null,
+    document_path: record.documentPath || record.document?.storagePath || null,
+    remarks: record.remarks,
+    updated_at: now(),
+  };
+}
+
+function getTestingCertificateStatus(expiryDate) {
+  if (!expiryDate) return { status: 'UNKNOWN', daysLeft: null, tone: 'info' };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const expiry = new Date(expiryDate); expiry.setHours(0,0,0,0);
+  const diff = Math.ceil((expiry - today) / (1000*60*60*24));
+  if (diff <= 0) return { status: 'EXPIRED', daysLeft: diff, tone: 'danger' };
+  if (diff >= 1 && diff <= 30) return { status: 'EXPIRING SOON', daysLeft: diff, tone: 'warning' };
+  return { status: 'VALID', daysLeft: diff, tone: 'success' };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -1209,6 +1290,12 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: energySettingsToCloudRow,
     orderBy: [{ column: 'id', ascending: true }],
   },
+  testingCertificates: {
+    table: 'testing_certificates',
+    fromRow: normalizeTestingCertificateCloudRow,
+    toRow: testingCertificateToCloudRow,
+    orderBy: [{ column: 'expiry_date', ascending: true }],
+  },
 };
 
 let version = 0;
@@ -1289,6 +1376,7 @@ let state = {
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
+  testingCertificates: loadPersistedValue('testingCertificates', []).map(normalizeTestingCertificate),
   plantSections: loadPersistedValue('plantSections', []).map((s) =>
     typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
   ),
@@ -1465,6 +1553,10 @@ async function writeToCloudNow(entity, action, payload) {
 
 async function fetchCloudEntity(entity) {
   const config = CLOUD_ENTITY_CONFIG[entity];
+  if (!config) {
+    rtLog('warn', `FETCH: no config for entity ${entity}`);
+    return [];
+  }
   let query = supabase
     .from(config.table)
     .select('*');
@@ -1475,6 +1567,11 @@ async function fetchCloudEntity(entity) {
 
   const { data, error } = await query;
   if (error) {
+    // For optional tables (testingCertificates) return empty rather than crashing sync
+    if (entity === 'testingCertificates') {
+      rtLog('warn', `FETCH failed on ${config.table} (optional, returning empty):`, error.message);
+      return [];
+    }
     rtLog('error', `FETCH failed on ${config.table}:`, error.message, error.details || '', error.hint || '');
     throw error;
   }
@@ -1748,7 +1845,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -1764,6 +1861,7 @@ async function initializeCloudSync() {
       fetchCloudEntity('monthlyAirCompressor'),
       fetchCloudEntity('dailySolarGeneration'),
       fetchCloudEntity('energySettings'),
+      fetchCloudEntity('testingCertificates'),
     ]);
 
     const remoteSnapshots = {
@@ -1782,6 +1880,7 @@ async function initializeCloudSync() {
       monthlyAirCompressor: remoteMonthlyAirCompressor,
       dailySolarGeneration: remoteDailySolarGeneration,
       energySettings: remoteEnergySettings,
+      testingCertificates: remoteTestingCertificates,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -1825,6 +1924,7 @@ async function initializeCloudSync() {
       state = { ...state, energySettings: normalizeEnergySettings(remoteEnergySettings[0] || {}) };
       persistEntity('energySettings');
     }
+    if (remoteTestingCertificates?.length) replaceEntityState('testingCertificates', remoteTestingCertificates, false);
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet
@@ -2375,6 +2475,71 @@ export function deleteMachinePmRecord(id, userName) {
   commitAndQueue('machinePmRecords', 'delete', id);
   logActivity(userName, 'deleted machine PM record', '', 'pm');
 }
+
+// ── Testing Certificates (Safety & Statutory) ─────────────────────────────────
+export const getTestingCertificates = () => state.testingCertificates || [];
+export const getTestingCertificatesForMachine = (machineId) =>
+  (state.testingCertificates || []).filter((r) => r.machineId === machineId);
+
+export function addTestingCertificate(fields, userName) {
+  const record = normalizeTestingCertificate({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, testingCertificates: [record, ...(state.testingCertificates || [])] };
+  commitAndQueue('testingCertificates', 'upsert', record);
+  logActivity(userName, 'added testing certificate', `${record.machineName || record.machineId} · ${record.certificateType} · ${record.certificateNumber}`, 'machine');
+  return record;
+}
+
+export function updateTestingCertificate(id, patch, userName) {
+  const existing = (state.testingCertificates || []).find((r) => r.id === id);
+  if (!existing) return null;
+  const updated = normalizeTestingCertificate({ ...existing, ...patch, id, updatedAt: now() });
+  state = { ...state, testingCertificates: (state.testingCertificates || []).map((r) => (r.id === id ? updated : r)) };
+  commitAndQueue('testingCertificates', 'upsert', updated);
+  logActivity(userName, 'updated testing certificate', `${updated.certificateType} · ${updated.certificateNumber}`, 'machine');
+  return updated;
+}
+
+export function deleteTestingCertificate(id, userName) {
+  const rec = (state.testingCertificates || []).find((r) => r.id === id);
+  state = { ...state, testingCertificates: (state.testingCertificates || []).filter((r) => r.id !== id) };
+  commitAndQueue('testingCertificates', 'delete', id);
+  logActivity(userName, 'deleted testing certificate', rec ? `${rec.certificateType} · ${rec.certificateNumber}` : '', 'machine');
+}
+
+export async function purgeTestingCertificates(machineId, userName) {
+  let before;
+  if (!machineId) {
+    before = [...(state.testingCertificates || [])];
+    state = { ...state, testingCertificates: [] };
+  } else {
+    before = (state.testingCertificates || []).filter((r) => r.machineId === machineId);
+    state = { ...state, testingCertificates: (state.testingCertificates || []).filter((r) => r.machineId !== machineId) };
+  }
+  commit('testingCertificates');
+  if (supabase && isSupabaseConfigured) {
+    try {
+      let q = supabase.from('testing_certificates').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (machineId) q = q.eq('machine_id', machineId);
+      await q;
+    } catch {}
+  }
+  logActivity(userName, 'purged testing certificates', `${before.length} removed`, 'machine');
+  return before.length;
+}
+
+export async function purgeTestingCertificatesByMachine(machineId, userName) {
+  return purgeTestingCertificates(machineId, userName);
+}
+
+export function getTestingCertificateAlertCount(certificates, machineId) {
+  const list = machineId ? (certificates || []).filter((r) => r.machineId === machineId) : (certificates || []);
+  return list.filter((r) => {
+    const { status } = getTestingCertificateStatus(r.expiryDate);
+    return status === 'EXPIRED' || status === 'EXPIRING SOON';
+  }).length;
+}
+
+export { getTestingCertificateStatus };
 
 export async function purgePmRecords(userName) {
   const previousPmCount = state.machinePmRecords.length;
@@ -3014,6 +3179,7 @@ export function exportBackup() {
       dailySolarGeneration: state.dailySolarGeneration,
       energySettings: state.energySettings,
       machinePmRecords: state.machinePmRecords,
+      testingCertificates: state.testingCertificates,
       activity: state.activity,
       settings: state.settings,
     },
@@ -3115,6 +3281,7 @@ export function resetPersistentData() {
     energySettings: state.energySettings,
     machineBreakdownLogs: state.machineBreakdownLogs,
     machinePmRecords: state.machinePmRecords,
+    testingCertificates: state.testingCertificates,
     amc: state.amc,
     plantSections: state.plantSections,
   };
@@ -3134,6 +3301,7 @@ export function resetPersistentData() {
     amc: [],
     machineBreakdownLogs: [],
     machinePmRecords: [],
+    testingCertificates: [],
     plantSections: [],
     activity: [],
     settings: { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 },
@@ -3159,6 +3327,7 @@ export function resetPersistentData() {
   queueEntityReplacement('dailySolarGeneration', state.dailySolarGeneration, previous.dailySolarGeneration);
   queueEntityReplacement('machineBreakdownLogs', state.machineBreakdownLogs, previous.machineBreakdownLogs);
   queueEntityReplacement('machinePmRecords', state.machinePmRecords, previous.machinePmRecords);
+  queueEntityReplacement('testingCertificates', state.testingCertificates, previous.testingCertificates);
   queueEntityReplacement('amc', state.amc, previous.amc);
   queueEntityReplacement('plantSections', state.plantSections, previous.plantSections);
 }

@@ -13,6 +13,7 @@ import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMo
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
 import AmcTab, { getAmcAlertCount } from '../components/AmcTab.jsx';
+import TestingCertificatesTab, { getTestingCertificateAlertCountForMachine } from '../components/TestingCertificatesTab.jsx';
 import { removeStoredDocument, uploadMachineAttachment } from '../lib/documentStorage.js';
 import { getDocumentUrl, toPreviewDocument } from '../lib/documentLinks.js';
 import { MACHINE_DOC_TABS, EXT_META, ALLOWED_EXT } from '../constants.js';
@@ -22,7 +23,7 @@ import {
   ArrowLeft, Cog, MapPin, Upload, Eye, Download, Trash2, FileText, AlertCircle,
   QrCode, Pencil, X, Save, HeartPulse, Timer, AlertOctagon, Wrench, Package,
   Plus, Image as ImageIcon, History, ClipboardCheck, Filter, ShieldCheck,
-  CalendarDays, FileSpreadsheet,
+  CalendarDays, FileSpreadsheet, Award,
 } from 'lucide-react';
 
 const MEDIA_EXT = ['.mp4', '.webm', '.mov'];
@@ -251,10 +252,13 @@ export default function MachineProfile() {
   // Per-machine breakdown log count
   const bdLogs = (store.machineBreakdownLogs || []).filter((l) => l.machineId === machine.id);
 
+  const certAlerts = getTestingCertificateAlertCountForMachine(store.testingCertificates || [], machine.id);
+  const certCount = (store.testingCertificates || []).filter((r) => r.machineId === machine.id).length;
   const tabCounts = {
     ...Object.fromEntries(MACHINE_DOC_TABS.map((t) => [t.id, (machine.docs || []).filter((d) => d.tab === t.id).length])),
     // AMC tab: show alert count when > 0, otherwise contract count
     amc: amcAlerts > 0 ? `⚠ ${amcAlerts}` : (store.amc || []).filter((r) => r.machineId === machine.id).length,
+    certs: certAlerts > 0 ? `⚠ ${certAlerts}` : certCount,
     spares:  (machine.spares || []).length,
     photos:  (machine.photos || []).length,
     history: (stats?.breakdownHistory?.length || 0) + (stats?.machinePmRecords?.length || 0),
@@ -469,9 +473,10 @@ export default function MachineProfile() {
               }`}
             >
               {t.id === 'amc' && amcAlerts > 0 && <ShieldCheck size={13} className="text-amber-400" aria-hidden="true" />}
+              {t.id === 'certs' && certAlerts > 0 && <Award size={13} className="text-amber-400" aria-hidden="true" />}
               {t.label}
               <span className={`badge ${
-                t.id === 'amc' && amcAlerts > 0
+                (t.id === 'amc' && amcAlerts > 0) || (t.id === 'certs' && certAlerts > 0)
                   ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                   : tab === t.id
                     ? 'bg-cyan-500/15 text-cyan-400'
@@ -846,6 +851,11 @@ export default function MachineProfile() {
           {/* ---- AMC Management tab ---- */}
           {tab === 'amc' && (
             <AmcTab machineId={machine.id} machineName={machine.name} />
+          )}
+
+          {/* ---- Testing Certificates tab ---- */}
+          {tab === 'certs' && (
+            <TestingCertificatesTab machineId={machine.id} machineName={machine.name} />
           )}
 
           {/* ---- Per-machine breakdown log tab ---- */}

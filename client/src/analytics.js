@@ -976,6 +976,93 @@ export function buildAMCNotifications(amcRecords, machines) {
   return notifications.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
+export function buildTestingCertificateNotifications(certificates, machines) {
+  const notifications = [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  (certificates || []).forEach((c) => {
+    if (!c.expiryDate) return;
+    const machine = (machines || []).find((m) => m.id === c.machineId);
+    const machineName = machine?.name || c.machineName || c.machineId || 'Unknown Machine';
+    const expiry = new Date(c.expiryDate); expiry.setHours(0,0,0,0);
+    const daysLeft = Math.ceil((expiry - today) / (1000*60*60*24));
+    const base = {
+      machineName,
+      certificateType: c.certificateType,
+      certificateNumber: c.certificateNumber,
+      expiryDate: c.expiryDate,
+      ts: c.updatedAt || c.createdAt,
+    };
+    if (daysLeft < 0) {
+      notifications.push({
+        id: `cert-expired-${c.id}`,
+        type: 'danger',
+        title: 'Safety Certificate Expired',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expired ${Math.abs(daysLeft)} days ago (${new Date(c.expiryDate).toLocaleDateString('en-GB')})`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft === 0) {
+      notifications.push({
+        id: `cert-expires-today-${c.id}`,
+        type: 'danger',
+        title: 'Safety Certificate Expires Today',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires today`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft === 1) {
+      notifications.push({
+        id: `cert-1d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 1 Day',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires tomorrow`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 7) {
+      notifications.push({
+        id: `cert-7d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 7 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 15) {
+      notifications.push({
+        id: `cert-15d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 15 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 30) {
+      notifications.push({
+        id: `cert-30d-${c.id}`,
+        type: 'info',
+        title: 'Safety Certificate Due in 30 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    }
+  });
+  return notifications.sort((a,b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999));
+}
+
 // ── PM Machine-Level Analytics ──────────────────────────────────────────────
 
 export function machineWisePM(machinePmRecords) {

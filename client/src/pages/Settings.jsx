@@ -1,13 +1,16 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData, getEnergySettings, upsertEnergySettings } from '../store.js';
 import { clearReportVault, listReportMetadata } from '../reportVault.js';
 import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
 import {
   Settings as SettingsIcon, Factory, User, Shield, Database,
   DownloadCloud, UploadCloud, CheckCircle2, AlertCircle, Info,
   Cog, AlertOctagon, ClipboardCheck, Zap, History, Trash2, Bell, Mail, MessageSquare,
 } from 'lucide-react';
+
+const NOTIF_STORAGE_KEY = 'ccpl_notification_settings';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -29,9 +32,104 @@ export default function Settings() {
   const [notifAmcExpired, setNotifAmcExpired] = useState(true);
   const [notifPmOverdue, setNotifPmOverdue] = useState(true);
   const [notifBreakdownOpen, setNotifBreakdownOpen] = useState(true);
+  const [notifSafetyExpiry, setNotifSafetyExpiry] = useState(true);
+  const [notifSafetyExpired, setNotifSafetyExpired] = useState(true);
   const [notifReminderDays, setNotifReminderDays] = useState('30,15,7,1');
   const [notifSaved, setNotifSaved] = useState(false);
   const [notifTestMsg, setNotifTestMsg] = useState(null);
+
+  // ── Load persisted notification settings on mount (localStorage + Supabase) ──
+  useEffect(() => {
+    let cancelled = false;
+    function applyNotifPayload(payload) {
+      if (!payload || typeof payload !== 'object') return;
+      if (typeof payload.enabled === 'boolean') setNotifEnabled(payload.enabled);
+      if (payload.channels && typeof payload.channels === 'object') {
+        if (typeof payload.channels.inApp === 'boolean') setNotifInApp(payload.channels.inApp);
+        if (typeof payload.channels.email === 'boolean') setNotifEmail(payload.channels.email);
+        if (typeof payload.channels.whatsapp === 'boolean') setNotifWhatsApp(payload.channels.whatsapp);
+      }
+      if (payload.recipients && typeof payload.recipients === 'object') {
+        if (payload.recipients.primaryEmail != null) setNotifPrimaryEmail(String(payload.recipients.primaryEmail));
+        if (payload.recipients.additionalEmails != null) setNotifAdditionalEmails(String(payload.recipients.additionalEmails));
+        if (payload.recipients.whatsappNumbers != null) setNotifWhatsAppNumbers(String(payload.recipients.whatsappNumbers));
+      } else {
+        // backwards compat: flat keys
+        if (payload.primaryEmail != null) setNotifPrimaryEmail(String(payload.primaryEmail));
+        if (payload.additionalEmails != null) setNotifAdditionalEmails(String(payload.additionalEmails));
+        if (payload.whatsappNumbers != null) setNotifWhatsAppNumbers(String(payload.whatsappNumbers));
+      }
+      if (payload.reminderDays != null) setNotifReminderDays(String(payload.reminderDays));
+      if (payload.types && typeof payload.types === 'object') {
+        if (typeof payload.types.amcExpiry === 'boolean') setNotifAmcExpiry(payload.types.amcExpiry);
+        if (typeof payload.types.amcOverdue === 'boolean') setNotifAmcOverdue(payload.types.amcOverdue);
+        if (typeof payload.types.amcExpired === 'boolean') setNotifAmcExpired(payload.types.amcExpired);
+        if (typeof payload.types.pmOverdue === 'boolean') setNotifPmOverdue(payload.types.pmOverdue);
+        if (typeof payload.types.breakdownOpen === 'boolean') setNotifBreakdownOpen(payload.types.breakdownOpen);
+        if (typeof payload.types.safetyExpiry === 'boolean') setNotifSafetyExpiry(payload.types.safetyExpiry);
+        if (typeof payload.types.safetyExpired === 'boolean') setNotifSafetyExpired(payload.types.safetyExpired);
+      }
+      // legacy flat booleans for safety types
+      if (typeof payload.safetyExpiry === 'boolean') setNotifSafetyExpiry(payload.safetyExpiry);
+      if (typeof payload.safetyExpired === 'boolean') setNotifSafetyExpired(payload.safetyExpired);
+    }
+
+    // 1. localStorage
+    try {
+      const raw = localStorage.getItem(NOTIF_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        applyNotifPayload(parsed);
+      }
+    } catch {}
+
+    // 2. Supabase — try notification_settings and user_settings (best-effort)
+    (async () => {
+      if (!isSupabaseConfigured || !supabase) return;
+      try {
+        const { data } = await supabase.from('notification_settings').select('*').eq('id', 'default').maybeSingle();
+        if (data && !cancelled) {
+          // Map Supabase columns to local payload shape where possible
+          const supaPayload = {};
+          if (Array.isArray(data.recipients)) {
+            const emails = data.recipients.filter((r) => r && r.includes('@'));
+            const phones = data.recipients.filter((r) => r && !r.includes('@'));
+            if (emails.length) {
+              supaPayload.recipients = {
+                primaryEmail: emails[0] || '',
+                additionalEmails: emails.slice(1).join(', '),
+                whatsappNumbers: phones.join(', '),
+              };
+            }
+          }
+          if (typeof data.enabled === 'boolean') supaPayload.enabled = data.enabled;
+          if (Array.isArray(data.reminder_days)) supaPayload.reminderDays = data.reminder_days.join(',');
+          // AMC and safety flags if columns exist
+          supaPayload.types = {};
+          if (typeof data.amc_expiry_30d === 'boolean') supaPayload.types.amcExpiry = data.amc_expiry_30d;
+          if (typeof data.amc_visit_overdue === 'boolean') supaPayload.types.amcOverdue = data.amc_visit_overdue;
+          if (typeof data.pm_overdue === 'boolean') supaPayload.types.pmOverdue = data.pm_overdue;
+          if (typeof data.safety_expiry_warning === 'boolean') supaPayload.types.safetyExpiry = data.safety_expiry_warning;
+          if (typeof data.safety_expired === 'boolean') supaPayload.types.safetyExpired = data.safety_expired;
+          if (Object.keys(supaPayload).length) applyNotifPayload(supaPayload);
+        }
+      } catch {}
+      try {
+        const uid = user?.id || 'default';
+        const { data: udata } = await supabase.from('user_settings').select('*').eq('id', uid).maybeSingle();
+        if (udata && !cancelled) {
+          const candidate = udata.settings || udata.ccpl_notification_settings || udata.notification_settings || udata.data;
+          if (candidate) {
+            const parsed = typeof candidate === 'string' ? JSON.parse(candidate) : candidate;
+            applyNotifPayload(parsed);
+          } else if (udata.ccpl_notification_settings) {
+            applyNotifPayload(udata.ccpl_notification_settings);
+          }
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   const currentEnergy = getEnergySettings();
   const [energyEditing, setEnergyEditing] = useState(false);
@@ -449,6 +547,8 @@ export default function Settings() {
                 { label: 'AMC Expired', checked: notifAmcExpired, onChange: setNotifAmcExpired },
                 { label: 'PM Overdue', checked: notifPmOverdue, onChange: setNotifPmOverdue },
                 { label: 'Long-Running Breakdown', checked: notifBreakdownOpen, onChange: setNotifBreakdownOpen },
+                { label: 'Safety Certificate Expiry Warning (30, 15, 7, 1 days prior)', checked: notifSafetyExpiry, onChange: setNotifSafetyExpiry },
+                { label: 'Safety Certificate Expired', checked: notifSafetyExpired, onChange: setNotifSafetyExpired },
               ].map((nt) => (
                 <label key={nt.label} className="flex items-center gap-2 rounded-control border border-white/[0.06] px-3 py-2 cursor-pointer hover:bg-white/[0.03] transition-colors">
                   <input type="checkbox" checked={nt.checked} onChange={(e) => nt.onChange(e.target.checked)} className="sr-only" />
@@ -464,7 +564,70 @@ export default function Settings() {
           {/* Actions */}
           <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/[0.06]">
             <button
-              onClick={() => {
+              onClick={async () => {
+                const payload = {
+                  enabled: notifEnabled,
+                  channels: { inApp: notifInApp, email: notifEmail, whatsapp: notifWhatsApp },
+                  recipients: {
+                    primaryEmail: notifPrimaryEmail,
+                    additionalEmails: notifAdditionalEmails,
+                    whatsappNumbers: notifWhatsAppNumbers,
+                  },
+                  reminderDays: notifReminderDays,
+                  types: {
+                    amcExpiry: notifAmcExpiry,
+                    amcOverdue: notifAmcOverdue,
+                    amcExpired: notifAmcExpired,
+                    pmOverdue: notifPmOverdue,
+                    breakdownOpen: notifBreakdownOpen,
+                    safetyExpiry: notifSafetyExpiry,
+                    safetyExpired: notifSafetyExpired,
+                  },
+                };
+                try {
+                  localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(payload));
+                } catch {}
+                // Persist to Supabase notification_settings (best-effort)
+                if (isSupabaseConfigured && supabase) {
+                  try {
+                    const recipientsArr = [notifPrimaryEmail, ...notifAdditionalEmails.split(',').map((s) => s.trim()).filter(Boolean), ...notifWhatsAppNumbers.split(',').map((s) => s.trim()).filter(Boolean)].filter(Boolean);
+                    const reminderArr = notifReminderDays.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+                    await supabase.from('notification_settings').upsert({
+                      id: 'default',
+                      enabled: notifEnabled,
+                      recipients: recipientsArr,
+                      amc_expiry_30d: notifAmcExpiry,
+                      amc_expiry_15d: notifAmcExpiry,
+                      amc_expiry_7d: notifAmcExpiry,
+                      amc_expiry_today: notifAmcExpiry,
+                      amc_visit_overdue: notifAmcOverdue,
+                      pm_overdue: notifPmOverdue,
+                      breakdown_open_hours: notifBreakdownOpen ? 24 : 0,
+                      reminder_days: reminderArr,
+                      safety_expiry_warning: notifSafetyExpiry,
+                      safety_expired: notifSafetyExpired,
+                      updated_at: new Date().toISOString(),
+                    }, { onConflict: 'id' });
+                  } catch {}
+                  // Also persist to user_settings per spec (best-effort via RPC or upsert)
+                  try {
+                    const uid = user?.id || 'default';
+                    await supabase.from('user_settings').upsert({
+                      id: uid,
+                      settings: payload,
+                      ccpl_notification_settings: payload,
+                      updated_at: new Date().toISOString(),
+                    }, { onConflict: 'id' });
+                  } catch {}
+                  // Fallback: try generic KV table if user_settings schema differs
+                  try {
+                    const uid2 = user?.id || 'default';
+                    await supabase.from('user_settings').upsert({
+                      id: uid2,
+                      data: payload,
+                    }, { onConflict: 'id' });
+                  } catch {}
+                }
                 logActivity(userName, 'updated notification settings', `Enabled: ${notifEnabled}`, 'info');
                 setNotifSaved(true);
                 setTimeout(() => setNotifSaved(false), 2500);

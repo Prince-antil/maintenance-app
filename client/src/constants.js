@@ -130,7 +130,7 @@ export const EXT_META = {
   '.pdf':  { badge: 'bg-red-500/15 text-red-400 border border-red-500/30', label: 'PDF' },
 };
 
-// Machine profile document tabs (AMC tab added last)
+// Machine profile document tabs (AMC + Testing Certificates)
 export const MACHINE_DOC_TABS = [
   { id: 'sop',     label: 'SOP' },
   { id: 'mop',     label: 'MOP' },
@@ -138,6 +138,7 @@ export const MACHINE_DOC_TABS = [
   { id: 'circuit', label: 'Circuit Diagrams & Schematics' },
   { id: 'media',   label: 'Training Videos / Media' },
   { id: 'amc',     label: 'AMC Management' },
+  { id: 'certs',   label: '📜 Testing Certificates' },
 ];
 
 export const APP_VERSION = '1.0';
