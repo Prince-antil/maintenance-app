@@ -280,3 +280,90 @@ export function aggregateSolarByMonth(rows) {
     grand_total: Number(m.grand_total.toFixed(2))
   }));
 }
+
+/**
+ * Canonical Energy Snapshot Aggregator
+ * Single source of truth for energy metrics - used by both Dashboard and Energy Management
+ * 
+ * @param {Array} utilityRows - Daily utility log rows (from daily_utility_log)
+ * @param {Array} solarRows - Daily solar generation rows (from daily_solar_generation)
+ * @returns {Object} Complete energy snapshot with all metrics
+ */
+export const computeEnergySnapshot = (utilityRows = [], solarRows = []) => {
+  const safeUtility = Array.isArray(utilityRows) ? utilityRows : [];
+  const safeSolar = Array.isArray(solarRows) ? solarRows : [];
+
+  // 1. Grid Import Sums
+  const unit1GridKwh = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.u1_import_kwh_reading ?? row?.u1_import_kwh ?? row?.u1ImportKwh ?? 0);
+    return acc + val;
+  }, 0);
+  const unit2GridKwh = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.u2_import_kwh_reading ?? row?.u2_import_kwh ?? row?.u2ImportKwh ?? 0);
+    return acc + val;
+  }, 0);
+  const totalGridKwh = unit1GridKwh + unit2GridKwh;
+
+  // 2. DG 380 & DG 500 Generation Sums
+  const dg380Kwh = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.dg380_kwh_reading ?? row?.dg380_kwh ?? row?.dg380Kwh ?? 0);
+    return acc + val;
+  }, 0);
+  const dg500Kwh = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.dg500_kwh_reading ?? row?.dg500_kwh ?? row?.dg500Kwh ?? 0);
+    return acc + val;
+  }, 0);
+  const dg380Hours = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.dg380_hourmeter_reading ?? row?.dg380_hours ?? 0);
+    return acc + val;
+  }, 0);
+  const dg500Hours = safeUtility.reduce((acc, row) => {
+    const val = Number(row?.dg500_hourmeter_reading ?? row?.dg500_hours ?? 0);
+    return acc + val;
+  }, 0);
+
+  // 3. Total HSD Fuel (Ltrs)
+  const totalFuelLtrs = safeUtility.reduce((acc, row) => {
+    const hsd380 = Number(row?.dg380_hsd_added_ltr ?? row?.dg380_hsd ?? 0);
+    const hsd500 = Number(row?.dg500_hsd_added_ltr ?? row?.dg500_hsd ?? 0);
+    return acc + hsd380 + hsd500;
+  }, 0);
+
+  // 4. Solar Total Generation (Unit 1 Inverters 1-4 + Unit 2 Inverters 1-3)
+  const solarKwh = safeSolar.reduce((acc, row) => {
+    const u1 = Number(row?.u1_inv1 || 0) + Number(row?.u1_inv2 || 0) + Number(row?.u1_inv3 || 0) + Number(row?.u1_inv4 || 0);
+    const u2 = Number(row?.u2_inv1 || 0) + Number(row?.u2_inv2 || 0) + Number(row?.u2_inv3 || 0);
+    return acc + u1 + u2;
+  }, 0);
+
+  // 5. Power Factor Averages
+  let u1PfSum = 0, u2PfSum = 0, u1PfCount = 0, u2PfCount = 0;
+  safeUtility.forEach((row) => {
+    if (row?.u1_pf) { u1PfSum += Number(row.u1_pf); u1PfCount++; }
+    if (row?.u2_pf) { u2PfSum += Number(row.u2_pf); u2PfCount++; }
+  });
+  const avgU1Pf = u1PfCount > 0 ? (u1PfSum / u1PfCount).toFixed(2) : '0.95';
+  const avgU2Pf = u2PfCount > 0 ? (u2PfSum / u2PfCount).toFixed(2) : '0.99';
+  const overallPf = ((Number(avgU1Pf) + Number(avgU2Pf)) / 2).toFixed(2);
+
+  // 6. Grid Percentage Split
+  const u1Pct = totalGridKwh > 0 ? Math.round((unit1GridKwh / totalGridKwh) * 100) : 50;
+  const u2Pct = 100 - u1Pct;
+
+  return {
+    unit1GridKwh: Number(unit1GridKwh.toFixed(1)),
+    unit2GridKwh: Number(unit2GridKwh.toFixed(1)),
+    totalGridKwh: Number(totalGridKwh.toFixed(1)),
+    dg380Kwh: Number(dg380Kwh.toFixed(1)),
+    dg380Hours: Number(dg380Hours.toFixed(1)),
+    dg500Kwh: Number(dg500Kwh.toFixed(1)),
+    dg500Hours: Number(dg500Hours.toFixed(1)),
+    solarKwh: Number(solarKwh.toFixed(1)),
+    totalFuelLtrs: Math.round(totalFuelLtrs),
+    avgU1Pf,
+    avgU2Pf,
+    overallPf,
+    u1Pct,
+    u2Pct
+  };
+};

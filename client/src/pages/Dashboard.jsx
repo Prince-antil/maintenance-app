@@ -17,8 +17,9 @@ import {
   machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
   lastNMonths, monthKey, monthlyPMCompletion, monthlyPMCompletionFromRecords,
   computePfTrend, computeDgFuelEfficiency, computeDailyDeltas,
-  computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
+  formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
+import { computeEnergySnapshot } from '../lib/energyEngine.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
 import {
@@ -37,6 +38,7 @@ import {
 // New Dashboard components
 import { SolarPerformanceCard } from '../components/dashboard/SolarPerformanceCard.jsx';
 import { RenewableEnergyCard } from '../components/dashboard/RenewableEnergyCard.jsx';
+import { EnergySnapshotCard } from '../components/dashboard/EnergySnapshotCard.jsx';
 import { computeDashboardMetrics } from '../components/dashboard/DashboardAnalyticsEngine.js';
 
 const MODULE_GROUPS = [
@@ -186,21 +188,8 @@ export default function Dashboard() {
   }, [dailyUtilityLog, periodFilter]);
 
   const energySnapshot = useMemo(() => {
-    const allDeltas = computeDailyDeltas(dailyUtilityLog);
-    const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
-    const snapshot = computeEnergySnapshot(periodDeltas, filteredDailySolarGeneration);
-    return {
-      unit1KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0)),
-      unit2KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0)),
-      totalGridMonth: snapshot.gridKwh,
-      dg500HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0)),
-      dg380HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0)),
-      dg500KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500KwhReading) || 0), 0)),
-      dg380KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380KwhReading) || 0), 0)),
-      solarMonth: snapshot.solarKwh,
-      fuelMonth: snapshot.fuelLtr,
-    };
-  }, [dailyUtilityLog, periodFilter, filteredDailySolarGeneration]);
+    return computeEnergySnapshot(filteredDailyUtilityLog, filteredDailySolarGeneration);
+  }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
 
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
@@ -362,90 +351,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Energy snapshot — dual-unit UHBVNL grid + DG 500/380 split */}
-      <section aria-label="Energy snapshot">
-        <div className="glass-card p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Zap size={16} className="text-amber-400" aria-hidden="true" />
-            <h3 className="text-card-title">Energy Snapshot — This Month</h3>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
-            {/* UHBVNL Unit 1 */}
-            <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 1 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit1KwhMonth.toLocaleString()}</p>
-              <p className="text-cyan-400 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* UHBVNL Unit 2 */}
-            <div className="rounded-control bg-violet-500/[0.07] border border-violet-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 2 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit2KwhMonth.toLocaleString()}</p>
-              <p className="text-violet-400 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* Total Grid */}
-            <div className="rounded-control bg-white/[0.04] border border-white/[0.10] p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Total Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.totalGridMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* DG 500 */}
-            <div className="rounded-control bg-amber-500/[0.07] border border-amber-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500</p>
-              <p className="text-amber-300 text-base font-bold tabular-nums">{energySnapshot.dg500KwhMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg500HrsMonth} hrs</p>
-            </div>
-            {/* DG 380 */}
-            <div className="rounded-control bg-orange-500/[0.07] border border-orange-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380</p>
-              <p className="text-orange-300 text-base font-bold tabular-nums">{energySnapshot.dg380KwhMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg380HrsMonth} hrs</p>
-            </div>
-            {/* Solar */}
-            <div className="rounded-control bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Solar</p>
-              <p className="text-emerald-300 text-base font-bold tabular-nums">{energySnapshot.solarMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* Fuel */}
-            <div className="rounded-control bg-red-500/[0.07] border border-red-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Fuel</p>
-              <p className="text-red-300 text-base font-bold tabular-nums">{energySnapshot.fuelMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">Ltrs</p>
-            </div>
-            {/* Power Factor */}
-            <div className="rounded-control bg-teal-500/[0.07] border border-teal-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
-              {latestPf && latestPf.avgPf ? (
-                <>
-                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.avgPf}</p>
-                  <p className="text-slate-500 text-[10px] mt-0.5">U1 {latestPf.u1Pf || '—'} · U2 {latestPf.u2Pf || '—'}</p>
-                </>
-              ) : (
-                <p className="text-slate-500 text-[10px]">No data</p>
-              )}
-            </div>
-          </div>
-          {/* Unit 1 vs Unit 2 split bar */}
-          {energySnapshot.totalGridMonth > 0 && (
-            <div className="flex items-center gap-3 pt-1">
-              <span className="text-slate-500 text-[10px] whitespace-nowrap">Grid split:</span>
-              <div className="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
-                <div
-                  className="h-full bg-cyan-400 transition-all duration-500"
-                  style={{ width: `${Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
-                />
-                <div
-                  className="h-full bg-violet-400 transition-all duration-500"
-                  style={{ width: `${Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
-                />
-              </div>
-              <span className="text-slate-500 text-[10px] whitespace-nowrap">
-                U1 {Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}% · U2 {Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-      </section>
+      <EnergySnapshotCard snapshotMetrics={energySnapshot} />
 
       {/* AI reliability insights */}
       <section aria-label="AI analytics">
