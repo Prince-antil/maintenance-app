@@ -376,12 +376,12 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="u1Import" name="U1 Import" stroke={C.grid} fill={C.grid} fillOpacity={0.2} />
-                  <Area type="monotone" dataKey="u1Solar" name="U1 Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.2} />
-                  <Area type="monotone" dataKey="u1Export" name="U1 Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.2} />
-                  <Area type="monotone" dataKey="u2Import" name="U2 Import" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.15} />
-                  <Area type="monotone" dataKey="u2Solar" name="U2 Solar" stroke="#34D399" fill="#34D399" fillOpacity={0.15} />
-                  <Area type="monotone" dataKey="u2Export" name="U2 Export" stroke="#A78BFA" fill="#A78BFA" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="u1ImportKwh" name="U1 Import" stroke={C.grid} fill={C.grid} fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u1SolarKwh" name="U1 Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u1ExportKwh" name="U1 Export" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.2} />
+                  <Area type="monotone" dataKey="u2ImportKwh" name="U2 Import" stroke="#06B6D4" fill="#06B6D4" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="u2SolarKwh" name="U2 Solar" stroke="#34D399" fill="#34D399" fillOpacity={0.15} />
+                  <Area type="monotone" dataKey="u2ExportKwh" name="U2 Export" stroke="#A78BFA" fill="#A78BFA" fillOpacity={0.15} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -393,9 +393,9 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Area type="monotone" dataKey="gridTotal" name="Grid Net" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="solar" name="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
-                  <Area type="monotone" dataKey="totalDg" name="DG" stroke={C.dg500} fill={C.dg500} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="gridNet" name="Grid Net" stroke={C.grid} fill={C.grid} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="solarTotal" name="Solar" stroke={C.solar} fill={C.solar} fillOpacity={0.3} />
+                  <Area type="monotone" dataKey="dgTotal" name="DG" stroke={C.dg500} fill={C.dg500} fillOpacity={0.3} />
                 </AreaChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -407,8 +407,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="dg380" name="DG 380" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="dg500" name="DG 500" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Kwh" name="DG 380" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Kwh" name="DG 500" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -420,8 +420,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="dg380Hrs" name="DG 380 Hrs" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="dg500Hrs" name="DG 500 Hrs" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Hours" name="DG 380 Hrs" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Hours" name="DG 500 Hrs" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -433,8 +433,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="dg380Fuel" name="DG 380 HSD" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="dg500Fuel" name="DG 500 HSD" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Hsd" name="DG 380 HSD" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Hsd" name="DG 500 HSD" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -446,8 +446,8 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <Tooltip {...TTIP} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Bar dataKey="dg380DefPct" name="DG 380 DEF%" fill={C.dg380} radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="dg500DefPct" name="DG 500 DEF%" fill={C.dg500} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg380Def" name="DG 380 DEF%" fill={C.dg380} radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="dg500Def" name="DG 500 DEF%" fill={C.dg500} radius={[2, 2, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
