@@ -10,7 +10,7 @@ import {
   computeSolarSummary,
   getUtilityDerived as getUtilityDerivedFromEngine,
 } from '../../lib/energyCalculations.js';
-import { formatEnergy } from '../../lib/energyEngine.js';
+import { formatEnergy } from '../../lib/energyCalculations.js';
 
 /**
  * Computes live Dashboard metrics from raw Solar and Utility records
@@ -24,20 +24,21 @@ export const computeDashboardMetrics = (solarRows = [], utilityRows = []) => {
   // 2. Process Utility Rows using Canonical Derivation
   const normalizedUtility = utilityRows.map(getUtilityDerived);
 
-  const meterImportKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.u1_import_kwh || 0) + (r.u2_import_kwh || 0)),
-    0
-  );
-  const meterExportKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.u1_export_kwh || 0) + (r.u2_export_kwh || 0)),
-    0
-  );
+  // Extract Import/Export values using correct field names from getUtilityDerived
+  const totalU1Import = normalizedUtility.reduce((sum, r) => sum + (r.u1ImportKwh || 0), 0);
+  const totalU2Import = normalizedUtility.reduce((sum, r) => sum + (r.u2ImportKwh || 0), 0);
+  const totalU1Export = normalizedUtility.reduce((sum, r) => sum + (r.u1ExportKwh || 0), 0);
+  const totalU2Export = normalizedUtility.reduce((sum, r) => sum + (r.u2ExportKwh || 0), 0);
+
+  const meterImportKwh = totalU1Import + totalU2Import;
+  const meterExportKwh = totalU1Export + totalU2Export;
+
   const meterSolarKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.u1_solar_kwh || 0) + (r.u2_solar_kwh || 0)),
+    (sum, r) => sum + ((r.u1SolarKwh || 0) + (r.u2SolarKwh || 0)),
     0
   );
   const totalDgKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.dg380_kwh || 0) + (r.dg500_kwh || 0)),
+    (sum, r) => sum + ((r.dg380Kwh || 0) + (r.dg500Kwh || 0)),
     0
   );
 
@@ -63,13 +64,21 @@ export const computeDashboardMetrics = (solarRows = [], utilityRows = []) => {
     crossCheckDeviationPct = 100;
   }
 
-  const isCrossCheckRequired = crossCheckDeviationPct > 5.0;
+  const isCrossCheckRequired = crossCheckDeviationPct > 5.0 || meterImportKwh === 0;
 
   return {
     inverterTotalKwh: Number(inverterTotalKwh.toFixed(1)),
     meterImportKwh: Number(meterImportKwh.toFixed(1)),
     meterExportKwh: Number(meterExportKwh.toFixed(1)),
+    totalU1Import: Number(totalU1Import.toFixed(1)),
+    totalU2Import: Number(totalU2Import.toFixed(1)),
+    totalU1Export: Number(totalU1Export.toFixed(1)),
+    totalU2Export: Number(totalU2Export.toFixed(1)),
     meterSolarKwh: Number(meterSolarKwh.toFixed(1)),
+    totalUtilitySolar: Number(meterSolarKwh.toFixed(1)),
+    totalDg: Number(totalDgKwh.toFixed(1)),
+    netGridKwh: Number(netGridKwh.toFixed(1)),
+    totalPlantConsumptionKwh: Number(totalPlantConsumptionKwh.toFixed(1)),
     renewableSharePct,
     co2AvoidedKg,
     crossCheckDeviationPct,
