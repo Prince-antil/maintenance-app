@@ -41,22 +41,33 @@ export function computeDynamicPowerFactors(u1_kwh, u1_kvah, u2_kwh, u2_kvah) {
 }
 
 /**
- * Compute weighted average Power Factor across an array of delta rows.
- * Weighted PF = Σ(import_kWh × PF) / Σ(import_kWh)
- * Uses u1ImportKwhReading and u2ImportKwhReading as weights.
+ * Compute weighted Power Factor across an array of delta rows.
+ * Uses standard electrical formulation:
+ *   PF_weighted = Σ(kWh_i) / Σ(kWh_i / PF_i)  for individual units
+ *   Combined PF = Total_kWh / sqrt(Total_kWh² + Total_kVARh²)
+ * This replaces simple arithmetic averaging with energy-weighted calculation.
  */
 export function computeWeightedPf(deltas) {
-  let weightedSum = 0;
-  let totalImport = 0;
+  let u1KwhSum = 0, u1KvarhSum = 0;
+  let u2KwhSum = 0, u2KvarhSum = 0;
   (deltas || []).forEach((d) => {
     const u1Import = Number(d._delta?.u1ImportKwhReading) || 0;
+    const u1Pf = Math.min(1, Math.max(0.1, Number(d._delta?.u1Pf) || Number(d.u1Pf) || 0.98));
+    if (u1Import > 0) {
+      u1KwhSum += u1Import;
+      u1KvarhSum += u1Import * Math.tan(Math.acos(u1Pf));
+    }
     const u2Import = Number(d._delta?.u2ImportKwhReading) || 0;
-    const u1Pf = Number(d._delta?.u1Pf) || Number(d.u1Pf) || 0;
-    const u2Pf = Number(d._delta?.u2Pf) || Number(d.u2Pf) || 0;
-    if (u1Import > 0 && u1Pf > 0) { weightedSum += u1Import * u1Pf; totalImport += u1Import; }
-    if (u2Import > 0 && u2Pf > 0) { weightedSum += u2Import * u2Pf; totalImport += u2Import; }
+    const u2Pf = Math.min(1, Math.max(0.1, Number(d._delta?.u2Pf) || Number(d.u2Pf) || 0.98));
+    if (u2Import > 0) {
+      u2KwhSum += u2Import;
+      u2KvarhSum += u2Import * Math.tan(Math.acos(u2Pf));
+    }
   });
-return totalImport > 0 ? weightedSum / totalImport : 0;
+  const totalKwh = u1KwhSum + u2KwhSum;
+  const totalKvarh = u1KvarhSum + u2KvarhSum;
+  if (totalKwh === 0) return 0;
+  return totalKwh / Math.sqrt(totalKwh * totalKwh + totalKvarh * totalKvarh);
 }
 
 /**

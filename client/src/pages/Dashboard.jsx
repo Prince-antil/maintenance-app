@@ -240,7 +240,20 @@ export default function Dashboard() {
     [effectiveUtilityLog, periodFilter]
   );
   const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(effectiveUtilityLog, 6, periodFilter), [effectiveUtilityLog, periodFilter]);
-  const pmTrend = useMemo(() => monthlyPMCompletionFromRecords(machinePmRecords, 6), [machinePmRecords]);
+  const pmTrend = useMemo(() => {
+    const fromRecords = monthlyPMCompletionFromRecords(machinePmRecords, 6);
+    const fromSummaries = monthlyPMCompletion(pms, 6);
+    return fromSummaries.map((s, i) => {
+      const r = fromRecords[i] || s;
+      return {
+        label: s.label,
+        planned: Math.max(s.planned, r.planned),
+        completed: Math.max(s.completed, r.completed),
+        pending: Math.max(s.pending, r.pending),
+        compliance: Math.max(s.compliance, r.compliance),
+      };
+    });
+  }, [machinePmRecords, pms]);
 
   const currentMonthKey = useMemo(() => {
     const now = new Date();
@@ -322,7 +335,7 @@ export default function Dashboard() {
   }
 
   const noBDs = filteredBreakdowns.length === 0;
-  const noPMs = filteredPMs.length === 0;
+  const noPMs = filteredPMs.length === 0 && (machinePmRecords || []).length === 0;
   const noDailyUtility = filteredDailyUtilityLog.length === 0;
   const noSolar = filteredDailySolarGeneration.length === 0;
 
