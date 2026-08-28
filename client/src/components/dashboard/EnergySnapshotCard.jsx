@@ -1,8 +1,24 @@
 import React from 'react';
 import { formatEnergy } from '../../lib/energyCalculations.js';
 
-export const EnergySnapshotCard = ({ snapshotMetrics = {} }) => {
+export const EnergySnapshotCard = ({ snapshotMetrics = {}, isLoading = false }) => {
   const m = snapshotMetrics;
+  if (isLoading) {
+    return (
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm animate-pulse">
+        <div className="flex items-center gap-2 mb-6">
+          <span className="text-amber-400 text-lg">⚡</span>
+          <h3 className="text-lg font-semibold text-white">Energy Snapshot — Active Period</h3>
+          <span className="ml-auto text-xs text-slate-500">Loading...</span>
+        </div>
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 h-24 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">

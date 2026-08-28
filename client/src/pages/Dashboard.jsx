@@ -84,6 +84,61 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
   const [periodFilter, setPeriodFilter] = useState('all');
+  // HYDRATION & FALLBACK STATE: ensure Dashboard uses same data context as EnergyManagement (store) with localStorage/supabase fallback
+  const [hydratedUtility, setHydratedUtility] = useState([]);
+  const [hydratedSolar, setHydratedSolar] = useState([]);
+  const [energyLoading, setEnergyLoading] = useState(false);
+
+  useEffect(() => {
+    // If store already has data, keep hydrated in sync and skip fetch
+    if (dailyUtilityLog.length > 0 || dailySolarGeneration.length > 0) {
+      setHydratedUtility(dailyUtilityLog);
+      setHydratedSolar(dailySolarGeneration);
+      return;
+    }
+    const fetchEnergyData = async () => {
+      try {
+        setEnergyLoading(true);
+        // 1. Fetch Utility Log Data (Fallback to LocalStorage if offline/cached)
+        let utilityData = [];
+        try {
+          const cachedUtility = localStorage.getItem('daily_utility_log') || localStorage.getItem('CCPL_DAILY_UTILITY_LOG_V1') || localStorage.getItem('energy_utility_data');
+          if (cachedUtility) {
+            const parsed = JSON.parse(cachedUtility);
+            if (Array.isArray(parsed) && parsed.length > 0) utilityData = parsed;
+          }
+        } catch {}
+        if (typeof window !== 'undefined' && window.supabase) {
+          try {
+            const { data: uData } = await window.supabase.from('daily_utility_log').select('*');
+            if (uData && uData.length > 0) utilityData = uData;
+          } catch {}
+        }
+        // 2. Fetch Solar Generation Data
+        let solarData = [];
+        try {
+          const cachedSolar = localStorage.getItem('daily_solar_generation') || localStorage.getItem('CCPL_DAILY_SOLAR_GENERATION_V1') || localStorage.getItem('energy_solar_data');
+          if (cachedSolar) {
+            const parsed = JSON.parse(cachedSolar);
+            if (Array.isArray(parsed) && parsed.length > 0) solarData = parsed;
+          }
+        } catch {}
+        if (typeof window !== 'undefined' && window.supabase) {
+          try {
+            const { data: sData } = await window.supabase.from('daily_solar_generation').select('*');
+            if (sData && sData.length > 0) solarData = sData;
+          } catch {}
+        }
+        if (Array.isArray(utilityData) && utilityData.length > 0) setHydratedUtility(utilityData);
+        if (Array.isArray(solarData) && solarData.length > 0) setHydratedSolar(solarData);
+      } catch (err) {
+        console.error('Error loading dashboard energy metrics:', err);
+      } finally {
+        setEnergyLoading(false);
+      }
+    };
+    fetchEnergyData();
+  }, [dailyUtilityLog, dailySolarGeneration]);
 
   useEffect(() => {
     (async () => {
@@ -105,7 +160,7 @@ export default function Dashboard() {
   // ---- everything below auto-recomputes when store data changes ----
   const kpi = useMemo(() => computeKPIs(store, totalFiles, periodFilter), [store, totalFiles, periodFilter]);
 
-  // Period filter for charts
+  // Period filter for charts (uses effective logs so fallback hydration is included)
   const availablePeriods = useMemo(() => {
     const allPeriods = new Set();
     store.breakdowns.forEach((r) => r.period && allPeriods.add(r.period));
@@ -116,14 +171,14 @@ export default function Dashboard() {
     store.machineBreakdownLogs.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
-    dailyUtilityLog.forEach((r) => {
+    effectiveUtilityLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
-    dailySolarGeneration.forEach((r) => {
+    effectiveSolarLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
     return [...allPeriods].sort().reverse();
-  }, [store, dailyUtilityLog, dailySolarGeneration]);
+  }, [store, effectiveUtilityLog, effectiveSolarLog]);
 
   const filteredBreakdowns = useMemo(() =>
     periodFilter === 'all' ? store.breakdowns : store.breakdowns.filter((r) => r.period === periodFilter),
@@ -142,13 +197,17 @@ export default function Dashboard() {
     [machinePmRecords, periodFilter]
   );
 
+  // Effective rows: prefer store data (same hook/context as EnergyManagement.jsx), fallback to hydrated localStorage/supabase cache if store still loading
+  const effectiveUtilityLog = useMemo(() => (dailyUtilityLog.length > 0 ? dailyUtilityLog : hydratedUtility), [dailyUtilityLog, hydratedUtility]);
+  const effectiveSolarLog = useMemo(() => (dailySolarGeneration.length > 0 ? dailySolarGeneration : hydratedSolar), [dailySolarGeneration, hydratedSolar]);
+
   const filteredDailyUtilityLog = useMemo(() =>
-    periodFilter === 'all' ? dailyUtilityLog : dailyUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
-    [dailyUtilityLog, periodFilter]
+    periodFilter === 'all' ? effectiveUtilityLog : effectiveUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [effectiveUtilityLog, periodFilter]
   );
   const filteredDailySolarGeneration = useMemo(() =>
-    periodFilter === 'all' ? dailySolarGeneration : dailySolarGeneration.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
-    [dailySolarGeneration, periodFilter]
+    periodFilter === 'all' ? effectiveSolarLog : effectiveSolarLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [effectiveSolarLog, periodFilter]
   );
 
   // Dashboard metrics using canonical calculations from canonical data sources
@@ -157,10 +216,10 @@ export default function Dashboard() {
   }, [filteredDailySolarGeneration, filteredDailyUtilityLog]);
 
   const pfTrend = useMemo(() =>
-    computePfTrend(dailyUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
-    [dailyUtilityLog, periodFilter]
+    computePfTrend(effectiveUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
+    [effectiveUtilityLog, periodFilter]
   );
-  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(dailyUtilityLog, 6, periodFilter), [dailyUtilityLog, periodFilter]);
+  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(effectiveUtilityLog, 6, periodFilter), [effectiveUtilityLog, periodFilter]);
   const pmTrend = useMemo(() => monthlyPMCompletionFromRecords(machinePmRecords, 6), [machinePmRecords]);
 
   const currentMonthKey = useMemo(() => {
@@ -169,8 +228,8 @@ export default function Dashboard() {
   }, []);
 
   const latestPf = useMemo(() => {
-    if (dailyUtilityLog.length === 0) return null;
-    const allDeltas = computeDailyDeltas(dailyUtilityLog);
+    if (effectiveUtilityLog.length === 0) return null;
+    const allDeltas = computeDailyDeltas(effectiveUtilityLog);
     const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
     if (periodDeltas.length === 0) return null;
     const last = periodDeltas[0];
@@ -185,8 +244,9 @@ export default function Dashboard() {
       u2Pf: u2PfRaw > 0 ? formatPowerFactor(u2PfRaw) : null,
       avgPf: avgRaw > 0 ? formatPowerFactor(avgRaw) : null,
     };
-  }, [dailyUtilityLog, periodFilter]);
+  }, [effectiveUtilityLog, periodFilter]);
 
+  // Compute metrics dynamically from fetched rows — uses robust computeEnergySnapshot with flexible key parsing & localStorage fallback
   const energySnapshot = useMemo(() => {
     return computeEnergySnapshot(filteredDailyUtilityLog, filteredDailySolarGeneration);
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
@@ -351,7 +411,8 @@ export default function Dashboard() {
         </div>
       </section>
 
-      <EnergySnapshotCard snapshotMetrics={energySnapshot} />
+      {/* Energy Snapshot Section — now hydrates via same store/context as EnergyManagement with fallback handling */}
+      <EnergySnapshotCard snapshotMetrics={energySnapshot} isLoading={energyLoading || loading} />
 
       {/* AI reliability insights */}
       <section aria-label="AI analytics">

@@ -290,66 +290,86 @@ export function aggregateSolarByMonth(rows) {
  * @returns {Object} Complete energy snapshot with all metrics
  */
 export const computeEnergySnapshot = (utilityRows = [], solarRows = []) => {
-  const safeUtility = Array.isArray(utilityRows) ? utilityRows : [];
-  const safeSolar = Array.isArray(solarRows) ? solarRows : [];
+  // If empty arguments passed, attempt retrieving from window global cache or localStorage
+  let safeUtility = Array.isArray(utilityRows) && utilityRows.length > 0 ? utilityRows : [];
+  let safeSolar = Array.isArray(solarRows) && solarRows.length > 0 ? solarRows : [];
+  if (safeUtility.length === 0 && typeof window !== 'undefined') {
+    try {
+      const uCache = localStorage.getItem('daily_utility_log') || localStorage.getItem('CCPL_DAILY_UTILITY_LOG_V1') || localStorage.getItem('energy_utility_data');
+      if (uCache) {
+        const parsed = JSON.parse(uCache);
+        if (Array.isArray(parsed) && parsed.length > 0) safeUtility = parsed;
+      }
+    } catch (e) {}
+  }
+  if (safeSolar.length === 0 && typeof window !== 'undefined') {
+    try {
+      const sCache = localStorage.getItem('daily_solar_generation') || localStorage.getItem('CCPL_DAILY_SOLAR_GENERATION_V1') || localStorage.getItem('energy_solar_data');
+      if (sCache) {
+        const parsed = JSON.parse(sCache);
+        if (Array.isArray(parsed) && parsed.length > 0) safeSolar = parsed;
+      }
+    } catch (e) {}
+  }
 
-  // 1. Grid Import Sums
+  // 1. Grid Import Sums (Support multiple potential database column key names)
   const unit1GridKwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.u1_import_kwh_reading ?? row?.u1_import_kwh ?? row?.u1ImportKwh ?? 0);
-    return acc + val;
+    const val = Number(row?.u1_import_kwh_reading ?? row?.u1_import_kwh ?? row?.u1_import ?? row?.u1ImportKwhReading ?? row?.u1ImportKwh ?? row?.u1_grid ?? row?.['U1 Import'] ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
   const unit2GridKwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.u2_import_kwh_reading ?? row?.u2_import_kwh ?? row?.u2ImportKwh ?? 0);
-    return acc + val;
+    const val = Number(row?.u2_import_kwh_reading ?? row?.u2_import_kwh ?? row?.u2_import ?? row?.u2ImportKwhReading ?? row?.u2ImportKwh ?? row?.u2_grid ?? row?.['U2 Import'] ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
   const totalGridKwh = unit1GridKwh + unit2GridKwh;
 
-  // 2. DG 380 & DG 500 Generation Sums
+  // 2. DG Generation Sums (flexible keys)
   const dg380Kwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.dg380_kwh_reading ?? row?.dg380_kwh ?? row?.dg380Kwh ?? 0);
-    return acc + val;
+    const val = Number(row?.dg380_kwh_reading ?? row?.dg380_kwh ?? row?.dg380 ?? row?.dg380KwhReading ?? row?.dg380Kwh ?? row?.['DG 380'] ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
   const dg500Kwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.dg500_kwh_reading ?? row?.dg500_kwh ?? row?.dg500Kwh ?? 0);
-    return acc + val;
+    const val = Number(row?.dg500_kwh_reading ?? row?.dg500_kwh ?? row?.dg500 ?? row?.dg500KwhReading ?? row?.dg500Kwh ?? row?.['DG 500'] ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
   const dg380Hours = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.dg380_hourmeter_reading ?? row?.dg380_hours ?? 0);
-    return acc + val;
+    const val = Number(row?.dg380_hourmeter_reading ?? row?.dg380_hours ?? row?.dg380Hours ?? row?.dg380_hrs ?? row?.dg380HourmeterReading ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
   const dg500Hours = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.dg500_hourmeter_reading ?? row?.dg500_hours ?? 0);
-    return acc + val;
+    const val = Number(row?.dg500_hourmeter_reading ?? row?.dg500_hours ?? row?.dg500Hours ?? row?.dg500_hrs ?? row?.dg500HourmeterReading ?? 0);
+    return acc + (Number.isFinite(val) ? val : 0);
   }, 0);
 
-  // 3. Total HSD Fuel (Ltrs)
+  // 3. Fuel (Ltrs) Sum - flexible + directFuel fallback
   const totalFuelLtrs = safeUtility.reduce((acc, row) => {
-    const hsd380 = Number(row?.dg380_hsd_added_ltr ?? row?.dg380_hsd ?? 0);
-    const hsd500 = Number(row?.dg500_hsd_added_ltr ?? row?.dg500_hsd ?? 0);
-    return acc + hsd380 + hsd500;
+    const hsd380 = Number(row?.dg380_hsd_added_ltr ?? row?.dg380_hsd ?? row?.dg380HsdAddedLtr ?? row?.dg380Hsd ?? row?.fuel_380 ?? 0);
+    const hsd500 = Number(row?.dg500_hsd_added_ltr ?? row?.dg500_hsd ?? row?.dg500HsdAddedLtr ?? row?.dg500Hsd ?? row?.fuel_500 ?? 0);
+    const directFuel = Number(row?.total_fuel ?? row?.fuel_ltrs ?? row?.fuel ?? row?.total_hsd_litres ?? 0);
+    return acc + (Number.isFinite(hsd380) ? hsd380 : 0) + (Number.isFinite(hsd500) ? hsd500 : 0) + (Number.isFinite(directFuel) ? directFuel : 0);
   }, 0);
 
-  // 4. Solar Total Generation (Unit 1 Inverters 1-4 + Unit 2 Inverters 1-3)
+  // 4. Solar Generation Sums - inverter columns + direct fallback, supports snake_case, camelCase, and store keys
   const solarKwh = safeSolar.reduce((acc, row) => {
-    const u1 = Number(row?.u1_inv1 || 0) + Number(row?.u1_inv2 || 0) + Number(row?.u1_inv3 || 0) + Number(row?.u1_inv4 || 0);
-    const u2 = Number(row?.u2_inv1 || 0) + Number(row?.u2_inv2 || 0) + Number(row?.u2_inv3 || 0);
-    return acc + u1 + u2;
+    const u1 = Number(row?.u1_inv1_kwh ?? row?.u1_inv1 ?? row?.u1Inv1Kwh ?? row?.u1Inv1 ?? 0) + Number(row?.u1_inv2_kwh ?? row?.u1_inv2 ?? row?.u1Inv2Kwh ?? row?.u1Inv2 ?? 0) + Number(row?.u1_inv3_kwh ?? row?.u1_inv3 ?? row?.u1Inv3Kwh ?? row?.u1Inv3 ?? 0) + Number(row?.u1_inv4_kwh ?? row?.u1_inv4 ?? row?.u1Inv4Kwh ?? row?.u1Inv4 ?? 0);
+    const u2 = Number(row?.u2_inv1_kwh ?? row?.u2_inv1 ?? row?.u2Inv1Kwh ?? row?.u2Inv1 ?? 0) + Number(row?.u2_inv2_kwh ?? row?.u2_inv2 ?? row?.u2Inv2Kwh ?? row?.u2Inv2 ?? 0) + Number(row?.u2_inv3_kwh ?? row?.u2_inv3 ?? row?.u2Inv3Kwh ?? row?.u2Inv3 ?? 0);
+    const directSolar = Number(row?.total_solar_kwh ?? row?.solar_kwh ?? row?.total_generation ?? row?.dailyTotalKwh ?? row?.daily_total_kwh ?? row?.grand_total ?? 0);
+    return acc + (u1 + u2 > 0 ? (u1 + u2) : (Number.isFinite(directSolar) ? directSolar : 0));
   }, 0);
 
-  // 5. Power Factor Averages
+  // 5. Power Factor Averages - supports u1_pf, u1Pf, u1PfReading etc.
   let u1PfSum = 0, u2PfSum = 0, u1PfCount = 0, u2PfCount = 0;
   safeUtility.forEach((row) => {
-    if (row?.u1_pf) { u1PfSum += Number(row.u1_pf); u1PfCount++; }
-    if (row?.u2_pf) { u2PfSum += Number(row.u2_pf); u2PfCount++; }
+    const v1 = row?.u1_pf ?? row?.u1Pf ?? row?.u1_pf_reading ?? null;
+    if (v1 != null && v1 !== '' && Number(v1) > 0) { u1PfSum += Number(v1); u1PfCount++; }
+    const v2 = row?.u2_pf ?? row?.u2Pf ?? row?.u2_pf_reading ?? null;
+    if (v2 != null && v2 !== '' && Number(v2) > 0) { u2PfSum += Number(v2); u2PfCount++; }
   });
   const avgU1Pf = u1PfCount > 0 ? (u1PfSum / u1PfCount).toFixed(2) : '0.95';
   const avgU2Pf = u2PfCount > 0 ? (u2PfSum / u2PfCount).toFixed(2) : '0.99';
   const overallPf = ((Number(avgU1Pf) + Number(avgU2Pf)) / 2).toFixed(2);
-
-  // 6. Grid Percentage Split
   const u1Pct = totalGridKwh > 0 ? Math.round((unit1GridKwh / totalGridKwh) * 100) : 50;
   const u2Pct = 100 - u1Pct;
-
   return {
     unit1GridKwh: Number(unit1GridKwh.toFixed(1)),
     unit2GridKwh: Number(unit2GridKwh.toFixed(1)),
