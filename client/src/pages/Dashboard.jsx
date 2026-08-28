@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
@@ -20,7 +20,6 @@ import {
   formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
 import { computeEnergySnapshot } from '../lib/energyEngine.js';
-import { supabase } from '../lib/supabaseClient.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
 import {
@@ -109,9 +108,10 @@ export default function Dashboard() {
             if (Array.isArray(parsed) && parsed.length > 0) utilityData = parsed;
           }
         } catch {}
-        if (supabase) {
+        const { supabase: supaClient } = await import('../lib/supabaseClient.js').catch(() => ({ supabase: null }));
+        if (supaClient) {
           try {
-            const { data: uData } = await supabase.from('daily_utility_log').select('*');
+            const { data: uData } = await supaClient.from('daily_utility_log').select('*');
             if (uData && uData.length > 0) utilityData = uData;
           } catch {}
         }
@@ -124,9 +124,9 @@ export default function Dashboard() {
             if (Array.isArray(parsed) && parsed.length > 0) solarData = parsed;
           }
         } catch {}
-        if (supabase) {
+        if (supaClient) {
           try {
-            const { data: sData } = await supabase.from('daily_solar_generation').select('*');
+            const { data: sData } = await supaClient.from('daily_solar_generation').select('*');
             if (sData && sData.length > 0) solarData = sData;
           } catch {}
         }
