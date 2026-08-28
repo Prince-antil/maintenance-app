@@ -166,19 +166,6 @@ export default function Dashboard() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }, []);
 
-  const renewableSummary = useMemo(
-    () => {
-      const mk = periodFilter === 'all' ? null : periodFilter;
-      return computeRenewableSummary(
-        dailyUtilityLog,
-        dailySolarGeneration,
-        energySettings,
-        mk
-      );
-    },
-    [dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey, periodFilter]
-  );
-
   const latestPf = useMemo(() => {
     if (dailyUtilityLog.length === 0) return null;
     const allDeltas = computeDailyDeltas(dailyUtilityLog);
