@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import {
@@ -27,7 +27,7 @@ import {
   computeUtilitySummary,
   computeSolarSummary 
 } from '../lib/energyEngine.js';
-import { useEnergyStore } from '../hooks/useEnergyStore.js';
+import { useEnergyCache, memoizedAggregations } from '../hooks/useEnergyCache.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
@@ -279,14 +279,16 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
     };
   }, [filteredRaw]);
 
+  // Use memoized aggregations for DG summary - better performance on tab switches
   const dgSummary = useMemo(() => {
     if (filteredDerived.length === 0) return { dg380Total: 0, dg500Total: 0, totalDg: 0, totalHsd: 0 };
-    const latest = filteredDerived[0];
-    const dg380Total = r1(latest.dg380);
-    const dg500Total = r1(latest.dg500);
-    const totalDg = r1(dg380Total + dg500Total);
-    const totalHsd = r1(filteredDerived.reduce((s, d) => s + (d.dg380Fuel || 0) + (d.dg500Fuel || 0), 0));
-    return { dg380Total, dg500Total, totalDg, totalHsd };
+    const totals = memoizedAggregations.dgTotals(filteredDerived);
+    return { 
+      dg380Total: r1(totals.dg380Total), 
+      dg500Total: r1(totals.dg500Total), 
+      totalDg: r1(totals.totalDg), 
+      totalHsd: r1(totals.totalHsd) 
+    };
   }, [filteredDerived]);
 
   const fields = useMemo(() => [
@@ -1153,13 +1155,16 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
     const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
     const best = Math.max(...filteredCalc.map((r) => r._sum));
     
+    // Use memoized aggregations for U1/U2 totals - better performance
+    const solarTotals = memoizedAggregations.solarTotals(filteredCalc);
+    
     return { 
       today: latest._sum, 
       month: monthTotal, 
       avg: summary.daily_avg, 
       best, 
-      u1: summary.u1_total, 
-      u2: summary.u2_total, 
+      u1: solarTotals.u1Total, 
+      u2: solarTotals.u2Total, 
       grandTotal: summary.grand_total, 
       monthlyAvg: summary.monthly_avg 
     };
@@ -1250,7 +1255,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                     <Td value={r.u2Inv1Kwh} className="text-cyan-300 tabular-nums" /><Td value={r.u2Inv2Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.u2Inv3Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.u2_total} className="text-cyan-300 font-semibold tabular-nums" />
-                    <Td value={r.dailyTotalKwh} className="text-white font-bold tabular-nums" />
+                    <Td value={r.grand_total} className="text-white font-bold tabular-nums" />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
@@ -1446,6 +1451,30 @@ export default function Energy() {
   const [dateTo, setDateTo] = useState('');
   const [registerMonth, setRegisterMonth] = useState('');
 
+  // Simple in-memory cache for tab data to avoid re-computation on tab switches
+  const tabDataCache = useRef(new Map());
+  const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+  const getCachedTabData = useCallback((tabKey) => {
+    const entry = tabDataCache.current.get(tabKey);
+    if (entry && Date.now() - entry.timestamp < CACHE_TTL) {
+      return entry.data;
+    }
+    return null;
+  }, []);
+
+  const setCachedTabData = useCallback((tabKey, data) => {
+    tabDataCache.current.set(tabKey, { data, timestamp: Date.now() });
+  }, []);
+
+  const invalidateTabCache = useCallback((tabKey) => {
+    if (tabKey) {
+      tabDataCache.current.delete(tabKey);
+    } else {
+      tabDataCache.current.clear();
+    }
+  }, []);
+
   const setForm = useCallback((k, v) => setFormValues((p) => ({ ...p, [k]: v })), []);
   const openAddForm = useCallback((d) => { setEditRow(null); setFormValues(d || {}); setFormOpen(true); }, []);
   const openEditForm = useCallback((r) => { setEditRow(r); setFormValues({ ...r }); setFormOpen(true); }, []);
@@ -1477,7 +1506,11 @@ export default function Energy() {
       .sort((a, b) => b.key.localeCompare(a.key));
   }, [dailyUtilityLog]);
 
-  const switchTab = useCallback((k) => { setActiveTab(k); setPage(0); setRegisterMonth(''); }, []);
+  const switchTab = useCallback((k) => { 
+    setActiveTab(k); 
+    setPage(0); 
+    setRegisterMonth(''); 
+  }, []);
 
   const formTitle = editRow ? 'Edit ' + activeTab : 'Add ' + activeTab.replace(/([A-Z])/g, ' $1').trim();
   const formSubtitle = editRow ? (editRow.date || editRow.month || '') : '';
