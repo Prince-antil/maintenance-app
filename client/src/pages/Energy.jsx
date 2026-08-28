@@ -18,10 +18,16 @@ import {
   computeWeightedPf,
   computeEnergySummaryFromRows,
   computeDynamicPowerFactors,
-  computeEnergySnapshot
+  computeEnergySnapshot,
+  computeEnergySummaryFromRows as computeEnergySummary
 } from '../analytics.js';
+import { 
+  processUtilityRow, 
+  processSolarRow, 
+  computeUtilitySummary,
+  computeSolarSummary 
+} from '../lib/energyEngine.js';
 import { useEnergyStore } from '../hooks/useEnergyStore.js';
-import { processSolarRow } from '../lib/energyEngine.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
@@ -210,7 +216,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
 
-  // Use new energy engine for derived calculations with dynamic PF
+  // Use energy engine for derived calculations with dynamic PF
   const derived = useMemo(() => {
     return sorted.map((row) => {
       const u1Import = toN(row.u1ImportKwhReading);
@@ -255,29 +261,14 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
   const filteredDerived = useMemo(() => registerMonth ? derived.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : derived, [derived, registerMonth]);
   const pageData = useMemo(() => filteredDerived.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredDerived, page]);
 
+  // Use energy engine for KPIs - works on raw store data, handles all date range filters
+  const filteredRaw = useMemo(() => registerMonth ? sorted.filter((r) => (r.date || '').slice(0, 7) === registerMonth) : sorted, [sorted, registerMonth]);
+  
   const kpis = useMemo(() => {
-    if (filteredDerived.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
+    if (filteredRaw.length === 0) return { grid: '—', dg: '—', solar: '—', pf: '—' };
     
-    // Use new energy engine for summary across all filtered data
-    const summary = computeEnergySummaryFromRows(
-      filteredDerived.map(d => ({
-        date: d.date,
-        u1_import_kwh_reading: d.u1Import,
-        u1_import_kvah_reading: toN(d.u1Import) * (toN(d.u1Pf) > 0 ? 1/0.99 : 1), // approx
-        u2_import_kwh_reading: d.u2Import,
-        u2_import_kvah_reading: toN(d.u2Import) * (toN(d.u2Pf) > 0 ? 1/0.99 : 1),
-        u1_solar_kwh_reading: d.u1Solar,
-        u2_solar_kwh_reading: d.u2Solar,
-        dg380_kwh_reading: d.dg380,
-        dg500_kwh_reading: d.dg500,
-        dg380_hourmeter_reading: d.dg380Hrs,
-        dg500_hourmeter_reading: d.dg500Hrs,
-        dg380_hsd_added_ltr: d.dg380Fuel,
-        dg500_hsd_added_ltr: d.dg500Fuel,
-        u1_pf: d.u1Pf,
-        u2_pf: d.u2Pf
-      }))
-    );
+    // Use energy engine computeUtilitySummary on raw data - handles all field name variations
+    const summary = computeUtilitySummary(filteredRaw);
     
     const pf = summary.avg_combined_pf;
     return { 
@@ -286,7 +277,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       solar: summary.total_solar_kwh, 
       pf: pf > 0 ? formatPowerFactor(pf) : '—' 
     };
-  }, [filteredDerived]);
+  }, [filteredRaw]);
 
   const dgSummary = useMemo(() => {
     if (filteredDerived.length === 0) return { dg380Total: 0, dg500Total: 0, totalDg: 0, totalHsd: 0 };
@@ -1152,17 +1143,26 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—' };
+    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—', monthlyAvg: '—' };
+    
+    // Use energy engine for solar summary
+    const summary = computeSolarSummary(filteredCalc);
+    
     const latest = filteredCalc[0];
     const monthData = filteredCalc.filter((r) => r.date?.slice(0, 7) === (dateFrom ? dateFrom.slice(0, 7) : currentMK));
     const monthTotal = r1(monthData.reduce((s, r) => s + r._sum, 0));
-    const avg = filteredCalc.length > 0 ? r1(filteredCalc.reduce((s, r) => s + r._sum, 0) / filteredCalc.length) : 0;
     const best = Math.max(...filteredCalc.map((r) => r._sum));
-    const u1Total = r1(filteredCalc.reduce((s, r) => s + r._u1, 0));
-    const u2Total = r1(filteredCalc.reduce((s, r) => s + r._u2, 0));
-    const months = new Set(filteredCalc.map(r => r.date?.slice(0, 7)).filter(Boolean));
-    const monthlyAvg = months.size > 0 ? r1(filteredCalc.reduce((s, r) => s + r._sum, 0) / months.size) : 0;
-    return { today: latest._sum, month: monthTotal, avg, best, u1: u1Total, u2: u2Total, grandTotal: r1(u1Total + u2Total), monthlyAvg };
+    
+    return { 
+      today: latest._sum, 
+      month: monthTotal, 
+      avg: summary.daily_avg, 
+      best, 
+      u1: summary.u1_total, 
+      u2: summary.u2_total, 
+      grandTotal: summary.grand_total, 
+      monthlyAvg: summary.monthly_avg 
+    };
   }, [filteredCalc, currentMK, dateFrom]);
 
   const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r._sum })), [filteredCalc]);
@@ -1194,8 +1194,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
 
   const handleSave = () => {
     if (!formValues.date) { pushToast({ type: 'error', message: 'Date is required' }); return; }
-    const total = toN(formValues.u1Inv1Kwh) + toN(formValues.u1Inv2Kwh) + toN(formValues.u1Inv3Kwh) + toN(formValues.u1Inv4Kwh) + toN(formValues.u2Inv1Kwh) + toN(formValues.u2Inv2Kwh) + toN(formValues.u2Inv3Kwh);
-    const payload = { ...formValues, dailyTotalKwh: r1(total) };
+    const payload = processSolarRow(formValues);
     if (editRow) updateDailySolarGeneration(editRow.id, payload, userName);
     else addDailySolarGeneration(payload, userName);
     closeForm();
@@ -1247,10 +1246,10 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                     <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
                     <Td value={r.u1Inv1Kwh} className="text-emerald-300 tabular-nums" /><Td value={r.u1Inv2Kwh} className="text-emerald-300 tabular-nums" />
                     <Td value={r.u1Inv3Kwh} className="text-emerald-300 tabular-nums" />                    <Td value={r.u1Inv4Kwh} className="text-emerald-300 tabular-nums" />
-                    <Td value={r._u1} className="text-emerald-300 font-semibold tabular-nums" />
+                    <Td value={r.u1_total} className="text-emerald-300 font-semibold tabular-nums" />
                     <Td value={r.u2Inv1Kwh} className="text-cyan-300 tabular-nums" /><Td value={r.u2Inv2Kwh} className="text-cyan-300 tabular-nums" />
                     <Td value={r.u2Inv3Kwh} className="text-cyan-300 tabular-nums" />
-                    <Td value={r._u2} className="text-cyan-300 font-semibold tabular-nums" />
+                    <Td value={r.u2_total} className="text-cyan-300 font-semibold tabular-nums" />
                     <Td value={r.dailyTotalKwh} className="text-white font-bold tabular-nums" />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteDailySolarGeneration(r.id, userName); }} /></td>}
                   </tr>

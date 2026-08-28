@@ -173,7 +173,8 @@ export function computeSolarSummary(rows) {
       u1_total: 0,
       u2_total: 0,
       grand_total: 0,
-      daily_avg: 0
+      daily_avg: 0,
+      monthly_avg: 0
     };
   }
 
@@ -183,12 +184,17 @@ export function computeSolarSummary(rows) {
   const u2_total = processed.reduce((sum, r) => sum + r.u2_total, 0);
   const grand_total = processed.reduce((sum, r) => sum + r.grand_total, 0);
   const daily_avg = processed.length > 0 ? Number((grand_total / processed.length).toFixed(2)) : 0;
+  
+  // Monthly average
+  const months = new Set(processed.map(r => r.date?.slice(0, 7)).filter(Boolean));
+  const monthly_avg = months.size > 0 ? Number((grand_total / months.size).toFixed(2)) : 0;
 
   return {
     u1_total: Number(u1_total.toFixed(2)),
     u2_total: Number(u2_total.toFixed(2)),
     grand_total: Number(grand_total.toFixed(2)),
-    daily_avg
+    daily_avg,
+    monthly_avg
   };
 }
 
