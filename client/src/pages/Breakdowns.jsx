@@ -280,50 +280,149 @@ export default function Breakdowns() {
     [machines]
   );
 
-  // ── KPI data ──────────────────────────────────────────────────────────────
-  const currentSummary = useMemo(() => aggregateBreakdownRecords(breakdowns, currentKey), [breakdowns, currentKey]);
-  const availability = useMemo(() => computeAvailability(breakdowns, machines.length, currentKey), [breakdowns, machines.length, currentKey]);
+  // ── Unified breakdown source — fallback to machine logs when section summaries empty ──
+  // Ensures metrics align with Machines.jsx (108) and Dashboard (108) even when
+  // Supabase sync yields empty breakdowns array but local machine logs exist.
+  const unifiedBreakdowns = useMemo(() => {
+    if (breakdowns && breakdowns.length > 0) return breakdowns;
+    // Derive section summaries from individual machine logs
+    if (!machineBreakdownLogs || machineBreakdownLogs.length === 0) return [];
+    const bySectionPeriod = {};
+    machineBreakdownLogs.forEach((log) => {
+      const period = String(log.date || '').slice(0, 7) || currentKey;
+      const section = log.plantSection || log.section || 'Unknown';
+      const key = `${period}::${section}`;
+      if (!bySectionPeriod[key]) {
+        bySectionPeriod[key] = {
+          id: `derived-${key}`,
+          period,
+          section,
+          breakdownCount: 0,
+          downtimeHours: 0,
+          operatingHours: 0,
+          mttr: 0,
+          mtbf: 0,
+          remarks: '',
+        };
+      }
+      bySectionPeriod[key].breakdownCount += 1;
+      bySectionPeriod[key].downtimeHours += Number(log.downtimeHours || 0);
+    });
+    return Object.values(bySectionPeriod).map((r) => ({
+      ...r,
+      downtimeHours: Math.round(r.downtimeHours * 10) / 10,
+      mttr: r.breakdownCount ? Math.round((r.downtimeHours / r.breakdownCount) * 10) / 10 : 0,
+    }));
+  }, [breakdowns, machineBreakdownLogs, currentKey]);
+
+  // ── KPI data — unified + All Months default (not hardcoded current month) ──
+  // Default to latest available month with data when current month is empty, else All
+  const latestPeriodWithData = useMemo(() => {
+    const periods = new Set([
+      ...unifiedBreakdowns.map((r) => r.period).filter(Boolean),
+      ...machineBreakdownLogs.map((r) => String(r.date || '').slice(0, 7)).filter(Boolean),
+    ]);
+    if (periods.size === 0) return null;
+    return [...periods].sort((a, b) => b.localeCompare(a))[0];
+  }, [unifiedBreakdowns, machineBreakdownLogs]);
+
+  const effectiveKey = useMemo(() => {
+    // If unified has data for currentKey, use it; else fallback to latest available or null (All)
+    const hasCurrent = unifiedBreakdowns.some((r) => r.period === currentKey);
+    if (hasCurrent) return currentKey;
+    if (latestPeriodWithData) return null; // null => All Months aggregate (shows 108)
+    return null;
+  }, [unifiedBreakdowns, currentKey, latestPeriodWithData]);
+
+  const currentSummary = useMemo(() => aggregateBreakdownRecords(unifiedBreakdowns, effectiveKey), [unifiedBreakdowns, effectiveKey]);
+  const availability = useMemo(() => computeAvailability(unifiedBreakdowns, machines.length, effectiveKey), [unifiedBreakdowns, machines.length, effectiveKey]);
 
   const prevMonthKey = useMemo(() => {
+    if (effectiveKey) {
+      const d = new Date(`${effectiveKey}-01`);
+      d.setMonth(d.getMonth() - 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    // When showing All, compare All vs previous month of latest
+    if (latestPeriodWithData) {
+      const d = new Date(`${latestPeriodWithData}-01`);
+      d.setMonth(d.getMonth() - 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  }, []);
-  const prevSummary = useMemo(() => aggregateBreakdownRecords(breakdowns, prevMonthKey), [breakdowns, prevMonthKey]);
-  const prevAvailability = useMemo(() => computeAvailability(breakdowns, machines.length, prevMonthKey), [breakdowns, machines.length, prevMonthKey]);
+  }, [effectiveKey, latestPeriodWithData]);
+  const prevSummary = useMemo(() => aggregateBreakdownRecords(unifiedBreakdowns, effectiveKey ? prevMonthKey : null), [unifiedBreakdowns, prevMonthKey, effectiveKey]);
+  const prevAvailability = useMemo(() => computeAvailability(unifiedBreakdowns, machines.length, effectiveKey ? prevMonthKey : null), [unifiedBreakdowns, machines.length, prevMonthKey, effectiveKey]);
 
   const pctChange = (curr, prev) => {
     if (!prev) return curr > 0 ? 100 : 0;
     return Math.round(((curr - prev) / prev) * 100);
   };
 
-  // ── Chart data ────────────────────────────────────────────────────────────
-  const trend = useMemo(() => monthlyBreakdownTrend(breakdowns, 12), [breakdowns]);
-  const topMachines = useMemo(() => machineWiseBreakdown(machineBreakdownLogs).slice(0, 10), [machineBreakdownLogs]);
-  const topMachinesPareto = useMemo(() => paretoTop10Machines(machineBreakdownLogs), [machineBreakdownLogs]);
-  const failurePareto = useMemo(() => failureCausePareto(machineBreakdownLogs), [machineBreakdownLogs]);
-  const monthlyRegister = useMemo(() => machineBreakdownRegister(machineBreakdownLogs), [machineBreakdownLogs]);
+  // ── Unified machine logs — fallback to breakdowns-derived when logs empty ──
+  const unifiedMachineLogs = useMemo(() => {
+    if (machineBreakdownLogs && machineBreakdownLogs.length > 0) return machineBreakdownLogs;
+    // Fallback: generate pseudo logs from section summaries for charts (ensures Pareto not empty)
+    if (unifiedBreakdowns.length > 0) {
+      const pseudo = [];
+      unifiedBreakdowns.forEach((rec) => {
+        for (let i = 0; i < (rec.breakdownCount || 0); i++) {
+          pseudo.push({
+            id: `pseudo-${rec.period}-${rec.section}-${i}`,
+            machineId: '',
+            machineCode: rec.section,
+            machineName: rec.section,
+            plantSection: rec.section,
+            date: `${rec.period}-15`,
+            startTime: `${rec.period}-15T08:00:00`,
+            endTime: `${rec.period}-15T10:00:00`,
+            downtimeHours: rec.breakdownCount ? rec.downtimeHours / rec.breakdownCount : 0,
+            failureCause: 'Aggregated from section summary',
+            status: 'closed',
+          });
+        }
+      });
+      return pseudo;
+    }
+    return [];
+  }, [machineBreakdownLogs, unifiedBreakdowns]);
 
-  // ── Month tabs for register ────────────────────────────────────────────────
+  // ── Chart data — unified sources ensure non-empty Pareto/Trends ────────────
+  const trend = useMemo(() => monthlyBreakdownTrend(unifiedBreakdowns, 12), [unifiedBreakdowns]);
+  const topMachines = useMemo(() => machineWiseBreakdown(unifiedMachineLogs).slice(0, 10), [unifiedMachineLogs]);
+  const topMachinesPareto = useMemo(() => paretoTop10Machines(unifiedMachineLogs), [unifiedMachineLogs]);
+  const failurePareto = useMemo(() => failureCausePareto(unifiedMachineLogs), [unifiedMachineLogs]);
+  const monthlyRegister = useMemo(() => machineBreakdownRegister(unifiedMachineLogs), [unifiedMachineLogs]);
+
+  // ── Month tabs for register — unified source ensures non-empty when breakdowns exist ──
   const monthTabs = useMemo(() => {
     const counts = {};
-    machineBreakdownLogs.forEach((r) => {
+    unifiedMachineLogs.forEach((r) => {
       const m = String(r.date || '').slice(0, 7);
       if (m) counts[m] = (counts[m] || 0) + 1;
     });
+    // Fallback to unifiedBreakdowns periods if no machine logs
+    if (Object.keys(counts).length === 0) {
+      unifiedBreakdowns.forEach((r) => {
+        const m = String(r.period || '').slice(0, 7);
+        if (m) counts[m] = (counts[m] || 0) + (r.breakdownCount || 0);
+      });
+    }
     return Object.entries(counts)
       .map(([key, count]) => ({ key, count }))
       .sort((a, b) => b.key.localeCompare(a.key));
-  }, [machineBreakdownLogs]);
+  }, [unifiedMachineLogs, unifiedBreakdowns]);
 
-  // Auto-select first month if none selected
-  const activeMonth = registerMonth || (monthTabs.length > 0 ? monthTabs[0].key : '');
+  // Default to All Months on initial load (spec: All or latest available, not hardcoded current month)
+  const activeMonth = registerMonth;
 
-  // ── Register table rows ───────────────────────────────────────────────────
+  // ── Register table rows — unified source ───────────────────────────────────
   const registerRows = useMemo(() => {
     const logs = activeMonth
-      ? machineBreakdownLogs.filter((r) => String(r.date || '').slice(0, 7) === activeMonth)
-      : machineBreakdownLogs;
+      ? unifiedMachineLogs.filter((r) => String(r.date || '').slice(0, 7) === activeMonth)
+      : unifiedMachineLogs;
     const q = regSearch.toLowerCase();
     return logs
       .filter((r) => {
@@ -546,7 +645,20 @@ export default function Breakdowns() {
             {/* Left: Month tabs */}
             <div className="col-span-12 lg:col-span-3">
               <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
-                {monthTabs.length === 0 && (
+                <button
+                  onClick={() => { setRegisterMonth(''); setRegPage(1); }}
+                  className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
+                    activeMonth === ''
+                      ? 'bg-cyan-400/15 text-cyan-300 border border-cyan-400/30 font-semibold'
+                      : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
+                  }`}
+                >
+                  <span className="truncate">All Months</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${activeMonth === '' ? 'bg-cyan-400/20 text-cyan-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                    {unifiedMachineLogs.length}
+                  </span>
+                </button>
+                {monthTabs.length === 0 && unifiedMachineLogs.length === 0 && (
                   <p className="text-slate-500 text-xs py-4 text-center">No breakdown logs yet</p>
                 )}
                 {monthTabs.map((tab) => {

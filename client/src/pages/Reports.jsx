@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore, updateBreakdown, deleteBreakdown, updatePM, deletePM } from '../store.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
@@ -28,10 +29,10 @@ import EmptyState from '../components/EmptyState.jsx';
 import { exportToCSV } from '../utils.js';
 import { COMPANY_NAME } from '../constants.js';
 import {
-  AlertCircle, AlertOctagon, CalendarDays, CalendarRange, ClipboardCheck, Download,
+  AlertCircle, AlertOctagon, Award, CalendarDays, CalendarRange, ClipboardCheck, Download,
   Factory, FileBarChart2, FileSpreadsheet, FileText, Gauge, Lightbulb,
   Pencil, Printer, ShieldCheck, Timer, TimerReset, Trash2, TrendingUp, X,
-  ChevronDown,
+  ChevronDown, Eye, ExternalLink, Clock,
 } from 'lucide-react';
 import { PieDonutChart, ChartCard } from '../components/AnalyticsCharts.jsx';
 
@@ -78,6 +79,20 @@ function exportPDF(title, columns, rows) {
 }
 
 const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—');
+
+function certDaysLeft(expiryDate) {
+  if (!expiryDate) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const expiry = new Date(expiryDate); expiry.setHours(0,0,0,0);
+  return Math.ceil((expiry - today) / (1000*60*60*24));
+}
+function certStatus(expiryDate) {
+  const d = certDaysLeft(expiryDate);
+  if (d == null) return { status: 'UNKNOWN', daysLeft: null, tone: 'info' };
+  if (d <= 0) return { status: 'EXPIRED', daysLeft: d, tone: 'danger' };
+  if (d >= 1 && d <= 30) return { status: 'EXPIRING SOON', daysLeft: d, tone: 'warning' };
+  return { status: 'VALID', daysLeft: d, tone: 'success' };
+}
 
 // Reports where rows have real store IDs and can be edited / deleted
 const EDITABLE_REPORTS = new Set(['pm', 'breakdown', 'availability']);
@@ -324,6 +339,7 @@ function EditModal({ reportId, row, onSave, onDelete, onClose }) {
 export default function Reports() {
   const store = useStore();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { machines, breakdowns, pms } = store;
   const [active, setActive] = useState('equipment');
   const [serverDocs, setServerDocs] = useState([]);
@@ -331,6 +347,9 @@ export default function Reports() {
   const [amcSectionFilter, setAmcSectionFilter] = useState('');
   const [amcVendorFilter, setAmcVendorFilter] = useState('');
   const [amcStatusFilter, setAmcStatusFilter] = useState('');
+  const [certSectionFilter, setCertSectionFilter] = useState('');
+  const [certTypeFilter, setCertTypeFilter] = useState('');
+  const [certStatusFilter, setCertStatusFilter] = useState('');
 
   const isAdmin = user?.role === 'admin';
   const userName = user?.full_name || user?.username || 'Admin';
@@ -696,8 +715,37 @@ export default function Reports() {
           (!amcStatusFilter || r.calculatedStatus === amcStatusFilter)
         ),
       },
+      {
+        id: 'testing-certificates',
+        label: 'Testing Certificates',
+        icon: Award,
+        desc: 'Statutory safety testing certificate compliance across 413 assets',
+        columns: [
+          { key: 'machineCode', label: 'Machine Code' },
+          { key: 'machineName', label: 'Machine Name' },
+          { key: 'plantSection', label: 'Plant Section' },
+          { key: 'certificateType', label: 'Certificate Type' },
+          { key: 'certificateNumber', label: 'Cert Number' },
+          { key: 'agencyName', label: 'Testing Agency' },
+          { label: 'Issue Date', value: (row) => row.issueDate ? new Date(row.issueDate).toLocaleDateString('en-GB') : '—' },
+          { label: 'Expiry Date', value: (row) => row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('en-GB') : '—' },
+          { key: 'frequency', label: 'Frequency' },
+          { label: 'Status', value: (row) => certStatus(row.expiryDate).status },
+          { label: 'Days Left', value: (row) => { const d = certDaysLeft(row.expiryDate); return d==null ? '—' : d<=0 ? 'EXPIRED' : `${d}d`; } },
+          { label: 'Document', value: (row) => row.document?.filename || row.documentName || (row.documentUrl ? 'View' : '—') },
+        ],
+        rows: (store.testingCertificates || []).filter((r) => {
+          if (certSectionFilter && r.plantSection !== certSectionFilter) return false;
+          if (certTypeFilter && r.certificateType !== certTypeFilter) return false;
+          if (certStatusFilter) {
+            const st = certStatus(r.expiryDate).status;
+            if (st !== certStatusFilter) return false;
+          }
+          return true;
+        }),
+      },
     ];
-  }, [store, serverDocs, machines, breakdowns, pms, amcSectionFilter, amcVendorFilter, amcStatusFilter]);
+  }, [store, serverDocs, machines, breakdowns, pms, amcSectionFilter, amcVendorFilter, amcStatusFilter, certSectionFilter, certTypeFilter, certStatusFilter]);
 
   const report = REPORTS.find((item) => item.id === active) || REPORTS[0];
   const filename = report.label.toLowerCase().replace(/\s+/g, '-');
@@ -850,6 +898,194 @@ export default function Reports() {
         );
       })()}
 
+      {/* ── Testing Certificates Overview ── */}
+      {active === 'testing-certificates' && (() => {
+        const certs = store.testingCertificates || [];
+        const total = certs.length;
+        const valid = certs.filter((c) => certStatus(c.expiryDate).status === 'VALID').length;
+        const expiring = certs.filter((c) => certStatus(c.expiryDate).status === 'EXPIRING SOON').length;
+        const expired = certs.filter((c) => certStatus(c.expiryDate).status === 'EXPIRED').length;
+        const compliance = total > 0 ? Math.round((valid / total) * 1000) / 10 : 0;
+        const statusData = [
+          { label: 'Valid', value: valid, color: '#10B981' },
+          { label: 'Expiring Soon', value: expiring, color: '#F59E0B' },
+          { label: 'Expired', value: expired, color: '#EF4444' },
+        ].filter((d) => d.value > 0);
+        const timeline = [...certs]
+          .filter((c) => c.expiryDate)
+          .map((c) => ({ ...c, daysLeft: certDaysLeft(c.expiryDate), status: certStatus(c.expiryDate).status }))
+          .sort((a, b) => a.daysLeft - b.daysLeft)
+          .slice(0, 8);
+        const sections = [...new Set(certs.map((c) => c.plantSection).filter(Boolean))].sort();
+        const types = [...new Set(certs.map((c) => c.certificateType).filter(Boolean))].sort();
+        const filteredForStats = certs.filter((r) => {
+          if (certSectionFilter && r.plantSection !== certSectionFilter) return false;
+          if (certTypeFilter && r.certificateType !== certTypeFilter) return false;
+          if (certStatusFilter && certStatus(r.expiryDate).status !== certStatusFilter) return false;
+          return true;
+        });
+        const handleExportTestingCSV = () => {
+          const rows = filteredForStats;
+          const cols = [
+            { key: 'machineCode', label: 'Machine Code' },
+            { key: 'machineName', label: 'Machine Name' },
+            { key: 'plantSection', label: 'Plant Section' },
+            { key: 'certificateType', label: 'Certificate Type' },
+            { key: 'certificateNumber', label: 'Cert Number' },
+            { key: 'agencyName', label: 'Testing Agency' },
+            { label: 'Issue Date', value: (r) => r.issueDate ? new Date(r.issueDate).toLocaleDateString('en-GB') : '' },
+            { label: 'Expiry Date', value: (r) => r.expiryDate ? new Date(r.expiryDate).toLocaleDateString('en-GB') : '' },
+            { key: 'frequency', label: 'Frequency' },
+            { label: 'Status', value: (r) => certStatus(r.expiryDate).status },
+            { label: 'Days Left', value: (r) => { const d = certDaysLeft(r.expiryDate); return d==null?'': d<=0?'EXPIRED': `${d}d`; } },
+          ];
+          exportToCSV(rows, cols, `testing-certificates-${new Date().toISOString().slice(0,10)}.csv`);
+        };
+        return (
+          <div className="space-y-4">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {[
+                { label: 'Total Certificates', value: total, color: 'text-cyan-400', bg: 'bg-cyan-400/10 border-cyan-400/25' },
+                { label: 'Valid / Active', value: valid, color: 'text-emerald-400', bg: 'bg-emerald-400/10 border-emerald-400/25' },
+                { label: 'Expiring Soon', value: expiring, color: 'text-amber-400', bg: 'bg-amber-400/10 border-amber-400/25' },
+                { label: 'Expired', value: expired, color: 'text-red-400', bg: 'bg-red-400/10 border-red-400/25' },
+                { label: 'Compliance Rate', value: `${compliance}%`, color: compliance >= 90 ? 'text-emerald-400' : compliance >= 75 ? 'text-amber-400' : 'text-red-400', bg: compliance >= 90 ? 'bg-emerald-400/10 border-emerald-400/25' : compliance >= 75 ? 'bg-amber-400/10 border-amber-400/25' : 'bg-red-400/10 border-red-400/25' },
+              ].map((kpi) => (
+                <div key={kpi.label} className={`rounded-control border p-3 text-center ${kpi.bg}`}>
+                  <p className={`text-xl font-bold leading-none ${kpi.color}`}>{kpi.value}</p>
+                  <p className="text-slate-400 text-[10px] mt-1.5 leading-tight">{kpi.label}</p>
+                </div>
+              ))}
+            </div>
+            {/* Charts + Timeline + Filters */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <ChartCard title="Status Distribution" subtitle="Valid vs Expiring Soon vs Expired" height={220} empty={statusData.length === 0}>
+                <PieDonutChart data={statusData} donut centerLabel={total} centerSub="Certs" />
+              </ChartCard>
+              <div className="glass-card p-5 flex flex-col">
+                <h4 className="text-card-title mb-3">Expiry Timeline</h4>
+                <div className="space-y-2 flex-1">
+                  {timeline.length === 0 ? (
+                    <p className="text-slate-500 text-xs">No certificates with expiry dates</p>
+                  ) : timeline.map((c) => {
+                    const daysCls = c.daysLeft < 0 || c.daysLeft === 0 ? 'text-red-400' : c.daysLeft <= 30 ? 'text-amber-400' : 'text-emerald-400';
+                    const label = c.daysLeft <= 0 ? 'EXPIRED' : `${c.daysLeft}d`;
+                    return (
+                      <div key={c.id} className="flex items-center gap-2 text-xs">
+                        <span className={`font-semibold w-16 text-right ${daysCls}`}>{label}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white truncate">{c.machineName || c.machineCode || c.machineId} — {c.certificateType}</p>
+                          <p className="text-slate-500 truncate">{c.agencyName} · {c.expiryDate ? new Date(c.expiryDate).toLocaleDateString('en-GB') : ''}</p>
+                        </div>
+                        <span className={`badge text-[10px] px-1.5 py-0.5 rounded-full ${c.status === 'VALID' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : c.status === 'EXPIRING SOON' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-red-500/15 text-red-400 border border-red-500/30'}`}>{c.status}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="glass-card p-5 flex flex-col justify-center">
+                <h4 className="text-card-title mb-3">Filters</h4>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-meta block mb-1">Plant Section</label>
+                    <select value={certSectionFilter} onChange={(e) => setCertSectionFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All Sections</option>
+                      {sections.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-meta block mb-1">Certificate Type</label>
+                    <select value={certTypeFilter} onChange={(e) => setCertTypeFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All Types</option>
+                      {types.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-meta block mb-1">Status</label>
+                    <select value={certStatusFilter} onChange={(e) => setCertStatusFilter(e.target.value)} className="input-field text-xs w-full">
+                      <option value="">All</option>
+                      <option value="VALID">Valid</option>
+                      <option value="EXPIRING SOON">Expiring Soon</option>
+                      <option value="EXPIRED">Expired</option>
+                    </select>
+                  </div>
+                  {(certSectionFilter || certTypeFilter || certStatusFilter) && (
+                    <button onClick={() => { setCertSectionFilter(''); setCertTypeFilter(''); setCertStatusFilter(''); }} className="btn-ghost text-xs w-full">Clear Filters</button>
+                  )}
+                </div>
+                <p className="text-slate-500 text-[10px] mt-3">{filteredForStats.length} of {total} certificates shown</p>
+                <button onClick={handleExportTestingCSV} disabled={!filteredForStats.length} className="btn-success text-xs mt-3 inline-flex items-center gap-1.5 justify-center disabled:opacity-40">
+                  <Download size={13} /> Export Testing Report CSV
+                </button>
+              </div>
+            </div>
+            {/* Data Table with Actions */}
+            <div className="glass-card overflow-hidden">
+              <div className="overflow-x-auto max-h-[520px]">
+                <table className="enterprise-table w-full min-w-[1200px]">
+                  <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
+                    <tr>
+                      <th>Machine Code</th>
+                      <th>Machine Name</th>
+                      <th>Plant Section</th>
+                      <th>Certificate Type</th>
+                      <th>Cert Number</th>
+                      <th>Testing Agency</th>
+                      <th>Issue Date</th>
+                      <th>Expiry Date</th>
+                      <th>Frequency</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredForStats.slice(0, 100).map((row) => {
+                      const st = certStatus(row.expiryDate);
+                      const badgeCls = st.status === 'VALID' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : st.status === 'EXPIRING SOON' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-red-500/15 text-red-400 border border-red-500/30';
+                      const docUrl = row.document?.publicUrl || row.documentUrl || row.document?.dataUrl || '';
+                      return (
+                        <tr key={row.id}>
+                          <td className="font-mono text-xs text-cyan-400">{row.machineCode || row.machineId || '—'}</td>
+                          <td className="text-white text-xs font-medium max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
+                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
+                          <td className="text-white text-xs">{row.certificateType || '—'}</td>
+                          <td className="font-mono text-xs text-slate-300">{row.certificateNumber || '—'}</td>
+                          <td className="text-slate-300 text-xs max-w-[140px] truncate" title={row.agencyName}>{row.agencyName || '—'}</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.issueDate ? new Date(row.issueDate).toLocaleDateString('en-GB') : '—'}</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('en-GB') : '—'}</td>
+                          <td className="text-slate-400 text-xs">{row.frequency || '—'}</td>
+                          <td><span className={`badge text-[10px] px-2 py-0.5 rounded-full font-bold ${badgeCls}`}>{st.status}</span></td>
+                          <td className="whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              {docUrl ? (
+                                <a href={docUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost !p-1.5 text-cyan-400 hover:text-cyan-300" title="View Document"><Eye size={13} /></a>
+                              ) : <span className="text-slate-600 p-1.5"><Eye size={13} /></span>}
+                              {row.machineId ? (
+                                <button onClick={() => navigate(`/machines/${row.machineId}`)} className="btn-ghost !p-1.5 text-slate-400 hover:text-white" title="Open Machine"><ExternalLink size={13} /></button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {filteredForStats.length === 0 && (
+                  <div className="p-6 text-center">
+                    <p className="text-slate-500 text-xs">No certificates match the current filters.</p>
+                  </div>
+                )}
+                {filteredForStats.length > 100 && (
+                  <p className="px-5 py-3 text-meta">Preview limited to 100 rows — exports include all {filteredForStats.length} rows.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {active !== 'testing-certificates' && (
       <div className="glass-card overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-4 border-b border-white/[0.06]">
           <div>
@@ -927,6 +1163,7 @@ export default function Reports() {
           </div>
         )}
       </div>
+      )}
 
       <p className="text-meta flex items-center gap-1.5">
         <FileText size={12} aria-hidden="true" />
