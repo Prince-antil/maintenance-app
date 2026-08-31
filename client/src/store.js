@@ -516,6 +516,9 @@ function dailySolarGenerationToCloudRow(record) {
 
 // ── Energy Settings normalizer ───────────────────────────────────────────
 function normalizeEnergySettings(fields) {
+  const capRaw = fields.installedSolarCapacityKwp;
+  const cap = capRaw != null && capRaw !== '' ? toNumber(capRaw) : 540;
+  const capFinal = cap > 0 ? cap : 540;
   return {
     id: fields.id || 'default',
     u1ImportExportCt: toNumber(fields.u1ImportExportCt),
@@ -523,7 +526,7 @@ function normalizeEnergySettings(fields) {
     u2ImportExportCt: toNumber(fields.u2ImportExportCt),
     u2SolarCt: toNumber(fields.u2SolarCt),
     pfWarningThreshold: toNumber(fields.pfWarningThreshold),
-    installedSolarCapacityKwp: toNumber(fields.installedSolarCapacityKwp),
+    installedSolarCapacityKwp: capFinal,
     gridCo2EmissionFactor: toNumber(fields.gridCo2EmissionFactor),
     avgPeakSunHoursPerDay: toNumber(fields.avgPeakSunHoursPerDay),
     createdAt: fields.createdAt || now(),

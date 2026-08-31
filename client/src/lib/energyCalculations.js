@@ -408,3 +408,44 @@ export function getCurrentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
+
+// ============================================================
+// SOLAR SPECIFIC YIELD — Units per kW per day
+// ============================================================
+export function computeSpecificYield(totalSolarKwh, capacityKw, days) {
+  const solar = Number(totalSolarKwh) || 0;
+  const cap = Number(capacityKw) || 0;
+  const d = Number(days) || 0;
+  if (!cap || !d) return 0;
+  return Number((solar / (cap * d)).toFixed(2));
+}
+
+export function getUniqueDaysCount(rows, dateKey = 'date') {
+  const days = new Set((rows || []).map((r) => (r[dateKey] || '').slice(0, 10)).filter(Boolean));
+  return days.size;
+}
+
+export function getDaysInRange(dateFrom, dateTo, rows) {
+  const unique = getUniqueDaysCount(rows);
+  if (unique > 0) return unique;
+  if (dateFrom && dateTo) {
+    const from = new Date(dateFrom);
+    const to = new Date(dateTo);
+    if (!isNaN(from) && !isNaN(to) && to >= from) {
+      return Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1;
+    }
+  }
+  if (dateFrom && !dateTo) {
+    const from = new Date(dateFrom);
+    const to = new Date();
+    if (!isNaN(from) && to >= from) {
+      return Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1;
+    }
+  }
+  return rows?.length || 1;
+}
+
+export function getSolarCapacity(energySettings) {
+  const v = Number(energySettings?.installedSolarCapacityKwp);
+  return Number.isFinite(v) && v > 0 ? v : 540;
+}

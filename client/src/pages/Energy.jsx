@@ -35,7 +35,11 @@ import {
   computeUtilitySummary,
   getCurrentMonthUtilityTotals,
   formatPowerFactor as formatPf,
-  formatEnergy as formatEnergyUtil
+  formatEnergy as formatEnergyUtil,
+  computeSpecificYield,
+  getDaysInRange,
+  getSolarCapacity,
+  getUniqueDaysCount
 } from '../lib/energyCalculations.js';
 import { useEnergyCache, memoizedAggregations } from '../hooks/useEnergyCache.js';
 import { downloadTemplate } from '../bulkImport.js';
@@ -1090,28 +1094,64 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—', monthlyAvg: '—' };
+    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—', monthlyAvg: '—', specificYield: '—', monthGenerationRaw: 0, totalSolarFiltered: 0, daysCount: 0, capacity: 540 };
     
-    // Use canonical solar summary - single source of truth
     const summary = computeSolarSummary(filteredCalc);
-    
-    // Month Generation: CURRENT calendar month from FULL dataset (not filtered)
-    const monthGeneration = getCurrentMonthSolarTotal(sorted);
+    const capacity = getSolarCapacity(store.energySettings);
+    // Month Generation: responsive to active date filter + fallback to latest month
+    let monthGeneration = 0;
+    const currentMonthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthRowsFiltered = filteredCalc.filter((r) => r.date?.slice(0, 7) === currentMonthKey);
+    if (currentMonthRowsFiltered.length > 0) {
+      monthGeneration = currentMonthRowsFiltered.reduce((s, r) => s + Number(r.grandTotal || getSolarDerived(r).grandTotal || 0), 0);
+    } else {
+      const latestMonthFiltered = [...new Set(filteredCalc.map((r) => r.date?.slice(0, 7)).filter(Boolean))].sort((a, b) => b.localeCompare(a))[0];
+      if (latestMonthFiltered) {
+        monthGeneration = filteredCalc.filter((r) => r.date?.slice(0, 7) === latestMonthFiltered).reduce((s, r) => s + Number(r.grandTotal || getSolarDerived(r).grandTotal || 0), 0);
+      }
+      if (monthGeneration === 0) {
+        monthGeneration = getCurrentMonthSolarTotal(sorted);
+        if (monthGeneration === 0 && sorted.length > 0) {
+          const latestOverall = [...new Set(sorted.map((r) => r.date?.slice(0, 7)).filter(Boolean))].sort((a, b) => b.localeCompare(a))[0];
+          if (latestOverall) {
+            monthGeneration = sorted.filter((r) => r.date?.slice(0, 7) === latestOverall).reduce((s, r) => s + Number(r.grandTotal || getSolarDerived(r).grandTotal || 0), 0);
+          }
+        }
+      }
+    }
+    // Supabase fallback: if still 0 but filtered has grandTotal, use filtered total for month
+    if (monthGeneration === 0 && filteredCalc.length > 0) {
+      const fallback = filteredCalc.reduce((s, r) => s + Number(r.grandTotal || 0), 0);
+      // If filtered is for a single month (e.g., This Month), fallback to filtered total
+      // For broader ranges, keep 0 but show latest month above already handled
+      if (filteredCalc.length <= 31) monthGeneration = fallback;
+    }
+    const totalSolarFiltered = filteredCalc.reduce((s, r) => s + Number(r.grandTotal || getSolarDerived(r).grandTotal || 0), 0);
+    const daysCount = getDaysInRange(dateFrom, dateTo, filteredCalc);
+    const specificYield = computeSpecificYield(totalSolarFiltered, capacity, daysCount);
     
     const latest = filteredCalc[0];
     const best = Math.max(...filteredCalc.map((r) => r.grandTotal || 0));
     
     return { 
       today: latest.grandTotal || 0, 
-      month: monthGeneration, 
+      month: Math.round(monthGeneration), 
       avg: summary.dailyAvg, 
       best, 
       u1: summary.u1Total, 
       u2: summary.u2Total, 
       grandTotal: summary.grandTotal, 
-      monthlyAvg: summary.monthlyAvg 
+      monthlyAvg: summary.monthlyAvg,
+      specificYield: specificYield > 0 ? specificYield.toFixed(2) : '0.00',
+      monthGenerationRaw: Math.round(monthGeneration),
+      totalSolarFiltered: Math.round(totalSolarFiltered),
+      daysCount,
+      capacity
     };
-  }, [filteredCalc, sorted, currentMK, dateFrom]);
+  }, [filteredCalc, sorted, currentMK, dateFrom, dateTo, store.energySettings]);
+
+  const [showYieldModal, setShowYieldModal] = useState(false);
+  const [editCapacity, setEditCapacity] = useState('');
 
   // Chart data using canonical derived values
   const dailyChart = useMemo(() => [...filteredCalc].reverse().map((r) => ({ name: r.date?.slice(5) || r.date, kWh: r.grandTotal })), [filteredCalc]);
@@ -1176,6 +1216,19 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <KpiCard label="U1 Total (Filtered)" value={kpis.u1} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
         <KpiCard label="U2 Total (Filtered)" value={kpis.u2} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
         <KpiCard label="Avg Monthly" value={kpis.monthlyAvg} unit="kWh" color="text-violet-300" bg="bg-violet-500/[0.07] border-violet-500/20" />
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => { setEditCapacity(String(kpis.capacity ?? 540)); setShowYieldModal(true); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditCapacity(String(kpis.capacity ?? 540)); setShowYieldModal(true); } }}
+          className="rounded-control border p-4 bg-amber-500/[0.07] border-amber-500/20 cursor-pointer hover:border-amber-500/40 hover:bg-amber-500/[0.10] transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+          title="Click to explore solar yield calculation"
+          aria-label="Specific Yield — click to explore"
+        >
+          <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1.5 leading-tight flex items-center justify-between"><span>SPECIFIC YIELD (kWh/kWp/day)</span><span className="text-[10px] text-amber-400/70">EXPLORE →</span></p>
+          <p className="text-xl font-bold tabular-nums text-amber-300">{kpis.specificYield}</p>
+          <p className="text-slate-500 text-xs mt-0.5">Units</p>
+        </div>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
         <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailySolar' })} onDownload={() => downloadTemplate('energyDailySolar')} label="Daily Reading" />
@@ -1244,6 +1297,68 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
           onClose={() => setConfirmPurge(false)}
           loading={purgeLoading}
         />
+      )}
+      {showYieldModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Solar Generation Efficiency Breakdown">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowYieldModal(false)} aria-hidden="true" />
+          <div className="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-400 text-lg">☀️</span>
+                <h3 className="text-white font-semibold">Solar Generation Efficiency Breakdown</h3>
+              </div>
+              <button onClick={() => setShowYieldModal(false)} className="w-8 h-8 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] flex items-center justify-center text-slate-400 hover:text-white transition-colors" aria-label="Close">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
+                <p className="text-slate-400 text-xs font-mono text-center leading-relaxed">
+                  Units = Total Solar Generation (kWh) / (Installed Capacity (kW) × Days)
+                </p>
+                <p className="text-emerald-400 text-xs font-mono text-center mt-2">
+                  {Number(kpis.totalSolarFiltered || 0).toLocaleString()} / ({Number(editCapacity || kpis.capacity || 540).toLocaleString()} × {kpis.daysCount || 1}) = {(() => { const cap = Number(editCapacity || kpis.capacity || 540); const days = Number(kpis.daysCount || 1); const total = Number(kpis.totalSolarFiltered || 0); return cap && days ? (total / (cap * days)).toFixed(2) : '0.00'; })()} kWh/kW/day
+                </p>
+              </div>
+              <div>
+                <label className="block text-slate-400 text-xs font-medium mb-1.5">Installed Capacity (kW) — Editable</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={editCapacity}
+                  onChange={(e) => setEditCapacity(e.target.value)}
+                  className="w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400/60"
+                  placeholder="540"
+                />
+                <p className="text-slate-500 text-[11px] mt-1">Default 540 kW — updates persist to Settings → Energy Configuration and Supabase.</p>
+              </div>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 space-y-2 text-xs">
+                <div className="flex justify-between"><span className="text-slate-500">Filtered Generation:</span><span className="text-white font-mono">{Number(kpis.totalSolarFiltered || 0).toLocaleString()} kWh</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Installed Capacity:</span><span className="text-white font-mono">{Number(editCapacity || kpis.capacity || 540).toLocaleString()} kW</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Period Days:</span><span className="text-white font-mono">{kpis.daysCount || 1} Days</span></div>
+                <div className="flex justify-between pt-2 border-t border-slate-800 font-semibold"><span className="text-slate-300">Result:</span><span className="text-emerald-400 font-mono">{Number(kpis.totalSolarFiltered || 0).toLocaleString()} / ({Number(editCapacity || kpis.capacity || 540).toLocaleString()} × {kpis.daysCount || 1}) = {(() => { const cap = Number(editCapacity || kpis.capacity || 540); const days = Number(kpis.daysCount || 1); const total = Number(kpis.totalSolarFiltered || 0); return cap && days ? (total / (cap * days)).toFixed(2) : '0.00'; })()} kWh/kW/day</span></div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button onClick={() => setShowYieldModal(false)} className="btn-ghost text-xs">Cancel</button>
+                <button
+                  onClick={() => {
+                    const cap = Number(editCapacity);
+                    if (!Number.isFinite(cap) || cap <= 0) { pushToast({ type: 'error', message: 'Enter a valid capacity (>0)' }); return; }
+                    try {
+                      upsertEnergySettings({ installedSolarCapacityKwp: cap }, userName);
+                      try { localStorage.setItem('ccpl_energy_capacity', String(cap)); } catch {}
+                      pushToast({ type: 'success', message: `Capacity updated to ${cap} kW` });
+                    } catch (e) { pushToast({ type: 'error', message: e.message }); }
+                    setShowYieldModal(false);
+                  }}
+                  className="btn-primary text-xs"
+                >
+                  Save / Apply
+                </button>
+              </div>
+              <p className="text-slate-500 text-[11px]">Recalculates Specific Yield across all time filters instantly. Persisted to energy_settings (Supabase) and localStorage.</p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

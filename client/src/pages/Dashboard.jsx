@@ -20,6 +20,8 @@ import {
   formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
 import { computeEnergySnapshot } from '../lib/energyEngine.js';
+import { computeSpecificYield, getDaysInRange, getSolarCapacity, getSolarDerived } from '../lib/energyCalculations.js';
+import { upsertEnergySettings } from '../store.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong } from '../utils.js';
 import Factory from 'lucide-react/dist/esm/icons/factory';
@@ -285,6 +287,35 @@ export default function Dashboard() {
     return computeEnergySnapshot(filteredDailyUtilityLog, filteredDailySolarGeneration);
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
 
+  // Solar Specific Yield — Units per kW per day, dynamic capacity 540 kW default
+  const solarSpecific = useMemo(() => {
+    const totalSolar = filteredDailySolarGeneration.reduce((sum, r) => {
+      const v = Number(r.grandTotal ?? r.dailyTotalKwh ?? getSolarDerived(r).grandTotal ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+    const fallbackTotal = Number(energySnapshot.solarKwh || 0);
+    const total = totalSolar > 0 ? totalSolar : fallbackTotal;
+    const capacity = getSolarCapacity(energySettings);
+    const uniqueDays = new Set(filteredDailySolarGeneration.map((r) => (r.date || '').slice(0, 10)).filter(Boolean)).size;
+    let days = uniqueDays;
+    if (days === 0 && filteredDailySolarGeneration.length > 0) days = filteredDailySolarGeneration.length;
+    if (days === 0 && periodFilter !== 'all') {
+      // For filtered period with no solar rows but periodFilter set, use calendar days in that month
+      const [y, m] = String(periodFilter).split('-').map(Number);
+      if (y && m) days = new Date(y, m, 0).getDate();
+    }
+    if (days === 0) days = 1;
+    const y = computeSpecificYield(total, capacity, days);
+    return { yield: y.toFixed(2), capacity, days, total: Math.round(total) };
+  }, [filteredDailySolarGeneration, energySettings, periodFilter, energySnapshot]);
+
+  const handleSolarCapacitySave = (newCap) => {
+    const cap = Number(newCap);
+    if (!Number.isFinite(cap) || cap <= 0) return;
+    upsertEnergySettings({ installedSolarCapacityKwp: cap }, user?.full_name || 'Admin');
+    try { localStorage.setItem('ccpl_solar_capacity', String(cap)); } catch {}
+  };
+
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
     equipment: equipmentWiseBreakdown(filteredBreakdowns).slice(0, 8),
@@ -446,8 +477,8 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Energy Snapshot Section ÔÇö now hydrates via same store/context as EnergyManagement with fallback handling */}
-      <EnergySnapshotCard snapshotMetrics={energySnapshot} isLoading={energyLoading || loading} />
+      {/* Energy Snapshot Section — now hydrates via same store/context as EnergyManagement with fallback handling */}
+      <EnergySnapshotCard snapshotMetrics={energySnapshot} solarSpecific={solarSpecific} onSolarCapacitySave={handleSolarCapacitySave} isLoading={energyLoading || loading} />
 
       {/* AI reliability insights */}
       <section aria-label="AI analytics">
