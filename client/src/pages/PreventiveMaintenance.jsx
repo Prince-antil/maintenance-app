@@ -171,7 +171,7 @@ function DetailModal({ row, onClose }) {
     ['Done PM Count', row.doneCount],
     ['Pending PM Count', row.pendingCount],
     ['Compliance', `${row.compliancePct}%`],
-    ['Remarks', row.remarks || '—'],
+    ['Remarks', row.remarks || '—' ],
   ];
   return (
     <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="PM summary details">
@@ -617,11 +617,11 @@ export default function PreventiveMaintenance() {
                     <tbody>
                       {regPageRows.map((row) => (
                         <tr key={`${row.machineId}-${row.period}`} className="cursor-pointer hover:bg-white/[0.03]">
-                          <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—'}</td>
-                          <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
-                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
+                          <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—' }</td>
+                          <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—' }</td>
+                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—' }</td>
                           <td className="text-slate-300 text-xs whitespace-nowrap">{formatDisplayDate(row.latestPmDate) || formatPeriodKey(row.period, true)}</td>
-                          <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—'}</td>
+                          <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—' }</td>
                           <td>
                             <span className={`badge text-[10px] ${
                               row.status === 'COMPLETED'
@@ -691,7 +691,7 @@ export default function PreventiveMaintenance() {
                     <td className="text-slate-300">{row.doneCount}</td>
                     <td className="text-slate-300">{row.pendingCount}</td>
                     <td className="text-slate-300">{row.compliancePct}%</td>
-                    <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—'}</td>
+                    <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—' }</td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label="View"><Eye size={12} /></button>

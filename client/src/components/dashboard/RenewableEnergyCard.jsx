@@ -88,14 +88,14 @@ export const RenewableEnergyCard = ({ metrics = {} }) => {
               <div>
                 <h5 className="text-xs font-semibold text-cyan-400 uppercase tracking-wider mb-2">1. Current Live Inputs</h5>
                 <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950 p-3 rounded-lg border border-slate-800">
-                  <div>• Solar Inverter Total: <b className="text-white">{metrics.inverterTotalKwh} kWh</b></div>
-                  <div>• Unit 1 Import: <b className="text-white">{metrics.totalU1Import} kWh</b></div>
-                  <div>• Unit 2 Import: <b className="text-white">{metrics.totalU2Import} kWh</b></div>
-                  <div>• Unit 1 Export: <b className="text-white">{metrics.totalU1Export} kWh</b></div>
-                  <div>• Unit 2 Export: <b className="text-white">{metrics.totalU2Export} kWh</b></div>
-                  <div>• Total Meter Import: <b className="text-white">{metrics.meterImportKwh} kWh</b></div>
-                  <div>• Total Meter Export: <b className="text-white">{metrics.meterExportKwh} kWh</b></div>
-                  <div>• DG Generation: <b className="text-white">{metrics.totalDg} kWh</b></div>
+                  <div> • Solar Inverter Total: <b className="text-white">{metrics.inverterTotalKwh} kWh</b></div>
+                  <div> • Unit 1 Import: <b className="text-white">{metrics.totalU1Import} kWh</b></div>
+                  <div> • Unit 2 Import: <b className="text-white">{metrics.totalU2Import} kWh</b></div>
+                  <div> • Unit 1 Export: <b className="text-white">{metrics.totalU1Export} kWh</b></div>
+                  <div> • Unit 2 Export: <b className="text-white">{metrics.totalU2Export} kWh</b></div>
+                  <div> • Total Meter Import: <b className="text-white">{metrics.meterImportKwh} kWh</b></div>
+                  <div> • Total Meter Export: <b className="text-white">{metrics.meterExportKwh} kWh</b></div>
+                  <div> • DG Generation: <b className="text-white">{metrics.totalDg} kWh</b></div>
                 </div>
               </div>
 
@@ -134,15 +134,14 @@ export const RenewableEnergyCard = ({ metrics = {} }) => {
                 <h5 className="text-xs font-semibold text-amber-400 uppercase tracking-wider mb-2">3. Diagnostic Status & Alerts</h5>
                 <div className="text-xs bg-amber-950/20 border border-amber-800/40 p-3 rounded-lg text-amber-300 space-y-1">
                   {metrics.meterImportKwh === 0 && (
-                    <p>• <b>Meter Import is 0:</b> Verify that Utility Energy Log records exist for Unit 1 and Unit 2 for the active date range.</p>
+                    <p> • <b>Meter Import is 0:</b> Verify that Utility Energy Log records exist for Unit 1 and Unit 2 for the active date range.</p>
                   )}
                   {metrics.crossCheckDeviationPct > 5 && (
-                    <p>
-                      • <b>Cross-Check Deviation ({metrics.crossCheckDeviationPct}%):</b> Discrepancy between solar inverter generation ({metrics.inverterTotalKwh} kWh) and utility solar meter ({metrics.totalUtilitySolar} kWh) exceeds the 5% tolerance threshold.
+                    <p> • <b>Cross-Check Deviation ({metrics.crossCheckDeviationPct}%):</b> Discrepancy between solar inverter generation ({metrics.inverterTotalKwh} kWh) and utility solar meter ({metrics.totalUtilitySolar} kWh) exceeds the 5% tolerance threshold.
                     </p>
                   )}
                   {metrics.meterImportKwh > 0 && metrics.crossCheckDeviationPct <= 5 && (
-                    <p className="text-emerald-400">• <b>All Systems Operational:</b> Meter import readings and inverter readings cross-check successfully.</p>
+                    <p className="text-emerald-400"> • <b>All Systems Operational:</b> Meter import readings and inverter readings cross-check successfully.</p>
                   )}
                 </div>
               </div>

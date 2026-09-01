@@ -473,7 +473,7 @@ export default function Settings() {
               ].map((row) => (
                 <div key={row.label} className="flex items-center justify-between rounded-control bg-white/[0.03] border border-white/[0.06] px-3 py-2">
                   <span className="text-slate-400 text-xs">{row.label}</span>
-                  <span className="text-white text-sm font-semibold">{row.value ?? '—'}</span>
+                  <span className="text-white text-sm font-semibold">{row.value ?? '—' }</span>
                 </div>
               ))}
             </div>

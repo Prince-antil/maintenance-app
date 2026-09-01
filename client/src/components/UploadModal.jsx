@@ -353,7 +353,7 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
                 </div>
                 <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider">Target Months</p>
-                  <p className="text-white text-sm font-semibold">{dryRun.targetMonths.join(', ') || '—'}</p>
+                  <p className="text-white text-sm font-semibold">{dryRun.targetMonths.join(', ') || '—' }</p>
                 </div>
                 <div className="rounded-control border border-white/[0.08] bg-white/[0.03] px-3 py-2">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider">Sections</p>
@@ -423,7 +423,7 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
                           <tr key={index}>
                             {previewColumns.map((column) => (
                               <td key={column} className="max-w-[160px] truncate text-xs text-slate-300" title={String(row[column] ?? '')}>
-                                {Array.isArray(row[column]) ? row[column].length : String(row[column] ?? '—')}
+                                {Array.isArray(row[column]) ? row[column].length : String(row[column] ?? '—' )}
                               </td>
                             ))}
                           </tr>

@@ -5,7 +5,7 @@ import { useUI } from '../context/UIContext.jsx';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { buildNotifications } from '../analytics.js';
-import { timeAgo, formatDateLong, loadLS, saveLS } from '../utils.js';
+import { timeAgo, formatDateLong, loadLS, saveLS, cleanText } from '../utils.js';
 import { listReportMetadata } from '../reportVault.js';
 import { UNIT_BADGE } from '../constants.js';
 import {

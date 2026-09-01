@@ -78,7 +78,7 @@ function exportPDF(title, columns, rows) {
   setTimeout(() => win.print(), 300);
 }
 
-const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—');
+const fmtDate = (value) => (value ? new Date(value).toLocaleDateString('en-GB') : '—' );
 
 function certDaysLeft(expiryDate) {
   if (!expiryDate) return null;
@@ -732,7 +732,7 @@ export default function Reports() {
           { key: 'frequency', label: 'Frequency' },
           { label: 'Status', value: (row) => certStatus(row.expiryDate).status },
           { label: 'Days Left', value: (row) => { const d = certDaysLeft(row.expiryDate); return d==null ? '—' : d<=0 ? 'EXPIRED' : `${d}d`; } },
-          { label: 'Document', value: (row) => row.document?.filename || row.documentName || (row.documentUrl ? 'View' : '—') },
+          { label: 'Document', value: (row) => row.document?.filename || row.documentName || (row.documentUrl ? 'View' : '—' ) },
         ],
         rows: (store.testingCertificates || []).filter((r) => {
           if (certSectionFilter && r.plantSection !== certSectionFilter) return false;
@@ -1046,15 +1046,15 @@ export default function Reports() {
                       const docUrl = row.document?.publicUrl || row.documentUrl || row.document?.dataUrl || '';
                       return (
                         <tr key={row.id}>
-                          <td className="font-mono text-xs text-cyan-400">{row.machineCode || row.machineId || '—'}</td>
-                          <td className="text-white text-xs font-medium max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
-                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
-                          <td className="text-white text-xs">{row.certificateType || '—'}</td>
-                          <td className="font-mono text-xs text-slate-300">{row.certificateNumber || '—'}</td>
-                          <td className="text-slate-300 text-xs max-w-[140px] truncate" title={row.agencyName}>{row.agencyName || '—'}</td>
-                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.issueDate ? new Date(row.issueDate).toLocaleDateString('en-GB') : '—'}</td>
-                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('en-GB') : '—'}</td>
-                          <td className="text-slate-400 text-xs">{row.frequency || '—'}</td>
+                          <td className="font-mono text-xs text-cyan-400">{row.machineCode || row.machineId || '—' }</td>
+                          <td className="text-white text-xs font-medium max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—' }</td>
+                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—' }</td>
+                          <td className="text-white text-xs">{row.certificateType || '—' }</td>
+                          <td className="font-mono text-xs text-slate-300">{row.certificateNumber || '—' }</td>
+                          <td className="text-slate-300 text-xs max-w-[140px] truncate" title={row.agencyName}>{row.agencyName || '—' }</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.issueDate ? new Date(row.issueDate).toLocaleDateString('en-GB') : '—' }</td>
+                          <td className="text-slate-300 text-xs whitespace-nowrap">{row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('en-GB') : '—' }</td>
+                          <td className="text-slate-400 text-xs">{row.frequency || '—' }</td>
                           <td><span className={`badge text-[10px] px-2 py-0.5 rounded-full font-bold ${badgeCls}`}>{st.status}</span></td>
                           <td className="whitespace-nowrap">
                             <div className="flex items-center gap-1">
@@ -1138,7 +1138,7 @@ export default function Reports() {
                   <tr key={row.id || index}>
                     {report.columns.map((col) => (
                       <td key={col.label} className="text-slate-300 max-w-[240px] truncate" title={cellValue(col, row)}>
-                        {cellValue(col, row) || '—'}
+                        {cellValue(col, row) || '—' }
                       </td>
                     ))}
                     {isAdmin && EDITABLE_REPORTS.has(report.id) && (

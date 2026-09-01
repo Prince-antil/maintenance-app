@@ -218,12 +218,12 @@ function CertificateRow({ cert, onEdit, onDelete, machineId }) {
 
   return (
     <tr>
-      <td className="text-white text-xs font-medium">{cert.certificateType || '—'}</td>
-      <td className="font-mono text-xs text-cyan-300">{cert.certificateNumber || '—'}</td>
-      <td className="text-slate-300 text-xs">{cert.agencyName || '—'}</td>
-      <td className="text-slate-300 text-xs whitespace-nowrap">{cert.issueDate ? new Date(cert.issueDate).toLocaleDateString('en-GB') : '—'}</td>
-      <td className="text-slate-300 text-xs whitespace-nowrap">{cert.expiryDate ? new Date(cert.expiryDate).toLocaleDateString('en-GB') : '—'}</td>
-      <td className="text-slate-400 text-xs">{cert.frequency || '—'}</td>
+      <td className="text-white text-xs font-medium">{cert.certificateType || '—' }</td>
+      <td className="font-mono text-xs text-cyan-300">{cert.certificateNumber || '—' }</td>
+      <td className="text-slate-300 text-xs">{cert.agencyName || '—' }</td>
+      <td className="text-slate-300 text-xs whitespace-nowrap">{cert.issueDate ? new Date(cert.issueDate).toLocaleDateString('en-GB') : '—' }</td>
+      <td className="text-slate-300 text-xs whitespace-nowrap">{cert.expiryDate ? new Date(cert.expiryDate).toLocaleDateString('en-GB') : '—' }</td>
+      <td className="text-slate-400 text-xs">{cert.frequency || '—' }</td>
       <td className={`text-xs font-bold ${daysLeft == null ? 'text-slate-500' : daysLeft <=0 ? 'text-red-400' : daysLeft <=30 ? 'text-amber-400' : 'text-emerald-400'}`}>
         {daysLeft == null ? '—' : daysLeft <0 ? `${daysLeft}d` : `${daysLeft}d`}
       </td>
@@ -232,7 +232,7 @@ function CertificateRow({ cert, onEdit, onDelete, machineId }) {
           <a href={docUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300" title={docName}>
             <FileText size={12} /> {docName ? (docName.length > 18 ? docName.slice(0,18)+'…' : docName) : 'View'}
           </a>
-        ) : <span className="text-slate-600 text-xs">—</span>}
+        ) : <span className="text-slate-600 text-xs"> — </span>}
       </td>
       <td><StatusBadge expiryDate={cert.expiryDate} /></td>
       <td className="whitespace-nowrap">

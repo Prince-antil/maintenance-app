@@ -23,7 +23,7 @@ import { computeEnergySnapshot } from '../lib/energyEngine.js';
 import { computeSpecificYield, getDaysInRange, getSolarCapacity, getSolarDerived } from '../lib/energyCalculations.js';
 import { upsertEnergySettings } from '../store.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
-import { timeAgo, greeting, formatDateLong } from '../utils.js';
+import { timeAgo, greeting, formatDateLong, cleanText } from '../utils.js';
 import Factory from 'lucide-react/dist/esm/icons/factory';
 import Activity from 'lucide-react/dist/esm/icons/activity';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
@@ -65,9 +65,9 @@ import { EnergySnapshotCard } from '../components/dashboard/EnergySnapshotCard.j
 import { computeDashboardMetrics } from '../components/dashboard/DashboardAnalyticsEngine.js';
 
 const MODULE_GROUPS = [
-  { label: 'Module A ┬À Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
-  { label: 'Module B ┬À Utilities & Energy Management', cats: ['Energy Report (DG 500 & 380KVA)', 'Energy Report (Solar)', 'Plantwise Energy Consumption'] },
-  { label: 'Module C ┬À Continuous Improvement & Compliance', cats: ['Kaizen', 'Improvement', 'ORM Data (Operational Risk Management)'] },
+  { label: 'Module A • Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
+  { label: 'Module B • Utilities & Energy Management', cats: ['Energy Report (DG 500 & 380KVA)', 'Energy Report (Solar)', 'Plantwise Energy Consumption'] },
+  { label: 'Module C • Continuous Improvement & Compliance', cats: ['Kaizen', 'Improvement', 'ORM Data (Operational Risk Management)'] },
 ];
 
 const SEVERITY_META = {
@@ -282,7 +282,7 @@ export default function Dashboard() {
     };
   }, [effectiveUtilityLog, periodFilter]);
 
-  // Compute metrics dynamically from fetched rows ÔÇö uses robust computeEnergySnapshot with flexible key parsing & localStorage fallback
+  // Compute metrics dynamically from fetched rows — uses robust computeEnergySnapshot with flexible key parsing & localStorage fallback
   const energySnapshot = useMemo(() => {
     return computeEnergySnapshot(filteredDailyUtilityLog, filteredDailySolarGeneration);
   }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
@@ -340,12 +340,12 @@ export default function Dashboard() {
   // Merge local activity feed with server upload history
   const feed = useMemo(() => {
     const local = store.activity.map((a) => ({
-      id: a.id, user: a.user, text: `${a.action} ${a.detail ? '┬À ' + a.detail : ''}`,
+      id: a.id, user: a.user, text: `${a.action} ${a.detail ? ' • ' + a.detail : ''}`,
       type: a.type, ts: a.ts,
     }));
     const uploads = recent.map((r) => ({
       id: `srv-${r.id}`, user: r.uploader_name || 'System',
-      text: `uploaded ${r.filename} ┬À ${r.category_name}`,
+      text: `uploaded ${r.filename} • ${r.category_name}`,
       type: 'upload', ts: r.uploaded_at, ext: r.file_format,
     }));
     return [...local, ...uploads]
@@ -381,10 +381,10 @@ export default function Dashboard() {
         <div className="relative z-10 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <h2 className="text-page-title">
-              {greeting()}, {user?.full_name || 'Engineer'} ­ƒæï
+              {cleanText(greeting())}, {cleanText(user?.full_name || 'Engineer')}
             </h2>
             <p className="text-body mt-1.5">
-              {user ? 'Maintenance Engineer' : 'Viewer'} ÔÇö {store.settings.plantName} ┬À Crystal Crop Protection Ltd.
+              {cleanText(user ? 'Maintenance Engineer' : 'Viewer')} — {cleanText(store.settings.plantName)} • Crystal Crop Protection Ltd.
             </p>
             <div className="flex flex-wrap items-center gap-2.5 mt-4">
               <StatusBadge
@@ -460,7 +460,7 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* 13 live KPI cards ÔÇö all values computed from stored data */}
+      {/* 13 live KPI cards — all values computed from stored data */}
       <section aria-label="Key performance indicators">
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 lg:gap-5">
           <KPIStatCard icon={Factory} label="Total Machines" value={kpi.machineCount} sub="Asset register" tone="accent" />
@@ -539,7 +539,7 @@ export default function Dashboard() {
         <ChartCard title="Section-wise Breakdowns" subtitle="Failure count per plant section" empty={noBDs}>
           <HorizontalBarChart data={charts.equipment} color="#06B6D4" />
         </ChartCard>
-        <ChartCard title="Top 10 Breakdown Sections" subtitle="Pareto ÔÇö section-wise failure concentration" empty={noBDs} height={280}>
+        <ChartCard title="Top 10 Breakdown Sections" subtitle="Pareto — section-wise failure concentration" empty={noBDs} height={280}>
           <ParetoChart data={charts.pareto} />
         </ChartCard>
         <ChartCard title="Breakdown by Section" subtitle="Failure distribution across plant" empty={noBDs}>
@@ -563,7 +563,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           )}
         </ChartCard>
-        <ChartCard title="DG Fuel Efficiency" subtitle="kWh per litre ÔÇö DG 500 vs DG 380" empty={noDailyUtility}>
+        <ChartCard title="DG Fuel Efficiency" subtitle="kWh per litre — DG 500 vs DG 380" empty={noDailyUtility}>
           {noDailyUtility ? (
             <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
           ) : (
@@ -581,7 +581,7 @@ export default function Dashboard() {
         <ChartCard title="Machine Health Distribution" subtitle="Fleet condition derived from failures & PM" empty={!store.machines.length}>
           <PieDonutChart data={charts.health} donut centerLabel={kpi.machineCount} centerSub="Machines" />
         </ChartCard>
-        <ChartCard title="Availability Trend" subtitle="Plant availability % ┬À last 6 months" empty={noBDs}>
+        <ChartCard title="Availability Trend" subtitle="Plant availability % • last 6 months" empty={noBDs}>
           <TrendChart data={charts.avail} color="#10B981" unit="%" yDomain={[0, 100]} />
         </ChartCard>
         <ChartCard title="MTTR Trend" subtitle="Mean time to repair (hrs)" empty={noBDs}>
@@ -598,7 +598,7 @@ export default function Dashboard() {
         </ChartCard>
       </section>
 
-      {/* Currently Under Breakdown ÔÇö real-time active incidents */}
+      {/* Currently Under Breakdown — real-time active incidents */}
       {charts.activeBreakdowns.length > 0 && (
         <section aria-label="Currently under breakdown">
           <div className="glass-card p-5">
@@ -633,9 +633,9 @@ export default function Dashboard() {
                         <td className="text-cyan-400 font-mono text-xs">{log.machineCode || log.machineId}</td>
                         <td className="text-white font-medium">{log.machineName}</td>
                         <td className="text-slate-300">{log.plantSection}</td>
-                        <td className="text-slate-300 text-xs whitespace-nowrap">{startD ? startD.toLocaleString('en-GB') : 'ÔÇö'}</td>
+                        <td className="text-slate-300 text-xs whitespace-nowrap">{startD ? startD.toLocaleString('en-GB') : '—' }</td>
                         <td className="text-amber-300 font-semibold">{durationHrs}h</td>
-                        <td className="text-slate-300 max-w-[200px] truncate" title={log.failureCause}>{log.failureCause || 'ÔÇö'}</td>
+                        <td className="text-slate-300 max-w-[200px] truncate" title={log.failureCause}>{log.failureCause || '—' }</td>
                         <td><span className="badge bg-red-500/15 text-red-400">{log.status}</span></td>
                       </tr>
                     );
@@ -682,7 +682,7 @@ export default function Dashboard() {
                         <td className="text-slate-300">{row.plantSection}</td>
                         <td className="text-slate-200 font-semibold">{row.breakdownCount}</td>
                         <td className="text-amber-300">{row.downtimeHours}h</td>
-                        <td className="text-slate-300 max-w-[180px] truncate" title={row.mainFailureCause}>{row.mainFailureCause || 'ÔÇö'}</td>
+                        <td className="text-slate-300 max-w-[180px] truncate" title={row.mainFailureCause}>{row.mainFailureCause || '—' }</td>
                         <td>
                           <span className={`badge ${row.status === 'ACTIVE' ? 'bg-red-500/15 text-red-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
                             {row.status}
@@ -813,7 +813,7 @@ export default function Dashboard() {
         ))}
       </section>
 
-      {/* Recent activity ÔÇö merged store events + server uploads */}
+      {/* Recent activity — merged store events + server uploads */}
       <section aria-label="Recent activity">
         <h3 className="text-section-heading mb-4">Recent Activity</h3>
         <div className="glass-card overflow-hidden">

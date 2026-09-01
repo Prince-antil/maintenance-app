@@ -15,6 +15,8 @@ const safeFormat = (val, decimals = 1) => {
 export const EnergySnapshotCard = ({ snapshotMetrics = {}, solarSpecific = null, onSolarCapacitySave }) => {
   const [showPfModal, setShowPfModal] = useState(false);
   const [showSolarModal, setShowSolarModal] = useState(false);
+  const [showGridModal, setShowGridModal] = useState(false);
+  const [showDgModal, setShowDgModal] = useState(false);
   const [editSolarCapacity, setEditSolarCapacity] = useState('');
   const m = snapshotMetrics;
   const u1Grid = safeFormat(m.unit1GridKwh);
@@ -54,21 +56,45 @@ export const EnergySnapshotCard = ({ snapshotMetrics = {}, solarSpecific = null,
           <div className="text-2xl font-bold text-white">{u2Grid}</div>
           <div className="text-xs text-slate-500 mt-1">kWh</div>
         </div>
-        {/* TOTAL GRID */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 font-medium uppercase mb-1">Total Grid</div>
+        {/* TOTAL GRID — Explore Grid Power */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowGridModal(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowGridModal(true); } }}
+          className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 cursor-pointer hover:border-cyan-500/40 hover:bg-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+          title="Click to explore Grid Power formula"
+          aria-label="Total Grid — click to explore"
+        >
+          <div className="text-xs text-slate-400 font-medium uppercase mb-1 flex items-center justify-between"><span>Total Grid</span><span className="text-[10px] text-cyan-400/70">EXPLORE →</span></div>
           <div className="text-2xl font-bold text-white">{totalGrid}</div>
-          <div className="text-xs text-slate-500 mt-1">kWh</div>
+          <div className="text-xs text-slate-500 mt-1">kWh • U1 {u1Grid} + U2 {u2Grid}</div>
         </div>
-        {/* DG 500 */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 font-medium uppercase mb-1">DG 500</div>
+        {/* DG 500 — Explore DG Generation */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowDgModal(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDgModal(true); } }}
+          className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 cursor-pointer hover:border-amber-500/40 hover:bg-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+          title="Click to explore DG Generation formula"
+          aria-label="DG 500 — click to explore"
+        >
+          <div className="text-xs text-slate-400 font-medium uppercase mb-1 flex items-center justify-between"><span>DG 500</span><span className="text-[10px] text-amber-400/70">EXPLORE →</span></div>
           <div className="text-2xl font-bold text-amber-400">{dg500}</div>
           <div className="text-xs text-slate-500 mt-1">kWh · {m.dg500Hours || 0} hrs</div>
         </div>
-        {/* DG 380 */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 font-medium uppercase mb-1">DG 380</div>
+        {/* DG 380 — Explore DG */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowDgModal(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDgModal(true); } }}
+          className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 cursor-pointer hover:border-amber-500/40 hover:bg-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+          title="Click to explore DG Generation formula"
+          aria-label="DG 380 — click to explore"
+        >
+          <div className="text-xs text-slate-400 font-medium uppercase mb-1 flex items-center justify-between"><span>DG 380</span><span className="text-[10px] text-amber-400/70">EXPLORE →</span></div>
           <div className="text-2xl font-bold text-amber-400">{dg380}</div>
           <div className="text-xs text-slate-500 mt-1">kWh · {m.dg380Hours || 0} hrs</div>
         </div>
@@ -95,11 +121,19 @@ export const EnergySnapshotCard = ({ snapshotMetrics = {}, solarSpecific = null,
           <div className="text-2xl font-bold text-emerald-400">{solarYield}</div>
           <div className="text-xs text-slate-500 mt-1">kWh/kWp/day</div>
         </div>
-        {/* FUEL */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 font-medium uppercase mb-1">Fuel</div>
+        {/* FUEL — Explore Diesel Efficiency */}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setShowDgModal(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDgModal(true); } }}
+          className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 cursor-pointer hover:border-rose-500/40 hover:bg-slate-900 transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+          title="Click to explore Diesel Efficiency formula"
+          aria-label="Fuel — click to explore"
+        >
+          <div className="text-xs text-slate-400 font-medium uppercase mb-1 flex items-center justify-between"><span>Fuel</span><span className="text-[10px] text-rose-400/70">EXPLORE →</span></div>
           <div className="text-2xl font-bold text-rose-400">{fuel}</div>
-          <div className="text-xs text-slate-500 mt-1">Ltrs</div>
+          <div className="text-xs text-slate-500 mt-1">Ltrs • Eff {(Number(m.totalFuelLtrs) > 0 ? (Number(m.dg500Kwh || 0) + Number(m.dg380Kwh || 0)) / Number(m.totalFuelLtrs) : 0).toFixed(2)} kWh/Ltr</div>
         </div>
         {/* POWER FACTOR — fully dynamic, clickable to explore */}
         <div
@@ -249,6 +283,79 @@ export const EnergySnapshotCard = ({ snapshotMetrics = {}, solarSpecific = null,
                 </button>
               </div>
               <p className="text-slate-500 text-[11px]">Recalculates Specific Yield across all time filters instantly. Persisted to energy_settings (Supabase) and localStorage.</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Grid Power Explore Modal */}
+      {showGridModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Grid Power Details">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowGridModal(false)} aria-hidden="true" />
+          <div className="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-cyan-400 text-lg">⚡</span>
+                <h3 className="text-white font-semibold">Grid Power — Explore</h3>
+              </div>
+              <button onClick={() => setShowGridModal(false)} className="w-8 h-8 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] flex items-center justify-center text-slate-400 hover:text-white transition-colors" aria-label="Close">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4">
+                <p className="text-slate-400 text-xs font-mono text-center">Total Grid = Unit 1 Grid + Unit 2 Grid</p>
+                <p className="text-cyan-400 text-xs font-mono text-center mt-2">{safeFormat(m.unit1GridKwh, 1)} + {safeFormat(m.unit2GridKwh, 1)} = {safeFormat(m.totalGridKwh, 1)} kWh</p>
+              </div>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 border-b border-slate-800"><p className="text-white text-xs font-semibold">Live Calculation — Variables</p></div>
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-900/50"><tr className="text-slate-500"><th className="text-left px-3 py-2">Variable</th><th className="text-left px-3 py-2">Source Column</th><th className="text-right px-3 py-2">Current Value</th></tr></thead>
+                  <tbody className="divide-y divide-slate-800">
+                    <tr><td className="px-3 py-2 text-slate-300">Unit 1 Grid</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">u1_import_kwh</td><td className="px-3 py-2 text-right text-white font-mono">{safeFormat(m.unit1GridKwh, 1)} kWh</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">Unit 2 Grid</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">u2_import_kwh</td><td className="px-3 py-2 text-right text-white font-mono">{safeFormat(m.unit2GridKwh, 1)} kWh</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">Total Grid</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">calculated</td><td className="px-3 py-2 text-right text-cyan-400 font-mono">{safeFormat(m.totalGridKwh, 1)} kWh</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4 flex items-center justify-between">
+                <span className="text-emerald-300 text-xs font-semibold">Result:</span><span className="text-emerald-400 text-lg font-bold font-mono">{safeFormat(m.totalGridKwh, 1)} kWh</span>
+              </div>
+              <div className="flex justify-end"><button onClick={() => setShowGridModal(false)} className="btn-ghost text-xs">Close</button></div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* DG Generation Explore Modal */}
+      {showDgModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="DG Generation Details">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowDgModal(false)} aria-hidden="true" />
+          <div className="relative bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="sticky top-0 bg-slate-900 border-b border-slate-800 p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-amber-400 text-lg">⚙️</span>
+                <h3 className="text-white font-semibold">DG Generation & Efficiency — Explore</h3>
+              </div>
+              <button onClick={() => setShowDgModal(false)} className="w-8 h-8 rounded-lg bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] flex items-center justify-center text-slate-400 hover:text-white transition-colors" aria-label="Close">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg p-4 space-y-2">
+                <p className="text-slate-400 text-xs font-mono text-center">DG Total = DG 380 + DG 500</p>
+                <p className="text-amber-400 text-xs font-mono text-center">{safeFormat(m.dg380Kwh, 1)} + {safeFormat(m.dg500Kwh, 1)} = {safeFormat(Number(m.dg380Kwh||0)+Number(m.dg500Kwh||0), 1)} kWh</p>
+                <p className="text-slate-400 text-xs font-mono text-center mt-2">Efficiency = DG Total / Total HSD Fuel</p>
+                <p className="text-amber-400 text-xs font-mono text-center">{safeFormat(Number(m.dg380Kwh||0)+Number(m.dg500Kwh||0), 1)} / {safeFormat(m.totalFuelLtrs, 0)} = {(Number(m.totalFuelLtrs) > 0 ? ((Number(m.dg380Kwh||0)+Number(m.dg500Kwh||0))/Number(m.totalFuelLtrs)).toFixed(2) : '0.00')} kWh/Ltr</p>
+              </div>
+              <div className="bg-slate-950/60 border border-slate-800 rounded-lg overflow-hidden">
+                <div className="px-4 py-2 border-b border-slate-800"><p className="text-white text-xs font-semibold">Live Calculation — Variables</p></div>
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-900/50"><tr className="text-slate-500"><th className="text-left px-3 py-2">Variable</th><th className="text-left px-3 py-2">Source Column</th><th className="text-right px-3 py-2">Current Value</th></tr></thead>
+                  <tbody className="divide-y divide-slate-800">
+                    <tr><td className="px-3 py-2 text-slate-300">DG 380</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">dg380_kwh</td><td className="px-3 py-2 text-right text-white font-mono">{safeFormat(m.dg380Kwh, 1)} kWh</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">DG 500</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">dg500_kwh</td><td className="px-3 py-2 text-right text-white font-mono">{safeFormat(m.dg500Kwh, 1)} kWh</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">DG Total</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">calculated</td><td className="px-3 py-2 text-right text-amber-400 font-mono">{safeFormat(Number(m.dg380Kwh||0)+Number(m.dg500Kwh||0), 1)} kWh</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">Total HSD Fuel</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">total_fuel_ltrs</td><td className="px-3 py-2 text-right text-white font-mono">{safeFormat(m.totalFuelLtrs, 0)} Ltrs</td></tr>
+                    <tr><td className="px-3 py-2 text-slate-300">Efficiency</td><td className="px-3 py-2 text-slate-500 font-mono text-[11px]">DG Total / Fuel</td><td className="px-3 py-2 text-right text-amber-400 font-mono">{(Number(m.totalFuelLtrs) > 0 ? ((Number(m.dg380Kwh||0)+Number(m.dg500Kwh||0))/Number(m.totalFuelLtrs)).toFixed(2) : '0.00')} kWh/Ltr</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-end"><button onClick={() => setShowDgModal(false)} className="btn-ghost text-xs">Close</button></div>
             </div>
           </div>
         </div>

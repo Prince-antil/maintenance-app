@@ -131,7 +131,7 @@ function DetailModal({ row, onClose }) {
     ['MTTR', `${row.mttr} hrs`],
     ['MTBF', `${row.mtbf} hrs`],
     ['Operating Hours', `${row.operatingHours || 0} hrs`],
-    ['Remarks', row.remarks || '—'],
+    ['Remarks', row.remarks || '—' ],
   ];
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="Breakdown summary details">
@@ -228,7 +228,7 @@ function KPICard({ icon: Icon, label, value, changePct, cls, invert }) {
   const changeColor = changePct === 0 ? 'text-slate-500 bg-slate-500/10 border-slate-500/20'
     : isGood ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20'
     : 'text-red-400 bg-red-400/10 border-red-400/20';
-  const arrow = positive ? '↑' : negative ? '↓' : '—';
+  const arrow = positive ? '↑' : negative ? '↓' : '—' ;
 
   return (
     <div className="glass-card p-4 flex flex-col gap-2">
@@ -742,16 +742,16 @@ export default function Breakdowns() {
                               <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || row.machineId}</td>
                               <td className="text-white font-medium text-xs max-w-[140px] truncate">{row.machineName}</td>
                               <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection}</td>
-                              <td className="text-slate-300 text-[11px] whitespace-nowrap">{startD ? startD.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                              <td className="text-slate-300 text-[11px] whitespace-nowrap">{endD ? endD.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-                              <td className="text-amber-300 text-xs font-semibold">{row.downtimeHours ? `${row.downtimeHours}h` : '—'}</td>
-                              <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.failureCause}>{row.failureCause || '—'}</td>
+                              <td className="text-slate-300 text-[11px] whitespace-nowrap">{startD ? startD.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—' }</td>
+                              <td className="text-slate-300 text-[11px] whitespace-nowrap">{endD ? endD.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—' }</td>
+                              <td className="text-amber-300 text-xs font-semibold">{row.downtimeHours ? `${row.downtimeHours}h` : '—' }</td>
+                              <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.failureCause}>{row.failureCause || '—' }</td>
                               <td>
                                 <span className={`badge text-[10px] ${row.status === 'closed' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
                                   {row.status === 'closed' ? 'Closed' : 'Open'}
                                 </span>
                               </td>
-                              <td className="text-slate-400 text-[11px] max-w-[100px] truncate" title={row.remarks}>{row.remarks || '—'}</td>
+                              <td className="text-slate-400 text-[11px] max-w-[100px] truncate" title={row.remarks}>{row.remarks || '—' }</td>
                             </tr>
                           );
                         })}

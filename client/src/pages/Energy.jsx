@@ -41,6 +41,8 @@ import {
   getSolarCapacity,
   getUniqueDaysCount
 } from '../lib/energyCalculations.js';
+import FormulaExplorerModal from '../components/FormulaExplorerModal.jsx';
+import { cleanText } from '../utils.js';
 import { useEnergyCache, memoizedAggregations } from '../hooks/useEnergyCache.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
@@ -155,7 +157,7 @@ function TblHead({ columns, admin }) {
 }
 
 function Td({ value, className }) {
-  if (value === null || value === undefined || value === '') return <td className="text-slate-600">—</td>;
+  if (value === null || value === undefined || value === '') return <td className="text-slate-600"> — </td>;
   return <td className={className || 'text-white tabular-nums'}>{typeof value === 'number' ? value.toLocaleString() : value}</td>;
 }
 
@@ -249,6 +251,10 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       pf: dynamicPf > 0 ? (formatPf(dynamicPf) ?? '0.00') : '0.00'
     };
   }, [filteredDerived]);
+
+  const [showGridModal, setShowGridModal] = useState(false);
+  const [showDgModalDaily, setShowDgModalDaily] = useState(false);
+  const [showPfModalDaily, setShowPfModalDaily] = useState(false);
 
   // DG Summary using memoized aggregations - sums across filtered period
   const dgSummary = useMemo(() => {
@@ -352,10 +358,19 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
       {/* Content */}
       <div className="col-span-12 lg:col-span-9 space-y-5">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard label="Latest Grid" value={kpis.grid} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
-        <KpiCard label="Latest DG" value={kpis.dg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
+        <div role="button" tabIndex={0} onClick={() => setShowGridModal(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowGridModal(true); } }} className="cursor-pointer hover:opacity-90 transition-opacity">
+          <KpiCard label="Latest Grid" value={kpis.grid} unit="kWh" color="text-cyan-300" bg="bg-cyan-500/[0.07] border-cyan-500/20" />
+          <p className="text-[10px] text-cyan-400/70 text-center mt-1">EXPLORE →</p>
+        </div>
+        <div role="button" tabIndex={0} onClick={() => setShowDgModalDaily(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDgModalDaily(true); } }} className="cursor-pointer hover:opacity-90 transition-opacity">
+          <KpiCard label="Latest DG" value={kpis.dg} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
+          <p className="text-[10px] text-amber-400/70 text-center mt-1">EXPLORE →</p>
+        </div>
         <KpiCard label="Latest Solar" value={kpis.solar} unit="kWh" color="text-emerald-300" bg="bg-emerald-500/[0.07] border-emerald-500/20" />
-        <KpiCard label="Current PF" value={kpis.pf} color={kpis.pf < 0.9 && kpis.pf > 0 ? 'text-red-300' : 'text-white'} bg={kpis.pf < 0.9 && kpis.pf > 0 ? 'bg-red-500/[0.07] border-red-500/20' : 'bg-white/[0.04] border-white/[0.10]'} />
+        <div role="button" tabIndex={0} onClick={() => setShowPfModalDaily(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowPfModalDaily(true); } }} className="cursor-pointer hover:opacity-90 transition-opacity">
+          <KpiCard label="Current PF" value={kpis.pf} color={kpis.pf < 0.9 && kpis.pf > 0 ? 'text-red-300' : 'text-white'} bg={kpis.pf < 0.9 && kpis.pf > 0 ? 'bg-red-500/[0.07] border-red-500/20' : 'bg-white/[0.04] border-white/[0.10]'} />
+          <p className="text-[10px] text-cyan-400/70 text-center mt-1">EXPLORE →</p>
+        </div>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="DG 380 Total" value={dgSummary.dg380Total} unit="kWh" color="text-amber-300" bg="bg-amber-500/[0.07] border-amber-500/20" />
@@ -460,7 +475,7 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                 <tbody>
                   {pageData.map((r) => (
                     <tr key={r.date}>
-                      <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
+                      <td className="text-slate-300 whitespace-nowrap">{r.date || '—' }</td>
                       <Td value={formatEnergy(r.u1ImportKwhReading)} className="text-slate-300 tabular-nums" />
                       <Td value={formatEnergy(r.u1ExportKwhReading)} className="text-slate-300 tabular-nums" />
                       <Td value={formatEnergy(r.u2ImportKwhReading)} className="text-slate-300 tabular-nums" />
@@ -469,13 +484,13 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
                       <Td value={formatEnergy(r.solarTotal)} className="text-emerald-300 tabular-nums" />
                       <Td value={formatEnergy(r.dgTotal)} className="text-amber-300 tabular-nums" />
                       <Td value={formatEnergy(r.totalPlant)} className="text-white font-bold tabular-nums" />
-                      <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPf(r.u1Pf) : '—'} className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPf(r.u2Pf) : '—'} className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
-                      <Td value={r.combinedPf != null && r.combinedPf > 0 ? formatPf(r.combinedPf) : '—'} className="text-teal-300 tabular-nums" />
+                      <Td value={r.u1Pf != null && r.u1Pf > 0 ? formatPf(r.u1Pf) : '—' } className={r.u1Pf > 0 && r.u1Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.u2Pf != null && r.u2Pf > 0 ? formatPf(r.u2Pf) : '—' } className={r.u2Pf > 0 && r.u2Pf < 0.9 ? 'text-red-300 tabular-nums' : 'text-white tabular-nums'} />
+                      <Td value={r.combinedPf != null && r.combinedPf > 0 ? formatPf(r.combinedPf) : '—' } className="text-teal-300 tabular-nums" />
                       <Td value={formatEnergy(r.dg380Hsd)} className="text-slate-300 tabular-nums" />
                       <Td value={formatEnergy(r.dg500Hsd)} className="text-slate-300 tabular-nums" />
-                      <Td value={r.dg380Def != null && r.dg380Def > 0 ? r.dg380Def.toFixed(1) : '—'} className="text-slate-300 tabular-nums" />
-                      <Td value={r.dg500Def != null && r.dg500Def > 0 ? r.dg500Def.toFixed(1) : '—'} className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg380Def != null && r.dg380Def > 0 ? r.dg380Def.toFixed(1) : '—' } className="text-slate-300 tabular-nums" />
+                      <Td value={r.dg500Def != null && r.dg500Def > 0 ? r.dg500Def.toFixed(1) : '—' } className="text-slate-300 tabular-nums" />
                       {isAdmin && <td className="text-right"><Acts onEdit={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw) onEdit(raw); }} onDelete={() => { const raw = dailyUtilityLog.find((x) => x.date === r.date); if (raw && window.confirm('Delete this reading?')) deleteDailyUtilityLog(raw.id, userName); }} /></td>}
                     </tr>
                   ))}
@@ -523,6 +538,63 @@ function DailyUtilityTab({ store, settings, userName, isAdmin, dateFrom, dateTo,
           loading={purgeLoading}
         />
       )}
+      <FormulaExplorerModal
+        isOpen={showGridModal}
+        onClose={() => setShowGridModal(false)}
+        title="Grid Power"
+        subtitle="Total Grid Consumption"
+        formula="Total Grid = Unit 1 Grid + Unit 2 Grid"
+        variables={[
+          { name: 'Unit 1 Grid', source: 'u1_import_kwh', value: filteredDerived[0]?.u1ImportKwh ?? 0, unit: 'kWh' },
+          { name: 'Unit 2 Grid', source: 'u2_import_kwh', value: filteredDerived[0]?.u2ImportKwh ?? 0, unit: 'kWh' },
+          { name: 'Total Grid', source: 'calculated', value: filteredDerived[0]?.gridNet ?? kpis.grid, unit: 'kWh' },
+        ]}
+        steps={[
+          `Unit 1 Grid (${filteredDerived[0]?.u1ImportKwh ?? 0} kWh) + Unit 2 Grid (${filteredDerived[0]?.u2ImportKwh ?? 0} kWh)`,
+          `Total Grid = ${filteredDerived[0]?.gridNet ?? kpis.grid} kWh (filtered period total: ${filteredDerived.reduce((s, r) => s + (r.gridNet || 0), 0).toLocaleString()} kWh)`,
+        ]}
+        result={`${filteredDerived.reduce((s, r) => s + (r.gridNet || 0), 0).toLocaleString()} kWh`}
+        resultLabel="Total Grid (Filtered Period)"
+      />
+      <FormulaExplorerModal
+        isOpen={showDgModalDaily}
+        onClose={() => setShowDgModalDaily(false)}
+        title="DG Generation & Diesel Efficiency"
+        subtitle="DG Total and Specific Fuel Consumption"
+        formula="DG Total = DG 380 + DG 500 | Efficiency = DG Total / Total HSD Fuel"
+        variables={[
+          { name: 'DG 380', source: 'dg380_kwh', value: filteredDerived.reduce((s, r) => s + (r.dg380Kwh || 0), 0).toLocaleString(), unit: 'kWh' },
+          { name: 'DG 500', source: 'dg500_kwh', value: filteredDerived.reduce((s, r) => s + (r.dg500Kwh || 0), 0).toLocaleString(), unit: 'kWh' },
+          { name: 'DG Total', source: 'calculated', value: filteredDerived.reduce((s, r) => s + (r.dgTotal || 0), 0).toLocaleString(), unit: 'kWh' },
+          { name: 'Total HSD Fuel', source: 'total_hsd', value: filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0).toLocaleString(), unit: 'Ltrs' },
+        ]}
+        steps={[
+          `DG Total = ${filteredDerived.reduce((s, r) => s + (r.dg380Kwh || 0), 0).toLocaleString()} + ${filteredDerived.reduce((s, r) => s + (r.dg500Kwh || 0), 0).toLocaleString()} = ${filteredDerived.reduce((s, r) => s + (r.dgTotal || 0), 0).toLocaleString()} kWh`,
+          `Efficiency = ${filteredDerived.reduce((s, r) => s + (r.dgTotal || 0), 0).toLocaleString()} / ${filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0).toLocaleString()} = ${(filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0) > 0 ? (filteredDerived.reduce((s, r) => s + (r.dgTotal || 0), 0) / filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0)).toFixed(2) : '0.00')} kWh/Ltr`,
+        ]}
+        result={`${(filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0) > 0 ? (filteredDerived.reduce((s, r) => s + (r.dgTotal || 0), 0) / filteredDerived.reduce((s, r) => s + (r.totalHsd || 0), 0)).toFixed(2) : '0.00')} kWh/Ltr`}
+        resultLabel="Diesel Efficiency"
+      />
+      <FormulaExplorerModal
+        isOpen={showPfModalDaily}
+        onClose={() => setShowPfModalDaily(false)}
+        title="Power Factor"
+        subtitle="Weighted Power Factor"
+        formula="Weighted PF = (U1 kWh × U1 PF + U2 kWh × U2 PF) / Total Grid kWh"
+        variables={[
+          { name: 'U1 kWh', source: 'u1_import_kwh', value: filteredDerived.reduce((s, r) => s + (r.u1ImportKwh || 0), 0).toLocaleString(), unit: 'kWh' },
+          { name: 'U1 PF', source: 'u1_pf', value: filteredDerived[0]?.u1Pf ?? '—', unit: '' },
+          { name: 'U2 kWh', source: 'u2_import_kwh', value: filteredDerived.reduce((s, r) => s + (r.u2ImportKwh || 0), 0).toLocaleString(), unit: 'kWh' },
+          { name: 'U2 PF', source: 'u2_pf', value: filteredDerived[0]?.u2Pf ?? '—', unit: '' },
+          { name: 'Total Grid', source: 'calculated', value: filteredDerived.reduce((s, r) => s + (r.gridNet || 0), 0).toLocaleString(), unit: 'kWh' },
+        ]}
+        steps={[
+          `Weighted PF = (${filteredDerived.reduce((s, r) => s + (r.u1ImportKwh || 0), 0).toLocaleString()} × ${filteredDerived[0]?.u1Pf ?? 0} + ${filteredDerived.reduce((s, r) => s + (r.u2ImportKwh || 0), 0).toLocaleString()} × ${filteredDerived[0]?.u2Pf ?? 0}) / ${filteredDerived.reduce((s, r) => s + (r.gridNet || 0), 0).toLocaleString()}`,
+          `Weighted PF = ${kpis.pf}`,
+        ]}
+        result={kpis.pf}
+        resultLabel="Weighted PF"
+      />
       </div>
     </div>
   );
@@ -551,7 +623,7 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { total: 0, latest: '—', highest: '—', mom: '—' };
+    if (filteredCalc.length === 0) return { total: 0, latest: '—' , highest: '—' , mom: '—' };
     const total = r1(filteredCalc.reduce((s, r) => s + r._total, 0));
     const latest = filteredCalc[0];
     const feeders = [
@@ -560,7 +632,7 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
     ];
     const highest = feeders.reduce((a, b) => a.val > b.val ? a : b);
     const prev = filteredCalc[1];
-    const mom = prev && prev._total > 0 ? r1(((latest._total - prev._total) / prev._total) * 100) : '—';
+    const mom = prev && prev._total > 0 ? r1(((latest._total - prev._total) / prev._total) * 100) : '—' ;
     return { total, latest: latest.month, highest: highest.name, mom: typeof mom === 'number' ? `${mom}%` : mom };
   }, [filteredCalc]);
 
@@ -630,7 +702,7 @@ function HerbicideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdi
                 <TblHead columns={cols} admin={isAdmin} />
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
-                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—'}</td>
+                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—' }</td>
                     <Td value={r._g1} className="text-emerald-300 tabular-nums" />
                     <Td value={r._t2} className="text-cyan-300 tabular-nums" />
                     <Td value={r._a3} className="text-violet-300 tabular-nums" />
@@ -701,12 +773,12 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   const kpis = useMemo(() => {
-    if (filtered.length === 0) return { total: 0, latest: '—', highest: '—', mom: '—' };
+    if (filtered.length === 0) return { total: 0, latest: '—' , highest: '—' , mom: '—' };
     const total = r1(filtered.reduce((s, r) => s + r._total, 0));
     const latest = filtered[0];
     const fMax = latest._feeders.map((v, i) => ({ name: FEEDER_LABELS_INSECT[i], val: v })).reduce((a, b) => a.val > b.val ? a : b);
     const prev = filtered[1];
-    const mom = prev && prev._total > 0 ? r1(((latest._total - prev._total) / prev._total) * 100) : '—';
+    const mom = prev && prev._total > 0 ? r1(((latest._total - prev._total) / prev._total) * 100) : '—' ;
     return { total, latest: latest.month, highest: fMax.name, mom: typeof mom === 'number' ? `${mom}%` : mom };
   }, [filtered]);
 
@@ -776,7 +848,7 @@ function InsecticideTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onE
                 <TblHead columns={cols} admin={isAdmin} />
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
-                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—'}</td>
+                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—' }</td>
                     {r._feeders.map((v, i) => <Td key={i} value={v} className={i < 8 ? 'text-cyan-300 tabular-nums' : i < 9 ? 'text-violet-300 tabular-nums' : 'text-amber-300 tabular-nums'} />)}
                     <Td value={r._total} className="text-white font-bold tabular-nums" />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyInsecticide(r.id, userName); }} /></td>}
@@ -815,7 +887,7 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   const kpis = useMemo(() => {
-    if (filtered.length === 0) return { total: '—', stp: '—', roIn: '—', roRej: '—' };
+    if (filtered.length === 0) return { total: '—' , stp: '—' , roIn: '—' , roRej: '—' };
     return { total: r1(filtered.reduce((s, r) => s + r._total, 0)), stp: filtered[0]._stp, roIn: filtered[0]._roIn, roRej: filtered[0]._roRej };
   }, [filtered]);
 
@@ -880,7 +952,7 @@ function WaterTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                 <TblHead columns={cols} admin={isAdmin} />
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
-                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—'}</td>
+                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—' }</td>
                     <Td value={r._stp} className="text-cyan-300 tabular-nums" />
                     <Td value={r._roIn} className="text-emerald-300 tabular-nums" />
                     <Td value={r._roRej} className="text-orange-300 tabular-nums" />
@@ -955,7 +1027,7 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
   const pageData = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page]);
 
   const kpis = useMemo(() => {
-    if (filtered.length === 0) return { run: '—', load: '—', avgPct: '—', highest: '—' };
+    if (filtered.length === 0) return { run: '—' , load: '—' , avgPct: '—' , highest: '—' };
     const r = filtered[0];
     const comps = [{ name: 'Compressor 1', pct: r.c1.pct }, { name: 'Compressor 2', pct: r.c2.pct }, { name: 'Compressor 3', pct: r.c3.pct }];
     const best = comps.reduce((a, b) => a.pct > b.pct ? a : b);
@@ -1032,10 +1104,10 @@ function AirCompressorTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, o
                 <TblHead columns={cols} admin={isAdmin} />
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
-                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—'}</td>
-                    <Td value={r.c1.run} className="text-cyan-300 tabular-nums" /><Td value={r.c1.load} /><Td value={r.c1.unload} /><Td value={r.c1.pct ? `${r.c1.pct}%` : '—'} />
-                    <Td value={r.c2.run} className="text-emerald-300 tabular-nums" /><Td value={r.c2.load} /><Td value={r.c2.unload} /><Td value={r.c2.pct ? `${r.c2.pct}%` : '—'} />
-                    <Td value={r.c3.run} className="text-amber-300 tabular-nums" /><Td value={r.c3.load} /><Td value={r.c3.unload} /><Td value={r.c3.pct ? `${r.c3.pct}%` : '—'} />
+                    <td className="text-slate-300 whitespace-nowrap">{r.month || '—' }</td>
+                    <Td value={r.c1.run} className="text-cyan-300 tabular-nums" /><Td value={r.c1.load} /><Td value={r.c1.unload} /><Td value={r.c1.pct ? `${r.c1.pct}%` : '—' } />
+                    <Td value={r.c2.run} className="text-emerald-300 tabular-nums" /><Td value={r.c2.load} /><Td value={r.c2.unload} /><Td value={r.c2.pct ? `${r.c2.pct}%` : '—' } />
+                    <Td value={r.c3.run} className="text-amber-300 tabular-nums" /><Td value={r.c3.load} /><Td value={r.c3.unload} /><Td value={r.c3.pct ? `${r.c3.pct}%` : '—' } />
                     {isAdmin && <td className="text-right"><Acts onEdit={() => onEdit(r)} onDelete={() => { if (window.confirm('Delete this record?')) deleteMonthlyAirCompressor(r.id, userName); }} /></td>}
                   </tr>
                 ))}</tbody>
@@ -1094,7 +1166,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
   const kpis = useMemo(() => {
-    if (filteredCalc.length === 0) return { today: '—', month: '—', avg: '—', best: '—', u1: '—', u2: '—', grandTotal: '—', monthlyAvg: '—', specificYield: '—', monthGenerationRaw: 0, totalSolarFiltered: 0, daysCount: 0, capacity: 540 };
+    if (filteredCalc.length === 0) return { today: '—' , month: '—' , avg: '—' , best: '—' , u1: '—' , u2: '—' , grandTotal: '—' , monthlyAvg: '—' , specificYield: '—' , monthGenerationRaw: 0, totalSolarFiltered: 0, daysCount: 0, capacity: 540 };
     
     const summary = computeSolarSummary(filteredCalc);
     const capacity = getSolarCapacity(store.energySettings);
@@ -1249,7 +1321,7 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
                 <TblHead columns={cols} admin={isAdmin} />
                 <tbody>{pageData.map((r) => (
                   <tr key={r.id}>
-                    <td className="text-slate-300 whitespace-nowrap">{r.date || '—'}</td>
+                    <td className="text-slate-300 whitespace-nowrap">{r.date || '—' }</td>
                     <Td value={formatEnergy(r.u1Inv1Kwh)} className="text-emerald-300 tabular-nums" /><Td value={formatEnergy(r.u1Inv2Kwh)} className="text-emerald-300 tabular-nums" />
                     <Td value={formatEnergy(r.u1Inv3Kwh)} className="text-emerald-300 tabular-nums" />                    <Td value={formatEnergy(r.u1Inv4Kwh)} className="text-emerald-300 tabular-nums" />
                     <Td value={formatEnergy(r.u1Total)} className="text-emerald-300 font-semibold tabular-nums" />
@@ -1483,7 +1555,7 @@ function SettingsTab({ store, userName, isAdmin, onAdd, formOpen, editRow, formV
             ].map((k) => (
               <div key={k.label} className="rounded-control bg-white/[0.04] border border-white/[0.10] p-3">
                 <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">{k.label}</p>
-                <p className="text-white text-lg font-bold tabular-nums">{k.value ?? '—'}</p>
+                <p className="text-white text-lg font-bold tabular-nums">{k.value ?? '—' }</p>
               </div>
             ))}
           </div>

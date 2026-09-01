@@ -411,7 +411,7 @@ export default function MachineProfile() {
                 <dd className="text-slate-200 text-[13px] font-medium mt-0.5 break-words">
                   {f.key === 'runningHours'
                     ? `${Number(machine.runningHours || 0).toLocaleString()} hrs`
-                    : machine[f.key] || <span className="text-slate-600">—</span>}
+                    : machine[f.key] || <span className="text-slate-600"> — </span>}
                 </dd>
               </div>
             ))}
@@ -517,9 +517,9 @@ export default function MachineProfile() {
                       {machine.spares.map((s) => (
                         <tr key={s.id}>
                           <td className="text-white font-medium">{s.name}</td>
-                          <td className="font-mono text-xs">{s.partCode || '—'}</td>
+                          <td className="font-mono text-xs">{s.partCode || '—' }</td>
                           <td>{s.qty}</td>
-                          <td className="text-slate-400">{s.remarks || '—'}</td>
+                          <td className="text-slate-400">{s.remarks || '—' }</td>
                           {isAdmin && (
                             <td>
                               <button onClick={() => removeSparePart(machine.id, s.id)} className="text-slate-500 hover:text-red-400 p-1" aria-label={`Remove ${s.name}`}>
@@ -643,12 +643,12 @@ export default function MachineProfile() {
                       <tbody>
                         {stats.breakdownHistory.map((r) => (
                           <tr key={r.id}>
-                            <td className="text-white font-medium whitespace-nowrap">{r.date || '—'}</td>
-                            <td className="text-slate-300 whitespace-nowrap">{r.startTime ? new Date(r.startTime).toLocaleString() : '—'}</td>
-                            <td className="text-slate-300 whitespace-nowrap">{r.endTime ? new Date(r.endTime).toLocaleString() : '—'}</td>
+                            <td className="text-white font-medium whitespace-nowrap">{r.date || '—' }</td>
+                            <td className="text-slate-300 whitespace-nowrap">{r.startTime ? new Date(r.startTime).toLocaleString() : '—' }</td>
+                            <td className="text-slate-300 whitespace-nowrap">{r.endTime ? new Date(r.endTime).toLocaleString() : '—' }</td>
                             <td className="text-amber-300 font-semibold">{r.downtimeHours || 0}</td>
-                            <td className="text-slate-300 max-w-[180px] truncate" title={r.failureCause}>{r.failureCause || '—'}</td>
-                            <td className="text-slate-300 max-w-[180px] truncate" title={r.actionTaken}>{r.actionTaken || '—'}</td>
+                            <td className="text-slate-300 max-w-[180px] truncate" title={r.failureCause}>{r.failureCause || '—' }</td>
+                            <td className="text-slate-300 max-w-[180px] truncate" title={r.actionTaken}>{r.actionTaken || '—' }</td>
                             <td>
                               <span className={`text-xs px-2 py-0.5 rounded-full ${
                                 r.status === 'closed' ? 'bg-emerald-500/15 text-emerald-400' :
@@ -656,7 +656,7 @@ export default function MachineProfile() {
                                 'bg-amber-500/15 text-amber-400'
                               }`}>{r.status || 'closed'}</span>
                             </td>
-                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—' }</td>
                           </tr>
                         ))}
                       </tbody>
@@ -819,9 +819,9 @@ export default function MachineProfile() {
                       <tbody>
                         {(stats.machinePmRecords || []).map((r) => (
                           <tr key={r.id}>
-                            <td className="text-white font-medium whitespace-nowrap">{r.pmDate || '—'}</td>
+                            <td className="text-white font-medium whitespace-nowrap">{r.pmDate || '—' }</td>
                             <td className="text-slate-300">{r.pmType}</td>
-                            <td className="text-slate-200 max-w-[200px] truncate" title={r.task}>{r.task || '—'}</td>
+                            <td className="text-slate-200 max-w-[200px] truncate" title={r.task}>{r.task || '—' }</td>
                             <td>
                               <span className={`text-xs px-2 py-0.5 rounded-full ${
                                 r.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400' :
@@ -830,9 +830,9 @@ export default function MachineProfile() {
                                 'bg-slate-500/15 text-slate-400'
                               }`}>{r.status}</span>
                             </td>
-                            <td className="text-slate-300 max-w-[150px] truncate" title={r.action}>{r.action || '—'}</td>
-                            <td className="text-slate-300">{r.technician || '—'}</td>
-                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—'}</td>
+                            <td className="text-slate-300 max-w-[150px] truncate" title={r.action}>{r.action || '—' }</td>
+                            <td className="text-slate-300">{r.technician || '—' }</td>
+                            <td className="text-slate-400 max-w-[150px] truncate" title={r.remarks}>{r.remarks || '—' }</td>
                             <td>
                               <button onClick={() => { if (window.confirm('Delete this PM record?')) { deleteMachinePmRecord(r.id, userName); pushToast({ type: 'success', text: 'PM record deleted' }); } }} className="text-slate-500 hover:text-red-400 p-1" title="Delete">
                                 <Trash2 size={12} />
@@ -1045,16 +1045,16 @@ export default function MachineProfile() {
                             <td className="text-slate-300 whitespace-nowrap text-xs">{fmtDateTime(l.startTime)}</td>
                             <td className="text-slate-300 whitespace-nowrap text-xs">{fmtDateTime(l.endTime)}</td>
                             <td className={`font-semibold ${l.downtimeHours > 8 ? 'text-red-400' : l.downtimeHours > 4 ? 'text-amber-300' : 'text-slate-200'}`}>
-                              {l.downtimeHours ? `${l.downtimeHours}h` : '—'}
+                              {l.downtimeHours ? `${l.downtimeHours}h` : '—' }
                             </td>
-                            <td className="text-slate-200 max-w-[200px] truncate" title={l.failureCause}>{l.failureCause || '—'}</td>
-                            <td className="text-slate-400 max-w-[200px] truncate" title={l.actionTaken}>{l.actionTaken || '—'}</td>
+                            <td className="text-slate-200 max-w-[200px] truncate" title={l.failureCause}>{l.failureCause || '—' }</td>
+                            <td className="text-slate-400 max-w-[200px] truncate" title={l.actionTaken}>{l.actionTaken || '—' }</td>
                             <td>
                               <span className={`badge ${l.status === 'closed' ? 'bg-emerald-500/15 text-emerald-400' : l.status === 'open' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}>
                                 {l.status}
                               </span>
                             </td>
-                            <td className="text-slate-500 max-w-[140px] truncate" title={l.remarks}>{l.remarks || '—'}</td>
+                            <td className="text-slate-500 max-w-[140px] truncate" title={l.remarks}>{l.remarks || '—' }</td>
                             {isAdmin && (
                               <td>
                                 <button
