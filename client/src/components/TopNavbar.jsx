@@ -8,6 +8,9 @@ import { buildNotifications } from '../analytics.js';
 import { timeAgo, formatDateLong, loadLS, saveLS, cleanText } from '../utils.js';
 import { listReportMetadata } from '../reportVault.js';
 import { UNIT_BADGE } from '../constants.js';
+import useComplianceAlerts from '../hooks/useComplianceAlerts.js';
+import NotificationDropdown from './NotificationDropdown.jsx';
+import AlertsDrawer from './AlertsDrawer.jsx';
 import {
   Menu, Shield, Search, Bell, ChevronDown, LogIn, LogOut,
   Plus, Upload, User, Clock, FileText, CalendarDays, Cog,
@@ -43,7 +46,18 @@ export default function TopNavbar() {
   const searchRef = useRef(null);
   const debounceRef = useRef(null);
 
-  // Notifications
+  // Compliance alerts — unified hook (AMC + Testing + PM)
+  const { allAlerts: complianceAlerts, counts: complianceCounts } = useComplianceAlerts();
+  const [notifFilter, setNotifFilter] = useState('all');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Listen for Dashboard ribbon -> open drawer
+  useEffect(() => {
+    const h = () => setDrawerOpen(true);
+    window.addEventListener('ccpl:open-alerts-drawer', h);
+    return () => window.removeEventListener('ccpl:open-alerts-drawer', h);
+  }, []);
+
+  // Notifications (legacy upload + test) kept for bell badge total (combined with compliance)
   const [uploadNotifs, setUploadNotifs] = useState([]);
   const [testNotifs, setTestNotifs] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -62,6 +76,8 @@ export default function TopNavbar() {
           title: 'Test Notification Delivered',
           detail: `Test sent at ${new Date(ts).toLocaleTimeString('en-GB')} — In-App channel confirmed`,
           ts,
+          category: 'info',
+          daysLeft: 0,
         },
       ]);
       // Auto-clear after 8s
@@ -98,26 +114,19 @@ export default function TopNavbar() {
       .catch(() => setUploadNotifs([]));
   }, [refreshKey]);
 
-  // Derived notification centre: pending PM summaries, monthly
-  // breakdown logs, low health/availability (live) + new uploads + test notifs
-  const notifications = useMemo(() => {
-    const derived = buildNotifications(store);
-    const uploads = uploadNotifs.slice(0, 6).map((n) => ({
-      id: `up-${n.id}`,
-      type: 'upload',
-      title: 'Report Uploaded',
-      detail: `${n.uploader_name || 'System'} uploaded ${n.filename} · ${n.category_name}${n.localOnly ? ' · saved in local vault' : ''}`,
-      ts: (n.uploaded_at || '').endsWith('Z') ? n.uploaded_at : n.uploaded_at + 'Z',
-    }));
-    return [...derived, ...uploads, ...testNotifs].sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 12);
-  }, [store, uploadNotifs, testNotifs]);
-
-  const unread = notifications.filter((n) => new Date(n.ts).getTime() > seenAt).length;
+  // Derived notification centre: compliance alerts (unified) + uploads + test
+  const complianceForBadge = complianceAlerts;
+  const badgeCount = complianceCounts.total;
+  const unread = badgeCount > 0 ? badgeCount : 0;
 
   const markNotifsSeen = () => {
     const now = Date.now();
     setSeenAt(now);
     saveLS(NOTIF_SEEN_KEY, now);
+  };
+  const handleMarkAllRead = () => {
+    markNotifsSeen();
+    setNotifOpen(false);
   };
 
   // Local instant search across the whole CMMS store (sync, zero latency)
@@ -313,45 +322,37 @@ export default function TopNavbar() {
             {formatDateLong()}
           </span>
 
-          {/* Notification centre */}
+          {/* Notification centre — Interactive Bell with Badge + Popover */}
           <div className="relative" ref={notifRef}>
             <button
               onClick={() => { setNotifOpen((v) => !v); if (!notifOpen) markNotifsSeen(); }}
               className="relative w-9 h-9 rounded-control flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-              aria-label={`Notifications${unread ? ` (${unread} unread)` : ''}`}
+              aria-label={`Notifications${badgeCount ? ` (${badgeCount} unread)` : ''}`}
             >
               <Bell size={17} aria-hidden="true" />
-              {unread > 0 && (
+              {badgeCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                  {unread > 9 ? '9+' : unread}
+                  {badgeCount > 9 ? '9+' : badgeCount}
                 </span>
               )}
             </button>
             {notifOpen && (
-              <div className="absolute right-0 top-full mt-2 w-[340px] glass-card !rounded-xl overflow-hidden shadow-2xl">
-                <p className="px-4 py-2.5 text-xs font-semibold text-white border-b border-white/[0.06]">Notification Centre</p>
-                {notifications.length === 0 ? (
-                  <p className="px-4 py-4 text-slate-500 text-xs">All clear — pending PM summaries, monthly breakdown logs, and low health warnings will surface here automatically.</p>
-                ) : (
-                  <ul className="max-h-80 overflow-y-auto">
-                    {notifications.map((n) => {
-                      const meta = NOTIF_META[n.type] || NOTIF_META.info;
-                      const Icon = meta.icon;
-                      return (
-                        <li key={n.id} className="flex gap-2.5 px-4 py-2.5 border-b border-white/[0.04] hover:bg-white/[0.03]">
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5 ${meta.cls}`}>
-                            <Icon size={13} aria-hidden="true" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-white text-xs font-semibold">{n.title}</p>
-                            <p className="text-slate-400 text-[11px] leading-snug mt-0.5">{n.detail}</p>
-                            <p className="text-slate-600 text-[10px] mt-0.5">{timeAgo(n.ts)}</p>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+              <div className="absolute right-0 top-full mt-2 z-[85]">
+                <NotificationDropdown
+                  alerts={complianceAlerts}
+                  counts={complianceCounts}
+                  activeFilter={notifFilter}
+                  onFilterChange={setNotifFilter}
+                  onMarkAllRead={handleMarkAllRead}
+                  onSettings={() => { setNotifOpen(false); navigate('/settings'); }}
+                  onViewDetails={(alert) => {
+                    setNotifOpen(false);
+                    if (alert.machineId) navigate(`/machines/${alert.machineId}`);
+                    else if (alert.category === 'cert') navigate('/machines');
+                    else if (alert.category === 'amc') navigate('/reports');
+                  }}
+                  onViewAll={() => { setNotifOpen(false); setDrawerOpen(true); }}
+                />
               </div>
             )}
           </div>
@@ -417,6 +418,7 @@ export default function TopNavbar() {
           )}
         </div>
       </div>
+      <AlertsDrawer isOpen={drawerOpen} onClose={() => setDrawerOpen(false)} alerts={complianceAlerts} machines={store.machines} />
     </header>
   );
 }

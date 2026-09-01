@@ -24,6 +24,7 @@ import { computeSpecificYield, getDaysInRange, getSolarCapacity, getSolarDerived
 import { upsertEnergySettings } from '../store.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
 import { timeAgo, greeting, formatDateLong, cleanText } from '../utils.js';
+import useComplianceAlerts from '../hooks/useComplianceAlerts.js';
 import Factory from 'lucide-react/dist/esm/icons/factory';
 import Activity from 'lucide-react/dist/esm/icons/activity';
 import Wrench from 'lucide-react/dist/esm/icons/wrench';
@@ -103,6 +104,7 @@ export default function Dashboard() {
   const store = useStore();
   const { machines, breakdowns, pms, machinePmRecords, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
+  const { counts: complianceCounts, allAlerts: complianceAlerts } = useComplianceAlerts();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -423,6 +425,25 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* Subtle Top Bar Ribbon — High-Priority Indicator (<7 days) */}
+      {(() => {
+        const critical = complianceAlerts.filter((a) => a.daysLeft != null && a.daysLeft < 7);
+        if (critical.length === 0) return null;
+        const certCritical = critical.filter((a) => a.category === 'cert').length;
+        const amcCritical = critical.filter((a) => a.category === 'amc').length;
+        return (
+          <section aria-label="Critical compliance ribbon" className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-control border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
+            <span>⚠️ {certCritical} Statutory Certificates & {amcCritical} AMC Contracts Expiring Soon.</span>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('ccpl:open-alerts-drawer'))}
+              className="px-3 py-1 rounded-control bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[11px] font-semibold"
+            >
+              Review in Bell 🔔
+            </button>
+          </section>
+        );
+      })()}
+
       {/* Period filter bar */}
       {availablePeriods.length > 1 && (
         <section aria-label="Period filter" className="flex items-center gap-3 flex-wrap">
@@ -693,76 +714,6 @@ export default function Dashboard() {
                   })}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* AMC Alerts */}
-      {charts.amcNotifications.length > 0 && (
-        <section aria-label="AMC alerts">
-          <div className="glass-card p-5">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-9 h-9 rounded-control bg-violet-400/10 border border-violet-400/25 flex items-center justify-center">
-                <ShieldCheck size={17} className="text-violet-400" aria-hidden="true" />
-              </div>
-              <div>
-                <h3 className="text-card-title">AMC Alerts</h3>
-                <p className="text-meta">Upcoming AMC expiries and service visit overdue alerts</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {charts.amcNotifications.slice(0, 8).map((n) => (
-                <div key={n.id} className={`flex items-center gap-3 rounded-control border px-4 py-2.5 ${
-                  n.type === 'danger' ? 'bg-red-500/10 border-red-500/25 text-red-300' :
-                  n.type === 'warning' ? 'bg-amber-500/10 border-amber-500/25 text-amber-300' :
-                  'bg-cyan-500/10 border-cyan-500/25 text-cyan-300'
-                }`}>
-                  <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold">{n.title}</p>
-                    <p className="text-[11px] opacity-80">{n.detail}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Safety & Testing Certificate Alerts */}
-      {charts.certNotifications.length > 0 && (
-        <section aria-label="Safety certificate alerts">
-          <div className="glass-card p-5">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-9 h-9 rounded-control bg-amber-400/10 border border-amber-400/25 flex items-center justify-center">
-                <Award size={17} className="text-amber-400" aria-hidden="true" />
-              </div>
-              <div>
-                <h3 className="text-card-title">Safety & Testing Certificate Alerts</h3>
-                <p className="text-meta">Certificates expiring within 30 days or already expired</p>
-              </div>
-              <span className="badge bg-amber-500/15 text-amber-300 border border-amber-500/30 ml-auto">{charts.certNotifications.length} alert{charts.certNotifications.length!==1?'s':''}</span>
-            </div>
-            <div className="space-y-2">
-              {charts.certNotifications.slice(0, 8).map((n) => (
-                <div
-                  key={n.id}
-                  onClick={() => n.machineId && navigate(`/machines/${n.machineId}`)}
-                  className={`flex items-center gap-3 rounded-control border px-4 py-2.5 cursor-pointer hover:bg-white/[0.04] transition-colors ${
-                    n.type === 'danger' ? 'bg-red-500/10 border-red-500/25 text-red-300' :
-                    n.type === 'warning' ? 'bg-amber-500/10 border-amber-500/25 text-amber-300' :
-                    'bg-cyan-500/10 border-cyan-500/25 text-cyan-300'
-                  }`}
-                >
-                  <Award size={14} className="shrink-0" aria-hidden="true" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold">{n.title}</p>
-                    <p className="text-[11px] opacity-80">{n.detail}</p>
-                  </div>
-                  <ChevronRight size={13} className="opacity-60 shrink-0" aria-hidden="true" />
-                </div>
-              ))}
             </div>
           </div>
         </section>
