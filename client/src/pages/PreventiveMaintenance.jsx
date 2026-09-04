@@ -299,7 +299,10 @@ export default function PreventiveMaintenance() {
   }, [kpiMonth, availableMonths]);
 
   const currentMonthRecords = useMemo(
-    () => machinePmRecords.filter((r) => activeKpiMonth && (r.pmDate || '').slice(0, 7) === activeKpiMonth),
+    () => {
+      if (!activeKpiMonth || activeKpiMonth === 'ALL') return machinePmRecords;
+      return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === activeKpiMonth);
+    },
     [machinePmRecords, activeKpiMonth]
   );
 
@@ -311,10 +314,10 @@ export default function PreventiveMaintenance() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, [activeKpiMonth]);
 
-  const prevMonthRecords = useMemo(
-    () => machinePmRecords.filter((r) => prevKpiMonth && (r.pmDate || '').slice(0, 7) === prevKpiMonth),
-    [machinePmRecords, prevKpiMonth]
-  );
+  const prevMonthRecords = useMemo(() => {
+    if (!prevKpiMonth || prevKpiMonth === 'ALL') return [];
+    return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === prevKpiMonth);
+  }, [machinePmRecords, prevKpiMonth]);
 
   const totalPlanned = currentMonthRecords.length;
   const totalCompleted = currentMonthRecords.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
@@ -348,11 +351,18 @@ export default function PreventiveMaintenance() {
     }
   }, [availableMonths, registerMonth, currentKey]);
 
+  const handleSelectAllMonths = (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    setRegisterMonth('ALL');
+    setKpiMonth('ALL');
+    setRegPage(1);
+    hasInitializedRef.current = true;
+  };
   const handleMonthSelect = (monthKey, e) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     if (monthKey === 'ALL' || monthKey === '' || monthKey == null) {
-      setRegisterMonth('');
-      setKpiMonth('');
+      setRegisterMonth('ALL');
+      setKpiMonth('ALL');
       setRegPage(1);
       hasInitializedRef.current = true;
     } else {
@@ -363,9 +373,10 @@ export default function PreventiveMaintenance() {
   };
 
   // Filtered register rows — search across Machine Code, Name, Section, and Task
+  // When registerMonth is '' or 'ALL', bypass date-range filtering and show full 447
   const registerRows = useMemo(() => {
     const filtered = monthlyRegister.filter((r) => {
-      if (registerMonth && r.period !== registerMonth) return false;
+      if (registerMonth && registerMonth !== 'ALL' && r.period !== registerMonth) return false;
       if (regSearch) {
         const q = regSearch.toLowerCase();
         const haystack = [
@@ -396,11 +407,11 @@ export default function PreventiveMaintenance() {
     return counts;
   }, [monthlyRegister]);
 
-  // Summary table
+  // Summary table — universal, skip filter when All Months
   const summaryRows = useMemo(() => {
     return [...pms]
       .filter((row) => {
-        if (registerMonth && row.period !== registerMonth) return false;
+        if (registerMonth && registerMonth !== 'ALL' && row.period !== registerMonth) return false;
         if (regSection && row.section !== regSection) return false;
         return true;
       })
@@ -563,17 +574,17 @@ export default function PreventiveMaintenance() {
           {/* Left Sidebar — Month Tabs */}
           <div className="col-span-12 lg:col-span-3">
             <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
-              {/* All Months tab */}
+              {/* All Months tab — universal, shows all 447 */}
               <button
-                onClick={(e) => handleMonthSelect('ALL', e)}
+                onClick={handleSelectAllMonths}
                 className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
-                  !registerMonth
+                  !registerMonth || registerMonth === 'ALL'
                     ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
                     : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
                 }`}
               >
                 <span className="truncate">All Months</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth || registerMonth === 'ALL' ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
                   {machinePmRecords.length}
                 </span>
               </button>

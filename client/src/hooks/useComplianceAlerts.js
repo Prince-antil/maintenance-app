@@ -12,66 +12,88 @@ function daysUntilExpiry(dateStr) {
 
 export function useComplianceAlerts() {
   const store = useStore();
+  const [machineAlerts, setMachineAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [directAmc, setDirectAmc] = useState(null);
   const [directCerts, setDirectCerts] = useState(null);
 
-  // Direct Supabase fetch for AMC/testing certificates with fallback and no 404 console errors
+  // Unified fetch per MASTER SPEC: query existing machines table, fallback to local, no 404s for missing amc_* tables
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
     let cancelled = false;
-    const fetchDirect = async () => {
+    const fetchAlerts = async () => {
       try {
-        // Fetch AMC from existing valid table only to avoid 404s (amc_subscriptions/amc_logs do not exist)
-        const fetchAmcAlerts = async () => {
+        // Try Supabase machines table (exists) — per spec example, filter amc_expiry/testing_due_date
+        if (isSupabaseConfigured && supabase) {
           try {
-            const { data, error } = await supabase.from('amc_records').select('*');
-            if (error) throw error;
-            if (!cancelled && data && data.length > 0) setDirectAmc(data);
-            else if (!cancelled) setDirectAmc(null);
-            return;
-          } catch (err) {
-            console.warn('Fallback to local/machines schema for AMC data:', err.message);
-            // Fallback: try machines table as per spec example (no 404)
-            try {
-              const { data: mData, error: mErr } = await supabase.from('machines').select('*').limit(5);
-              if (!mErr && mData) {
-                // No AMC data in machines, just use local store
-                if (!cancelled) setDirectAmc(null);
+            const { data: machinesData, error } = await supabase.from('machines').select('*');
+            if (!error && machinesData) {
+              const today = new Date();
+              const activeAlerts = (machinesData || [])
+                .filter((m) => m.amc_expiry || m.testing_due_date || m.amcExpiry || m.testingDueDate)
+                .map((m) => {
+                  const expiryRaw = m.amc_expiry || m.testing_due_date || m.amcExpiry || m.testingDueDate;
+                  const expiryDate = new Date(expiryRaw);
+                  const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+                  return {
+                    id: m.id,
+                    title: `AMC / Testing Due: ${m.name || m.code || m.machineCode || m.id}`,
+                    type: m.amc_expiry || m.amcExpiry ? 'AMC' : 'Testing',
+                    daysUntilExpiry,
+                    daysLeft: daysUntilExpiry,
+                    status: daysUntilExpiry <= 7 ? 'critical' : 'warning',
+                    expiryDate: expiryRaw,
+                    machineId: m.id,
+                    ts: m.updated_at || m.created_at,
+                  };
+                })
+                .filter((item) => item.daysUntilExpiry <= 30);
+              if (!cancelled && activeAlerts.length > 0) {
+                setMachineAlerts(activeAlerts);
+                // Also populate directAmc for fallback if needed
+                setDirectAmc(activeAlerts);
               }
-            } catch {}
-            if (!cancelled) setDirectAmc(null);
-          }
-        };
-        const fetchCerts = async () => {
-          try {
-            const { data, error } = await supabase.from('testing_certificates').select('*');
-            if (error) throw error;
-            if (!cancelled && data && data.length > 0) setDirectCerts(data);
-            else if (!cancelled) setDirectCerts(null);
+            }
           } catch (err) {
-            console.warn('Fallback to local store for Testing Certificates:', err.message);
-            if (!cancelled) setDirectCerts(null);
+            console.warn('Fallback compliance calculation:', err.message);
           }
-        };
-        await Promise.all([fetchAmcAlerts(), fetchCerts()]);
-      } catch {}
+        }
+        // Also try valid Supabase tables amc_records/testing_certificates as secondary (no 404 for missing amc_subscriptions/logs)
+        if (isSupabaseConfigured && supabase) {
+          try {
+            const { data: amcData } = await supabase.from('amc_records').select('*');
+            if (!cancelled && amcData && amcData.length > 0) setDirectAmc(amcData);
+          } catch {}
+          try {
+            const { data: certData } = await supabase.from('testing_certificates').select('*');
+            if (!cancelled && certData && certData.length > 0) setDirectCerts(certData);
+          } catch {}
+        }
+      } catch (err) {
+        console.warn('Fallback compliance calculation:', err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
-    fetchDirect();
-    // Realtime subscription only for existing tables to avoid 404s
-    const channel = supabase.channel('compliance-alerts-hook');
-    ['amc_records', 'testing_certificates'].forEach((tbl) => {
-      try {
-        channel.on('postgres_changes', { event: '*', schema: 'public', table: tbl }, () => fetchDirect());
-      } catch {}
-    });
-    channel.subscribe();
-    return () => {
-      cancelled = true;
-      try { supabase.removeChannel(channel); } catch {}
-    };
+    fetchAlerts();
+    // Realtime for valid tables only
+    if (isSupabaseConfigured && supabase) {
+      const channel = supabase.channel('compliance-alerts-hook-v2');
+      ['amc_records', 'testing_certificates', 'machines'].forEach((tbl) => {
+        try {
+          channel.on('postgres_changes', { event: '*', schema: 'public', table: tbl }, () => fetchAlerts());
+        } catch {}
+      });
+      channel.subscribe();
+      return () => {
+        cancelled = true;
+        try { supabase.removeChannel(channel); } catch {}
+      };
+    }
+    setLoading(false);
+    return () => { cancelled = true; };
   }, []);
 
-  const amcSource = (directAmc && directAmc.length > 0) ? directAmc : store.amc;
+  const amcSource = (directAmc && Array.isArray(directAmc) && directAmc.length > 0 && directAmc[0]?.contractEndDate) ? directAmc : store.amc;
   const certSource = (directCerts && directCerts.length > 0) ? directCerts : store.testingCertificates;
   const machines = store.machines || [];
   const pms = store.pms || [];
@@ -185,24 +207,27 @@ export function useComplianceAlerts() {
   }, [pms]);
 
   const allAlerts = useMemo(() => {
-    const combined = [...amcAlerts, ...certAlerts, ...pmAlerts];
-    return combined.sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999) || new Date(b.ts) - new Date(a.ts));
-  }, [amcAlerts, certAlerts, pmAlerts]);
+    const combined = [...amcAlerts, ...certAlerts, ...pmAlerts, ...machineAlerts];
+    return combined.sort((a, b) => (a.daysLeft ?? a.daysUntilExpiry ?? 999) - (b.daysLeft ?? b.daysUntilExpiry ?? 999) || new Date(b.ts) - new Date(a.ts));
+  }, [amcAlerts, certAlerts, pmAlerts, machineAlerts]);
 
   const counts = useMemo(() => ({
     total: allAlerts.length,
     amc: amcAlerts.length,
     cert: certAlerts.length,
     pm: pmAlerts.length,
-    critical: allAlerts.filter((a) => a.daysLeft != null && a.daysLeft < 7).length,
+    critical: allAlerts.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7).length,
   }), [allAlerts, amcAlerts, certAlerts, pmAlerts]);
 
   return {
     allAlerts,
+    alerts: allAlerts,
     amcAlerts,
     certAlerts,
     pmAlerts,
     counts,
+    activeCount: allAlerts.length,
+    loading,
     machines,
     amcSource,
     certSource,
