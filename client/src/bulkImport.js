@@ -698,6 +698,8 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const pmDateRaw = parseDateValue(getCell(row, mapping, 'pmDate'));
     const pmDate = pmDateRaw ? pmDateRaw.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
+    const rawStatus = String(getCell(row, mapping, 'status') || '').trim().toLowerCase();
+    const status = rawStatus || 'pending';
     return {
       machineCode: String(getCell(row, mapping, 'machineCode') || '').trim(),
       machineName: mName,
@@ -705,8 +707,8 @@ function parseModuleRow(moduleId, row, mapping, index) {
       pmDate,
       pmType: String(getCell(row, mapping, 'pmType') || 'Preventive').trim() || 'Preventive',
       task: String(getCell(row, mapping, 'task') || '').trim(),
-      status: String(getCell(row, mapping, 'status') || 'completed').trim().toLowerCase() || 'completed',
-      completed: String(getCell(row, mapping, 'completed') || '').toLowerCase() !== 'false',
+      status,
+      completed: status === 'completed' || String(getCell(row, mapping, 'completed') || '').toLowerCase() === 'true',
       actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
       technician: String(getCell(row, mapping, 'technician') || '').trim(),
       remarks: String(getCell(row, mapping, 'remarks') || '').trim(),

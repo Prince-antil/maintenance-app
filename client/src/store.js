@@ -1102,8 +1102,13 @@ function normalizeMachinePmRecord(fields) {
     pmDate,
     pmType: String(fields.pmType || fields.pm_type || 'Preventive').trim(),
     task: String(fields.task || '').trim(),
-    status: String(fields.status || 'completed').toLowerCase(),
-    completed: fields.completed !== false && fields.completed !== 'false',
+    status: String(fields.status || 'pending').toLowerCase(),
+    completed: (() => {
+      if (fields.completed === true || String(fields.completed).toLowerCase() === 'true') return true;
+      if (fields.completed === false || String(fields.completed).toLowerCase() === 'false') return false;
+      const s = String(fields.status || 'pending').toLowerCase().trim();
+      return s === 'completed';
+    })(),
     action: String(fields.action || '').trim(),
     technician: String(fields.technician || '').trim(),
     remarks: String(fields.remarks || '').trim(),
@@ -2990,7 +2995,7 @@ export function dryRunImportMachinePmRecords(rows) {
       autoCreateNames.push(label);
     }
 
-    const st = String(row.status || 'completed').toLowerCase();
+    const st = String(row.status || 'pending').toLowerCase();
     if (st === 'completed' || row.completed === true || row.completed === 'true') {
       totalCompleted += 1;
     } else {
