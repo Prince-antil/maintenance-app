@@ -149,26 +149,31 @@ export function useComplianceAlerts() {
   }, [certSource, machines, store.testingCertificates]);
 
   const pmAlerts = useMemo(() => {
-    const currentKey = new Date().toISOString().slice(0, 7);
-    const pending = (pms || []).filter((r) => (r.pendingCount || 0) > 0);
-    const overdue = pending.filter((r) => {
-      const k = summaryMonthKey(r);
-      return k && k < currentKey;
+    // Universal: show all PM pending across all months, not just current month
+    const pendingAll = (pms || []).filter((r) => (r.pendingCount || 0) > 0);
+    // Sort by period descending (most recent first) to show relevant overdue first
+    const sorted = [...pendingAll].sort((a, b) => (b.period || '').localeCompare(a.period || ''));
+    const list = sorted.slice(0, 10);
+    return list.map((r) => {
+      const isOverdue = (() => {
+        const k = summaryMonthKey(r);
+        const cur = new Date().toISOString().slice(0, 7);
+        return k && k < cur;
+      })();
+      return {
+        id: `pm-${r.id}`,
+        category: 'pm',
+        type: isOverdue ? 'danger' : 'warning',
+        severity: isOverdue ? 'critical' : 'warning',
+        title: isOverdue ? 'PM Overdue' : 'PM Pending',
+        detail: `${r.section} • ${r.pendingCount} pending — ${r.period || 'Unknown'}`,
+        asset: r.section,
+        vendor: '',
+        expiryDate: r.period,
+        daysLeft: isOverdue ? -1 : 10,
+        ts: r.updatedAt || r.createdAt,
+      };
     });
-    const list = (overdue.length ? overdue : pending).slice(0, 5);
-    return list.map((r) => ({
-      id: `pm-${r.id}`,
-      category: 'pm',
-      type: 'warning',
-      severity: 'warning',
-      title: 'PM Overdue',
-      detail: `${r.section} • ${r.pendingCount} pending — ${r.period || currentKey}`,
-      asset: r.section,
-      vendor: '',
-      expiryDate: r.period,
-      daysLeft: 5,
-      ts: r.updatedAt || r.createdAt,
-    }));
   }, [pms]);
 
   const allAlerts = useMemo(() => {

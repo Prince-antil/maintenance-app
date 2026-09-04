@@ -425,18 +425,21 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Subtle Top Bar Ribbon — High-Priority Indicator (<7 days) */}
+      {/* Subtle Top Bar Ribbon — Universal High-Priority Indicator (any active alert) */}
       {(() => {
+        if (complianceAlerts.length === 0) return null;
         const critical = complianceAlerts.filter((a) => a.daysLeft != null && a.daysLeft < 7);
-        if (critical.length === 0) return null;
-        const certCritical = critical.filter((a) => a.category === 'cert').length;
-        const amcCritical = critical.filter((a) => a.category === 'amc').length;
+        const isCritical = critical.length > 0;
+        const certCount = complianceAlerts.filter((a) => a.category === 'cert').length;
+        const amcCount = complianceAlerts.filter((a) => a.category === 'amc').length;
+        const pmCount = complianceAlerts.filter((a) => a.category === 'pm').length;
+        const total = complianceAlerts.length;
         return (
-          <section aria-label="Critical compliance ribbon" className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-control border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs">
-            <span>⚠️ {certCritical} Statutory Certificates & {amcCritical} AMC Contracts Expiring Soon.</span>
+          <section aria-label="Critical compliance ribbon" className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-control border text-xs ${isCritical ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'}`}>
+            <span>⚠️ {total} Compliance Alert{total!==1?'s':''} — {certCount} Certificates • {amcCount} AMC • {pmCount} PM {isCritical ? '— Critical <7 days!' : '— Expiring within 30 days'}</span>
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('ccpl:open-alerts-drawer'))}
-              className="px-3 py-1 rounded-control bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[11px] font-semibold"
+              className={`px-3 py-1 rounded-control border text-[11px] font-semibold ${isCritical ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-200' : 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-500/40 text-cyan-200'}`}
             >
               Review in Bell 🔔
             </button>
