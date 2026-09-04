@@ -46,8 +46,8 @@ export default function TopNavbar() {
   const searchRef = useRef(null);
   const debounceRef = useRef(null);
 
-  // Compliance alerts — unified hook (AMC + Testing + PM)
-  const { allAlerts: complianceAlerts, counts: complianceCounts } = useComplianceAlerts();
+  // Compliance alerts — unified hook (AMC + Testing + PM) with 45-day bell and interval pop-up
+  const { allAlerts: complianceAlerts, intervalAlerts, counts: complianceCounts, activeCount } = useComplianceAlerts();
   const [notifFilter, setNotifFilter] = useState('all');
   const [drawerOpen, setDrawerOpen] = useState(false);
   // Listen for Dashboard ribbon -> open drawer
@@ -56,6 +56,26 @@ export default function TopNavbar() {
     window.addEventListener('ccpl:open-alerts-drawer', h);
     return () => window.removeEventListener('ccpl:open-alerts-drawer', h);
   }, []);
+  // Interval pop-up: show toast when an alert hits its interval day (60,30,15,<=7) — for that complete day
+  const { pushToast } = useUI();
+  const lastIntervalRef = useRef('');
+  useEffect(() => {
+    if (!intervalAlerts || intervalAlerts.length === 0) return;
+    const key = intervalAlerts.map((a) => `${a.id}:${a.daysLeft}`).sort().join('|');
+    if (key === lastIntervalRef.current) return;
+    lastIntervalRef.current = key;
+    const critical = intervalAlerts.filter((a) => a.daysLeft != null && a.daysLeft <= 7);
+    const toShow = critical.length ? critical.slice(0, 3) : intervalAlerts.slice(0, 3);
+    toShow.forEach((alert) => {
+      const daysText = alert.daysLeft < 0 ? `expired ${Math.abs(alert.daysLeft)}d ago` : alert.daysLeft === 0 ? 'expires today' : `expires in ${alert.daysLeft}d`;
+      pushToast({
+        type: alert.severity === 'critical' ? 'error' : 'warning',
+        title: alert.title,
+        message: `${alert.detail} — ${daysText}`,
+        duration: 6000,
+      });
+    });
+  }, [intervalAlerts, pushToast]);
 
   // Notifications (legacy upload + test) kept for bell badge total (combined with compliance)
   const [uploadNotifs, setUploadNotifs] = useState([]);

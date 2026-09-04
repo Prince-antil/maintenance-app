@@ -10,6 +10,22 @@ function daysUntilExpiry(dateStr) {
   return Math.ceil((expiry - today) / (1000*60*60*24));
 }
 
+function isIntervalVisible(daysLeft) {
+  if (daysLeft == null) return false;
+  if (daysLeft < 0) return true; // expired always visible
+  if (daysLeft === 60) return true;
+  if (daysLeft === 30) return true;
+  if (daysLeft === 15) return true;
+  if (daysLeft >= 0 && daysLeft <= 7) return true; // 7-day window
+  return false;
+}
+
+function isBellVisible(daysLeft) {
+  if (daysLeft == null) return false;
+  // Bell shows every time if 45 or less (including expired)
+  return daysLeft <= 45;
+}
+
 export function useComplianceAlerts() {
   const store = useStore();
   const [machineAlerts, setMachineAlerts] = useState([]);
@@ -46,11 +62,12 @@ export function useComplianceAlerts() {
                     ts: m.updated_at || m.created_at,
                   };
                 })
-                .filter((item) => item.daysUntilExpiry <= 30);
+                .filter((item) => item.daysUntilExpiry <= 45);
               if (!cancelled && activeAlerts.length > 0) {
                 setMachineAlerts(activeAlerts);
-                // Also populate directAmc for fallback if needed
                 setDirectAmc(activeAlerts);
+              } else if (!cancelled) {
+                setMachineAlerts([]);
               }
             }
           } catch (err) {
@@ -99,19 +116,15 @@ export function useComplianceAlerts() {
   const pms = store.pms || [];
 
   const amcAlerts = useMemo(() => {
-    // Use direct source with fallback to store, without over-filtering at query level
     const source = (amcSource && amcSource.length > 0) ? amcSource : store.amc;
-    // Include all entries where Days Remaining <=30 or status Overdue/Due Soon via buildAMCNotifications
-    // Fallback: if buildAMCNotifications returns empty due to strict status, compute directly
     let raws = buildAMCNotifications(source, machines);
     if (raws.length === 0 && source && source.length > 0) {
-      // Fallback: manually include all where daysRemaining <=30 or overdue
       const today = new Date(); today.setHours(0,0,0,0);
       raws = source.filter((r) => {
         const expiry = r.contractEndDate || r.expiryDate || r.expiry_date;
         if (!expiry) return false;
         const days = Math.ceil((new Date(expiry).setHours(0,0,0,0) - today.getTime()) / 86400000);
-        return days <= 30;
+        return days <= 45;
       }).map((r) => {
         const expiry = r.contractEndDate || r.expiryDate;
         const days = daysUntilExpiry(expiry);
@@ -132,7 +145,6 @@ export function useComplianceAlerts() {
       ...n,
       category: n.title?.includes('Visit') ? 'service' : 'amc',
       daysLeft: n.daysLeft ?? (() => {
-        // Prefer expiryDate if available, else parse detail
         const expiry = n.expiryDate || n.detail?.match(/(\d{4}-\d{2}-\d{2})/)?.[0];
         if (expiry) return daysUntilExpiry(expiry);
         const m = n.detail?.match(/(\d+) days/);
@@ -154,7 +166,7 @@ export function useComplianceAlerts() {
         const expiry = c.expiryDate || c.expiry_date;
         if (!expiry) return false;
         const days = Math.ceil((new Date(expiry).setHours(0,0,0,0) - today.getTime()) / 86400000);
-        return days <= 30;
+        return days <= 45;
       }).map((c) => {
         const expiry = c.expiryDate || c.expiry_date;
         const days = daysUntilExpiry(expiry);
@@ -211,22 +223,31 @@ export function useComplianceAlerts() {
     return combined.sort((a, b) => (a.daysLeft ?? a.daysUntilExpiry ?? 999) - (b.daysLeft ?? b.daysUntilExpiry ?? 999) || new Date(b.ts) - new Date(a.ts));
   }, [amcAlerts, certAlerts, pmAlerts, machineAlerts]);
 
+  // Bell shows every time if 45 or less (including expired) — universal
+  const bellAlerts = useMemo(() => allAlerts.filter((a) => isBellVisible(a.daysLeft ?? a.daysUntilExpiry)), [allAlerts]);
+  // Pop-up / dropdown visible on intervals: 60,30,15, 7-day window, expired always
+  const intervalAlerts = useMemo(() => allAlerts.filter((a) => isIntervalVisible(a.daysLeft ?? a.daysUntilExpiry)), [allAlerts]);
+
   const counts = useMemo(() => ({
-    total: allAlerts.length,
-    amc: amcAlerts.length,
-    cert: certAlerts.length,
-    pm: pmAlerts.length,
-    critical: allAlerts.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7).length,
-  }), [allAlerts, amcAlerts, certAlerts, pmAlerts]);
+    total: bellAlerts.length,
+    amc: bellAlerts.filter((a) => a.category === 'amc' || a.type === 'AMC').length,
+    cert: bellAlerts.filter((a) => a.category === 'cert').length,
+    pm: bellAlerts.filter((a) => a.category === 'pm').length,
+    critical: bellAlerts.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7).length,
+    intervalTotal: intervalAlerts.length,
+  }), [bellAlerts, intervalAlerts]);
 
   return {
-    allAlerts,
-    alerts: allAlerts,
+    allAlerts: bellAlerts,
+    alerts: bellAlerts,
+    intervalAlerts,
+    bellAlerts,
     amcAlerts,
     certAlerts,
     pmAlerts,
     counts,
-    activeCount: allAlerts.length,
+    activeCount: bellAlerts.length,
+    intervalCount: intervalAlerts.length,
     loading,
     machines,
     amcSource,

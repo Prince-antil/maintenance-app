@@ -104,7 +104,7 @@ export default function Dashboard() {
   const store = useStore();
   const { machines, breakdowns, pms, machinePmRecords, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
-  const { counts: complianceCounts, allAlerts: complianceAlerts } = useComplianceAlerts();
+  const { counts: complianceCounts, allAlerts: complianceAlerts, intervalAlerts } = useComplianceAlerts();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -425,15 +425,16 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Subtle Top Bar Ribbon — Universal High-Priority Indicator (any active alert) */}
+      {/* Subtle Top Bar Ribbon — Interval-based pop-up (60,30,15,7) but bell always shows if <=45 */}
       {(() => {
-        if (complianceAlerts.length === 0) return null;
-        const critical = complianceAlerts.filter((a) => a.daysLeft != null && a.daysLeft < 7);
+        const visible = intervalAlerts || complianceAlerts;
+        if (!visible || visible.length === 0) return null;
+        const critical = visible.filter((a) => a.daysLeft != null && a.daysLeft < 7);
         const isCritical = critical.length > 0;
-        const certCount = complianceAlerts.filter((a) => a.category === 'cert').length;
-        const amcCount = complianceAlerts.filter((a) => a.category === 'amc').length;
-        const pmCount = complianceAlerts.filter((a) => a.category === 'pm').length;
-        const total = complianceAlerts.length;
+        const certCount = visible.filter((a) => a.category === 'cert').length;
+        const amcCount = visible.filter((a) => a.category === 'amc').length;
+        const pmCount = visible.filter((a) => a.category === 'pm').length;
+        const total = visible.length;
         return (
           <section aria-label="Critical compliance ribbon" className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-control border text-xs ${isCritical ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'}`}>
             <span>⚠️ {total} Compliance Alert{total!==1?'s':''} — {certCount} Certificates • {amcCount} AMC • {pmCount} PM {isCritical ? '— Critical <7 days!' : '— Expiring within 30 days'}</span>
