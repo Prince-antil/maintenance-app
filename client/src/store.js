@@ -1047,8 +1047,52 @@ function machineBreakdownLogToCloudRow(record) {
 }
 
 // ── Per-machine PM records ──────────────────────────────────────────────────
+function toISODateLocal(value) {
+  if (!value) return '';
+  // Handle Date object (from XLSX) — use local date, not UTC, to avoid July/Aug shift
+  if (value instanceof Date && !isNaN(value)) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // Handle Excel serial number (e.g., 45261)
+  if (typeof value === 'number' && Number.isFinite(value) && value > 30000 && value < 60000) {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + value * 86400000);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const s = String(value).trim();
+  // Try to parse YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+    const [a, b, c] = s.split('/').map(Number);
+    // Assume DD/MM/YYYY if first part >12, else MM/DD/YYYY — prefer DD/MM as per Indian format
+    const day = a > 12 ? a : a;
+    const month = a > 12 ? b : a;
+    // Actually try DD/MM/YYYY first
+    const parts = s.split('/');
+    const dd = String(parts[0]).padStart(2, '0');
+    const mm = String(parts[1]).padStart(2, '0');
+    const yyyy = parts[2];
+    if (Number(mm) >= 1 && Number(mm) <= 12) return `${yyyy}-${mm}-${dd}`;
+  }
+  // Fallback: try Date parsing but use local
+  const parsed = new Date(s);
+  if (!isNaN(parsed)) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return s.slice(0, 10);
+}
 function normalizeMachinePmRecord(fields) {
-  const pmDate = fields.pmDate || fields.pm_date || new Date().toISOString().slice(0, 10);
+  const rawPmDate = fields.pmDate || fields.pm_date || fields.date || '';
+  const pmDate = toISODateLocal(rawPmDate) || new Date().toISOString().slice(0, 10);
   return {
     id: fields.id || uid('mpm'),
     machineId: fields.machineId || '',

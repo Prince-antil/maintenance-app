@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM, updatePM, purgePmRecords } from '../store.js';
+import { useStore, addPM, deletePM, updatePM, purgePmRecords, deleteMachinePmRecord } from '../store.js';
 import {
   formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,
@@ -642,11 +642,12 @@ export default function PreventiveMaintenance() {
                         <th>PM Date</th>
                         <th>PM Type & Task</th>
                         <th>Status</th>
+                        <th className="w-20 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {regPageRows.map((row) => (
-                        <tr key={`${row.machineId}-${row.period}`} className="cursor-pointer hover:bg-white/[0.03]">
+                        <tr key={`${row.machineId}-${row.period}-${row.pmCount}`} className="hover:bg-white/[0.03]">
                           <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—' }</td>
                           <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—' }</td>
                           <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—' }</td>
@@ -660,6 +661,28 @@ export default function PreventiveMaintenance() {
                             }`}>
                               {row.status === 'COMPLETED' ? 'Completed' : 'Pending'}
                             </span>
+                          </td>
+                          <td className="text-right">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const count = row.pmCount || 1;
+                                const label = `${row.machineName || row.machineCode} • ${formatPeriodKey(row.period, true)} (${count} record${count!==1?'s':''})`;
+                                if (!window.confirm(`Delete ${label}?\nThis will remove ${count} PM record(s) for this machine and month. This cannot be undone.`)) return;
+                                const toDelete = machinePmRecords.filter((r) => r.machineId === row.machineId && (r.pmDate || '').slice(0, 7) === row.period);
+                                if (toDelete.length > 0) {
+                                  toDelete.forEach((r) => deleteMachinePmRecord(r.id, userName));
+                                } else {
+                                  const fallback = machinePmRecords.filter((r) => (r.machineCode === row.machineCode || r.machineName === row.machineName) && (r.pmDate || '').slice(0, 7) === row.period);
+                                  fallback.forEach((r) => deleteMachinePmRecord(r.id, userName));
+                                }
+                              }}
+                              className="btn-ghost !p-1.5 text-slate-500 hover:text-red-400"
+                              aria-label={`Delete PM for ${row.machineName} ${row.period}`}
+                              title="Delete this machine's PM for this month"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </td>
                         </tr>
                       ))}
