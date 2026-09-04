@@ -264,6 +264,8 @@ export default function PreventiveMaintenance() {
   const [deleting, setDeleting] = useState(null);
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
+  const [editingRegister, setEditingRegister] = useState(null);
+  const [deletingRegister, setDeletingRegister] = useState(null);
 
   // Register filters
   const [registerMonth, setRegisterMonth] = useState('');
@@ -663,26 +665,30 @@ export default function PreventiveMaintenance() {
                             </span>
                           </td>
                           <td className="text-right">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const count = row.pmCount || 1;
-                                const label = `${row.machineName || row.machineCode} • ${formatPeriodKey(row.period, true)} (${count} record${count!==1?'s':''})`;
-                                if (!window.confirm(`Delete ${label}?\nThis will remove ${count} PM record(s) for this machine and month. This cannot be undone.`)) return;
-                                const toDelete = machinePmRecords.filter((r) => r.machineId === row.machineId && (r.pmDate || '').slice(0, 7) === row.period);
-                                if (toDelete.length > 0) {
-                                  toDelete.forEach((r) => deleteMachinePmRecord(r.id, userName));
-                                } else {
-                                  const fallback = machinePmRecords.filter((r) => (r.machineCode === row.machineCode || r.machineName === row.machineName) && (r.pmDate || '').slice(0, 7) === row.period);
-                                  fallback.forEach((r) => deleteMachinePmRecord(r.id, userName));
-                                }
-                              }}
-                              className="btn-ghost !p-1.5 text-slate-500 hover:text-red-400"
-                              aria-label={`Delete PM for ${row.machineName} ${row.period}`}
-                              title="Delete this machine's PM for this month"
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingRegister(row);
+                                }}
+                                className="btn-ghost !p-1.5 text-slate-500 hover:text-cyan-400"
+                                aria-label={`Edit PM for ${row.machineName} ${row.period}`}
+                                title="Edit this machine's PM for this month"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingRegister(row);
+                                }}
+                                className="btn-ghost !p-1.5 text-slate-500 hover:text-red-400"
+                                aria-label={`Delete PM for ${row.machineName} ${row.period}`}
+                                title="Delete this machine's PM for this month"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -794,6 +800,97 @@ export default function PreventiveMaintenance() {
               <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
               <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
                 <Trash2 size={12} aria-hidden="true" /> {purgeLoading ? 'Purging...' : 'Purge All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingRegister && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setEditingRegister(null)} role="dialog" aria-modal="true" aria-label="Edit machine PM">
+          <div className="modal-content glass-card p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-card-title">Edit PM — {editingRegister.machineName || editingRegister.machineCode}</h3>
+              <button onClick={() => setEditingRegister(null)} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
+            </div>
+            <p className="text-meta mb-4">{formatPeriodKey(editingRegister.period, true)} • {editingRegister.plantSection} • {editingRegister.pmCount} record(s)</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Status</label>
+                <select
+                  value={editingRegister.status}
+                  onChange={(e) => setEditingRegister((prev) => ({ ...prev, status: e.target.value }))}
+                  className="select-field text-xs w-full"
+                >
+                  <option value="PENDING">Pending</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Task</label>
+                <input
+                  type="text"
+                  value={editingRegister.mainTask || ''}
+                  onChange={(e) => setEditingRegister((prev) => ({ ...prev, mainTask: e.target.value }))}
+                  className="input-field text-xs w-full"
+                  placeholder="Task description"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setEditingRegister(null)} className="btn-ghost text-xs">Cancel</button>
+              <button
+                onClick={() => {
+                  const newStatus = String(editingRegister.status || '').toLowerCase();
+                  const isCompleted = newStatus === 'completed';
+                  const toUpdate = machinePmRecords.filter((r) => r.machineId === editingRegister.machineId && (r.pmDate || '').slice(0, 7) === editingRegister.period);
+                  const list = toUpdate.length ? toUpdate : machinePmRecords.filter((r) => (r.machineCode === editingRegister.machineCode || r.machineName === editingRegister.machineName) && (r.pmDate || '').slice(0, 7) === editingRegister.period);
+                  list.forEach((r) => {
+                    const updatedTask = editingRegister.mainTask || r.task;
+                    deleteMachinePmRecord(r.id, userName);
+                    addMachinePmRecord({
+                      machineId: r.machineId,
+                      machineCode: r.machineCode,
+                      machineName: r.machineName,
+                      plantSection: r.plantSection,
+                      pmDate: r.pmDate,
+                      pmType: r.pmType,
+                      task: updatedTask,
+                      status: isCompleted ? 'completed' : 'pending',
+                      completed: isCompleted,
+                      action: r.action,
+                      technician: r.technician,
+                      remarks: r.remarks,
+                    }, userName);
+                  });
+                  setEditingRegister(null);
+                }}
+                className="btn-primary text-xs"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deletingRegister && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeletingRegister(null)} role="dialog" aria-modal="true" aria-label="Delete machine PM">
+          <div className="modal-content glass-card p-6 w-full max-w-sm">
+            <h3 className="text-card-title mb-2">Delete PM Records</h3>
+            <p className="text-body mb-5">
+              Delete <span className="text-white font-medium">{deletingRegister.machineName || deletingRegister.machineCode}</span> for <span className="text-white font-medium">{formatPeriodKey(deletingRegister.period, true)}</span> ({deletingRegister.pmCount} record(s))? This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeletingRegister(null)} className="btn-ghost text-xs">Cancel</button>
+              <button
+                onClick={() => {
+                  const toDelete = machinePmRecords.filter((r) => r.machineId === deletingRegister.machineId && (r.pmDate || '').slice(0, 7) === deletingRegister.period);
+                  const list = toDelete.length ? toDelete : machinePmRecords.filter((r) => (r.machineCode === deletingRegister.machineCode || r.machineName === deletingRegister.machineName) && (r.pmDate || '').slice(0, 7) === deletingRegister.period);
+                  list.forEach((r) => deleteMachinePmRecord(r.id, userName));
+                  setDeletingRegister(null);
+                }}
+                className="btn-danger text-xs inline-flex items-center gap-1.5"
+              >
+                <Trash2 size={12} /> Delete
               </button>
             </div>
           </div>
