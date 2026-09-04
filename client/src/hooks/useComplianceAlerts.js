@@ -22,8 +22,9 @@ function isIntervalVisible(daysLeft) {
 
 function isBellVisible(daysLeft) {
   if (daysLeft == null) return false;
-  // Bell shows every time if 45 or less (including expired)
-  return daysLeft <= 45;
+  // Bell shows every time if has expiry (to ensure badge never 0 when data exists)
+  // For universal visibility, show all with expiry; critical handling still via <7
+  return true;
 }
 
 export function useComplianceAlerts() {
@@ -62,7 +63,7 @@ export function useComplianceAlerts() {
                     ts: m.updated_at || m.created_at,
                   };
                 })
-                .filter((item) => item.daysUntilExpiry <= 45);
+                .filter((item) => item.daysUntilExpiry != null);
               if (!cancelled && activeAlerts.length > 0) {
                 setMachineAlerts(activeAlerts);
                 setDirectAmc(activeAlerts);
@@ -123,8 +124,7 @@ export function useComplianceAlerts() {
       raws = source.filter((r) => {
         const expiry = r.contractEndDate || r.expiryDate || r.expiry_date;
         if (!expiry) return false;
-        const days = Math.ceil((new Date(expiry).setHours(0,0,0,0) - today.getTime()) / 86400000);
-        return days <= 45;
+        return true;
       }).map((r) => {
         const expiry = r.contractEndDate || r.expiryDate;
         const days = daysUntilExpiry(expiry);
@@ -165,8 +165,7 @@ export function useComplianceAlerts() {
       raws = source.filter((c) => {
         const expiry = c.expiryDate || c.expiry_date;
         if (!expiry) return false;
-        const days = Math.ceil((new Date(expiry).setHours(0,0,0,0) - today.getTime()) / 86400000);
-        return days <= 45;
+        return true;
       }).map((c) => {
         const expiry = c.expiryDate || c.expiry_date;
         const days = daysUntilExpiry(expiry);

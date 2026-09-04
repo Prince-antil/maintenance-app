@@ -425,11 +425,11 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Subtle Top Bar Ribbon — Interval-based pop-up (60,30,15,7) but bell always shows if <=45 */}
+      {/* Subtle Top Bar Ribbon — always visible when any expiring data exists */}
       {(() => {
-        const visible = intervalAlerts || complianceAlerts;
+        const visible = complianceAlerts;
         if (!visible || visible.length === 0) return null;
-        const critical = visible.filter((a) => a.daysLeft != null && a.daysLeft < 7);
+        const critical = visible.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7);
         const isCritical = critical.length > 0;
         const certCount = visible.filter((a) => a.category === 'cert').length;
         const amcCount = visible.filter((a) => a.category === 'amc').length;
