@@ -2787,8 +2787,15 @@ export function importMachinePmRecordsBulk(rows, userName) {
       pmDate: row.pmDate || row.pm_date || row.date || new Date().toISOString().slice(0, 10),
       pmType: row.pmType || row.pm_type || 'Preventive',
       task: row.task || row.description || '',
-      status: row.status || 'completed',
-      completed: row.completed !== false && row.completed !== 'false' && row.status !== 'pending',
+      status: (row.status && String(row.status).trim()) ? String(row.status).toLowerCase() : 'pending',
+      completed: (() => {
+        if (row.completed === true || row.completed === 'true' || String(row.completed).toLowerCase() === 'true') return true;
+        if (row.completed === false || row.completed === 'false') return false;
+        const s = String(row.status || '').toLowerCase().trim();
+        if (s === 'pending' || s === 'overdue' || s === 'skipped') return false;
+        if (s === 'completed') return true;
+        return false;
+      })(),
       action: row.action || row.actionTaken || '',
       technician: row.technician || '',
       remarks: row.remarks || '',

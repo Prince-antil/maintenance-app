@@ -333,15 +333,34 @@ export default function PreventiveMaintenance() {
 
   const complianceTrend = useMemo(() => monthlyPMComplianceTrendFromRecords(machinePmRecords, 12), [machinePmRecords]);
 
-  // Default to current month
+  // Default to current month on initial load only — do not override All Months selection
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
+    if (hasInitializedRef.current) return;
     if (!registerMonth && availableMonths.length) {
       const currentM = availableMonths.find((m) => m.key === currentKey);
       const defaultMonth = currentM ? currentM.key : availableMonths[0].key;
       setRegisterMonth(defaultMonth);
       setKpiMonth(defaultMonth);
+      hasInitializedRef.current = true;
+    } else if (availableMonths.length) {
+      hasInitializedRef.current = true;
     }
   }, [availableMonths, registerMonth, currentKey]);
+
+  const handleMonthSelect = (monthKey, e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (monthKey === 'ALL' || monthKey === '' || monthKey == null) {
+      setRegisterMonth('');
+      setKpiMonth('');
+      setRegPage(1);
+      hasInitializedRef.current = true;
+    } else {
+      setRegisterMonth(monthKey);
+      setKpiMonth(monthKey);
+      setRegPage(1);
+    }
+  };
 
   // Filtered register rows — search across Machine Code, Name, Section, and Task
   const registerRows = useMemo(() => {
@@ -546,7 +565,7 @@ export default function PreventiveMaintenance() {
             <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
               {/* All Months tab */}
               <button
-                onClick={() => { setRegisterMonth(''); setKpiMonth(''); setRegPage(1); }}
+                onClick={(e) => handleMonthSelect('ALL', e)}
                 className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
                   !registerMonth
                     ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
@@ -561,7 +580,7 @@ export default function PreventiveMaintenance() {
               {availableMonths.map((m) => (
                 <button
                   key={m.key}
-                  onClick={() => { setRegisterMonth(m.key); setKpiMonth(m.key); setRegPage(1); }}
+                  onClick={(e) => handleMonthSelect(m.key, e)}
                   className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
                     registerMonth === m.key
                       ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
