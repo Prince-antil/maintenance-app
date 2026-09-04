@@ -15,43 +15,51 @@ export function useComplianceAlerts() {
   const [directAmc, setDirectAmc] = useState(null);
   const [directCerts, setDirectCerts] = useState(null);
 
-  // Direct Supabase fetch for amc_subscriptions / testing_certificates (spec) with realtime sync
+  // Direct Supabase fetch for AMC/testing certificates with fallback and no 404 console errors
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     let cancelled = false;
     const fetchDirect = async () => {
       try {
-        // Try spec table names first, fallback to existing store tables
-        const amcTables = ['amc_subscriptions', 'amc_logs', 'amc_records'];
-        for (const tbl of amcTables) {
+        // Fetch AMC from existing valid table only to avoid 404s (amc_subscriptions/amc_logs do not exist)
+        const fetchAmcAlerts = async () => {
           try {
-            const { data, error } = await supabase.from(tbl).select('*').limit(1);
-            if (!error && data) {
-              const { data: full } = await supabase.from(tbl).select('*');
-              if (!cancelled && full && full.length > 0) setDirectAmc(full);
-              else if (!cancelled) setDirectAmc(null);
-              break;
-            }
-          } catch {}
-        }
-        const certTables = ['testing_certificates', 'testing_certificates'];
-        for (const tbl of certTables) {
+            const { data, error } = await supabase.from('amc_records').select('*');
+            if (error) throw error;
+            if (!cancelled && data && data.length > 0) setDirectAmc(data);
+            else if (!cancelled) setDirectAmc(null);
+            return;
+          } catch (err) {
+            console.warn('Fallback to local/machines schema for AMC data:', err.message);
+            // Fallback: try machines table as per spec example (no 404)
+            try {
+              const { data: mData, error: mErr } = await supabase.from('machines').select('*').limit(5);
+              if (!mErr && mData) {
+                // No AMC data in machines, just use local store
+                if (!cancelled) setDirectAmc(null);
+              }
+            } catch {}
+            if (!cancelled) setDirectAmc(null);
+          }
+        };
+        const fetchCerts = async () => {
           try {
-            const { data, error } = await supabase.from(tbl).select('*').limit(1);
-            if (!error && data) {
-              const { data: full } = await supabase.from(tbl).select('*');
-              if (!cancelled && full && full.length > 0) setDirectCerts(full);
-              else if (!cancelled) setDirectCerts(null);
-              break;
-            }
-          } catch {}
-        }
+            const { data, error } = await supabase.from('testing_certificates').select('*');
+            if (error) throw error;
+            if (!cancelled && data && data.length > 0) setDirectCerts(data);
+            else if (!cancelled) setDirectCerts(null);
+          } catch (err) {
+            console.warn('Fallback to local store for Testing Certificates:', err.message);
+            if (!cancelled) setDirectCerts(null);
+          }
+        };
+        await Promise.all([fetchAmcAlerts(), fetchCerts()]);
       } catch {}
     };
     fetchDirect();
-    // Realtime subscription for amc and certs
+    // Realtime subscription only for existing tables to avoid 404s
     const channel = supabase.channel('compliance-alerts-hook');
-    ['amc_records', 'amc_subscriptions', 'amc_logs', 'testing_certificates'].forEach((tbl) => {
+    ['amc_records', 'testing_certificates'].forEach((tbl) => {
       try {
         channel.on('postgres_changes', { event: '*', schema: 'public', table: tbl }, () => fetchDirect());
       } catch {}
