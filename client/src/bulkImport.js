@@ -53,7 +53,7 @@ export const IMPORT_MODULES = {
   },
   energy: {
     id: 'energy',
-    label: 'Energy Logs',
+    label: 'Energy Logs (Legacy Aggregate)',
     shortLabel: 'Energy',
     templateFilename: 'Energy_Log_Template.xlsx',
     defaultCategory: 'Plantwise Energy Consumption',
@@ -62,8 +62,8 @@ export const IMPORT_MODULES = {
       {
         'Date': new Date().toISOString().slice(0, 10),
         'Plant Section': 'Utility Section',
-        'UHBVNL Unit 1 KWh (Col H)': 4200,
-        'UHBVNL Unit 2 KWh (Col U)': 1850,
+        'UHBVNL Unit 1 KWh': 4200,
+        'UHBVNL Unit 2 KWh': 1850,
         'DG 500kVA Run Hrs': 4.5,
         'DG 380kVA Run Hrs': 2,
         'Fuel Consumed (Ltrs)': 180,
@@ -78,6 +78,7 @@ export const IMPORT_MODULES = {
         'Cartap (kWh)': 270,
         'Compressors (kWh)': 95,
         'Water/STP (kWh)': 65,
+        'Remarks': '(Total KWh & SEC auto-calculated if blank)',
       },
     ],
   },
@@ -278,6 +279,8 @@ export const IMPORT_MODULES = {
         'U2 INV1 KWh': 180,
         'U2 INV2 KWh': 170,
         'U2 INV3 KWh': 160,
+        'Daily Total KWh': '',
+        'Remarks': '(Daily Total auto = sum of 7 inverters if blank; or enter total alone if inverter split unavailable)',
       },
     ],
   },
@@ -310,9 +313,9 @@ const FIELD_ALIASES = {
   energy: {
     date: ['date', 'logdate', 'readingdate'],
     plantSection: ['plantsection', 'section', 'department'],
-    // Dual UHBVNL grid feeders
-    uhbvnlUnit1Kwh: ['uhbvnlunit1kwh', 'unit1kwh', 'kwhi', 'kwh_i', 'columnh', 'gridunit1', 'uhbvnl1', 'unit1import', 'u1kwh'],
-    uhbvnlUnit2Kwh: ['uhbvnlunit2kwh', 'unit2kwh', 'kwhi10', 'kwh_i10', 'columnu', 'gridunit2', 'uhbvnl2', 'unit2import', 'u2kwh'],
+    // Dual UHBVNL grid feeders — includes legacy Col H/U suffix variants
+    uhbvnlUnit1Kwh: ['uhbvnlunit1kwh', 'uhbvnlunit1kwhcolh', 'uhbvnlunit1', 'unit1kwh', 'kwhi', 'kwh_i', 'columnh', 'gridunit1', 'uhbvnl1', 'unit1import', 'u1kwh', 'u1grid'],
+    uhbvnlUnit2Kwh: ['uhbvnlunit2kwh', 'uhbvnlunit2kwhcolu', 'uhbvnlunit2', 'unit2kwh', 'kwhi10', 'kwh_i10', 'columnu', 'gridunit2', 'uhbvnl2', 'unit2import', 'u2kwh', 'u2grid'],
     totalGridKwh:   ['totalgridkwh', 'gridkwh', 'totalgrid', 'gridtotal', 'totalimport'],
     // DG generators
     dg500RunHours: ['dg500kvarunhrs', 'dg500runhrs', 'dg500hours', 'dg500kvahours', 'dg500runhours'],
@@ -438,14 +441,14 @@ const FIELD_ALIASES = {
   },
   energyDailySolar: {
     date: ['date', 'readingdate', 'logdate'],
-    u1Inv1Kwh: ['u1inv1kwh', 'unit1inv1kwh', 'u1inv1'],
-    u1Inv2Kwh: ['u1inv2kwh', 'unit1inv2kwh', 'u1inv2'],
-    u1Inv3Kwh: ['u1inv3kwh', 'unit1inv3kwh', 'u1inv3'],
-    u1Inv4Kwh: ['u1inv4kwh', 'unit1inv4kwh', 'u1inv4'],
-    u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1'],
-    u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2'],
-    u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3'],
-    dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum'],
+    u1Inv1Kwh: ['u1inv1kwh', 'unit1inv1kwh', 'u1inv1', 'u1 inverter 1', 'inv1', 'inverter1'],
+    u1Inv2Kwh: ['u1inv2kwh', 'unit1inv2kwh', 'u1inv2', 'u1 inverter 2', 'inv2'],
+    u1Inv3Kwh: ['u1inv3kwh', 'unit1inv3kwh', 'u1inv3', 'u1 inverter 3', 'inv3'],
+    u1Inv4Kwh: ['u1inv4kwh', 'unit1inv4kwh', 'u1inv4', 'u1 inverter 4', 'inv4'],
+    u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1', 'u2 inverter 1'],
+    u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2', 'u2 inverter 2'],
+    u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3', 'u2 inverter 3'],
+    dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum', 'daily total kwh', 'grandtotal', 'grand total', 'daily solar', 'solar generation', 'solartotal', 'generationkwh', 'solarkwh'],
   },
 };
 
@@ -932,24 +935,39 @@ export function inferUploadMeta(moduleId, parsedRows) {
 /**
  * Canonical sheet name aliases for each module in a master workbook.
  * Matching is case-insensitive and strips non-alphanumeric chars.
+ * Each key maps to all known sheet/tab label variants for that module.
  */
 const MASTER_SHEET_ALIASES = {
-  pm: ['pmdata', 'preventivemaintenance', 'pm', 'pmreport', 'pmsummary', 'preventive'],
-  breakdowns: ['breakdowndata', 'breakdowns', 'breakdownreport', 'breakdownsummary', 'breakdown'],
-  energy: ['energydata', 'energylogs', 'energy', 'energyreport', 'energylog'],
+  pm: ['pmdata', 'preventivemaintenance', 'pm', 'pmreport', 'pmsummary', 'preventive', 'pmlogs', 'pmmaster'],
+  breakdowns: ['breakdowndata', 'breakdowns', 'breakdownreport', 'breakdownsummary', 'breakdown', 'bdlogs', 'breakdownlogs'],
+  machineBreakdownLogs: ['machinebreakdownlogs', 'breakdownlogs', 'bdlogs', 'machinebd', 'permachinebreakdown', 'machinebreakdown'],
+  machines: ['machines', 'machinesdata', 'equipment', 'equipmentmaster', 'machineregister', 'assetregister', 'machinemaster'],
+  machinePmRecords: ['machinepmrecords', 'pmrecords', 'permachinepm', 'machinepm', 'pmregister', 'machinewise'],
+  energy: ['energydata', 'energylogs', 'energy', 'energyreport', 'energylog', 'plantenergy', 'energylegacy'],
+  energyDailyUtility: ['dailyutility', 'dailyutilitylog', 'utilitydata', 'utilitylog', 'dailyutilityreadings', 'utility', 'dailyutilitydata'],
+  energyMonthlyHerbicide: ['herbicide', 'monthlyherbicide', 'herbicidedata', 'herbicidesection', 'herbi'],
+  energyMonthlyInsecticide: ['insecticide', 'monthlyinsecticide', 'insecticidedata', 'insecticidesection', 'insec'],
+  energyMonthlyWater: ['water', 'monthlywater', 'waterdata', 'waterstp', 'stp', 'waterstpsheet'],
+  energyMonthlyAirCompressor: ['aircompressor', 'monthlyaircompressor', 'aircompressordata', 'compressor', 'aircompsheet', 'air'],
+  energyDailySolar: ['dailysolar', 'dailysolargeneration', 'solardata', 'solargeneration', 'solarinverter', 'solarlog', 'solar'],
 };
 
 /**
  * Detect which module a sheet name maps to.
+ * Tolerant: exact alias match OR header substring match (covers "PM_Data", "Energy - Daily Utility" etc.)
  * @param {string} sheetName
- * @returns {'pm'|'breakdowns'|'energy'|null}
+ * @returns {string|null}
  */
 function detectSheetModule(sheetName) {
   const key = toKey(sheetName);
   for (const [moduleId, aliases] of Object.entries(MASTER_SHEET_ALIASES)) {
     if (aliases.includes(key)) return moduleId;
+    // Fuzzy: if sheet key contains alias or alias contains key (min 3 chars)
+    if (key.length >= 3 && aliases.some(a => key.includes(a) || a.includes(key))) return moduleId;
   }
-  return null;
+  // Final fallback: try to match IMPORT_MODULES shortLabel/id directly
+  const direct = MODULE_ORDER.find(m => toKey(m) === key || toKey(IMPORT_MODULES[m]?.shortLabel || '') === key);
+  return direct || null;
 }
 
 /**
@@ -990,46 +1008,24 @@ function parseSheet(workbook, sheetName, moduleId) {
 
 /**
  * Parse a master multi-sheet workbook.
- *
- * Accepts a .xlsx file whose sheets are named (case-insensitive):
- *   - PM_Data / Preventive Maintenance / PM
- *   - Breakdown_Data / Breakdowns
- *   - Energy_Data / Energy Logs / Energy
- *
- * Returns a result object per module plus aggregate totals.
- *
- * @param {File} file
- * @returns {Promise<MasterImportResult>}
- *
- * @typedef {{ parsedRows: object[], errors: string[], counts: object }} SheetResult
- * @typedef {{ pm: SheetResult, breakdowns: SheetResult, energy: SheetResult, sheetMap: object, totalValid: number, totalErrors: string[], hasData: boolean }} MasterImportResult
+ * Supports all 12 modules — each sheet is auto-detected via MASTER_SHEET_ALIASES.
+ * Returns a result object per detected module plus aggregate totals.
  */
 export async function parseMasterImportFile(file) {
   const workbook = await readWorkbook(file);
   const sheetNames = workbook.SheetNames;
-
-  // Map each sheet name to a module
-  const sheetMap = {}; // moduleId -> sheetName
+  const sheetMap = {};
   sheetNames.forEach((name) => {
     const moduleId = detectSheetModule(name);
-    if (moduleId && !sheetMap[moduleId]) {
-      sheetMap[moduleId] = name;
-    }
+    if (moduleId && !sheetMap[moduleId]) sheetMap[moduleId] = name;
   });
-
   const results = {};
   const totalErrors = [];
   let totalValid = 0;
-
-  for (const moduleId of ['pm', 'breakdowns', 'energy']) {
+  for (const moduleId of MODULE_ORDER) {
     const sheetName = sheetMap[moduleId];
     if (!sheetName) {
-      results[moduleId] = {
-        parsedRows: [],
-        errors: [],
-        counts: { total: 0, valid: 0, invalid: 0 },
-        sheetName: null,
-      };
+      results[moduleId] = { parsedRows: [], errors: [], counts: { total: 0, valid: 0, invalid: 0 }, sheetName: null };
       continue;
     }
     const result = parseSheet(workbook, sheetName, moduleId);
@@ -1037,74 +1033,54 @@ export async function parseMasterImportFile(file) {
     totalErrors.push(...result.errors);
     totalValid += result.counts.valid;
   }
-
-  return {
-    pm: results.pm,
-    breakdowns: results.breakdowns,
-    energy: results.energy,
-    sheetMap,
-    sheetNames,
-    totalValid,
-    totalErrors,
-    hasData: totalValid > 0,
-  };
+  // Provide legacy aliases for backward-compat consumers (pm/breakdowns/energy)
+  return { ...results, sheetMap, sheetNames, totalValid, totalErrors, hasData: totalValid > 0 };
 }
 
 /**
- * Generate and download a master template workbook with all three sheets pre-populated.
+ * Generate and download a master template workbook with ALL sheets pre-populated.
+ * Uses canonical IMPORT_MODULES sampleRows so templates stay in sync with import logic.
+ * Sheet names are human-readable and auto-detected on import via aliases.
  */
 export function downloadMasterTemplate() {
   const workbook = XLSX.utils.book_new();
-
-  const pmSample = [
-    {
-      'Reporting Period': new Date().toISOString().slice(0, 7),
-      'Plant Section': 'Herbi EC Packaging',
-      'Planned PM Count': 24,
-      'Done PM Count': 21,
-      'Pending PM Count': 3,
-      'Compliance %': 87.5,
-      Remarks: '',
-    },
+  const sheetNameMap = {
+    pm: 'PM_Monthly_Summary',
+    breakdowns: 'Breakdown_Monthly_Summary',
+    machineBreakdownLogs: 'Machine_Breakdown_Logs',
+    machines: 'Machine_Register',
+    machinePmRecords: 'Machine_PM_Records',
+    energy: 'Energy_Log_Legacy',
+    energyDailyUtility: 'Energy_Daily_Utility',
+    energyMonthlyHerbicide: 'Energy_Herbicide',
+    energyMonthlyInsecticide: 'Energy_Insecticide',
+    energyMonthlyWater: 'Energy_Water_STP',
+    energyMonthlyAirCompressor: 'Energy_Air_Compressor',
+    energyDailySolar: 'Energy_Daily_Solar',
+  };
+  MODULE_ORDER.forEach((moduleId) => {
+    const def = IMPORT_MODULES[moduleId];
+    if (!def) return;
+    const sheetName = sheetNameMap[moduleId] || def.shortLabel;
+    const safeName = sheetName.slice(0, 31);
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(def.sampleRows), safeName);
+  });
+  // Add a README sheet explaining every template
+  const readme = [
+    { Sheet: 'PM_Monthly_Summary', Purpose: 'Monthly PM compliance per Plant Section', Required: 'Plant Section, Reporting Period, Planned PM Count', Notes: 'Compliance% & duration auto-calculated' },
+    { Sheet: 'Breakdown_Monthly_Summary', Purpose: 'Monthly breakdown stats per Section', Required: 'Plant Section, Reporting Period, Breakdown Count', Notes: 'MTTR/MTBF auto if blank' },
+    { Sheet: 'Machine_Breakdown_Logs', Purpose: 'Per-machine breakdown incidents', Required: 'Machine Name + Start Time', Notes: 'Downtime auto from Start/End' },
+    { Sheet: 'Machine_Register', Purpose: 'Machine asset master', Required: 'Machine Name', Notes: 'Machine Code auto if blank' },
+    { Sheet: 'Machine_PM_Records', Purpose: 'Per-machine PM history', Required: 'Machine Name', Notes: 'Status defaults to pending' },
+    { Sheet: 'Energy_Log_Legacy', Purpose: 'Legacy aggregate energy (dual grid+DG+SEC)', Required: 'Date', Notes: 'Total KWh/SEC auto if blank' },
+    { Sheet: 'Energy_Daily_Utility', Purpose: 'Daily grid/DG/HSD/DEF + PF readings', Required: 'Date', Notes: 'PF auto if kVAh missing' },
+    { Sheet: 'Energy_Herbicide', Purpose: 'Monthly Herbicide sub-meters (5 meters)', Required: 'Month (YYYY-MM)', Notes: 'Delta calculated vs prior month' },
+    { Sheet: 'Energy_Insecticide', Purpose: 'Monthly Insecticide (12 feeders)', Required: 'Month (YYYY-MM)', Notes: 'Delta vs prior month' },
+    { Sheet: 'Energy_Water_STP', Purpose: 'Monthly Water/STP/RO/PIAU (4 meters)', Required: 'Month (YYYY-MM)', Notes: 'Delta vs prior month' },
+    { Sheet: 'Energy_Air_Compressor', Purpose: 'Monthly Air Compressor run/load hrs', Required: 'Month (YYYY-MM)', Notes: 'Unload & Load% auto' },
+    { Sheet: 'Energy_Daily_Solar', Purpose: 'Daily solar inverter generation (7 inverters)', Required: 'Date', Notes: 'Daily Total = sum of 7 if blank; or enter total alone' },
+    { Sheet: 'README', Purpose: 'This index', Required: '-', Notes: 'Keep headers exactly as in row 1 — aliases handle variants' },
   ];
-  const bdSample = [
-    {
-      'Reporting Period': new Date().toISOString().slice(0, 7),
-      'Plant Section': 'EC INSEC Packaging',
-      'Breakdown Count': 8,
-      'Downtime Hours': 26.5,
-      'Operating Hours': 35280,
-      'MTTR': '',
-      'MTBF': '',
-      'Remarks': '(MTTR and MTBF are auto-calculated if left blank)',
-    },
-  ];
-  const energySample = [
-    {
-      'Date': new Date().toISOString().slice(0, 10),
-      'Plant Section': 'Utility Section',
-      'UHBVNL Unit 1 KWh (Col H)': 4200,
-      'UHBVNL Unit 2 KWh (Col U)': 1850,
-      'DG 500kVA Run Hrs': 4.5,
-      'DG 380kVA Run Hrs': 2,
-      'Fuel Consumed (Ltrs)': 180,
-      'Solar Generation (kWh)': 620,
-      'DG KWh': 0,
-      'Total KWh': '',
-      'Production MT': 120,
-      'Plant SEC (kWh/MT)': '',
-      'Glyphosate (kWh)': 310,
-      'ACM (kWh)': 820,
-      'Jet-mill (kWh)': 540,
-      'Cartap (kWh)': 270,
-      'Compressors (kWh)': 95,
-      'Water/STP (kWh)': 65,
-      'Remarks': '(Total KWh & SEC auto-calculated if blank)',
-    },
-  ];
-
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pmSample), 'PM_Data');
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(bdSample), 'Breakdown_Data');
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(energySample), 'Energy_Data');
-  XLSX.writeFile(workbook, 'Master_Import_Template.xlsx');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(readme), 'README');
+  XLSX.writeFile(workbook, 'CCPL_Master_Import_Template.xlsx');
 }

@@ -465,17 +465,29 @@ function monthlyAirCompressorToCloudRow(record) {
 
 // ── Daily Solar Generation normalizer ────────────────────────────────────
 function normalizeDailySolarGeneration(fields) {
+  const u1Inv1Kwh = toNumber(fields.u1Inv1Kwh);
+  const u1Inv2Kwh = toNumber(fields.u1Inv2Kwh);
+  const u1Inv3Kwh = toNumber(fields.u1Inv3Kwh);
+  const u1Inv4Kwh = toNumber(fields.u1Inv4Kwh);
+  const u2Inv1Kwh = toNumber(fields.u2Inv1Kwh);
+  const u2Inv2Kwh = toNumber(fields.u2Inv2Kwh);
+  const u2Inv3Kwh = toNumber(fields.u2Inv3Kwh);
+  const invTotal = round1(u1Inv1Kwh + u1Inv2Kwh + u1Inv3Kwh + u1Inv4Kwh + u2Inv1Kwh + u2Inv2Kwh + u2Inv3Kwh);
+  // Prefer inverter sum; fall back to explicit daily total (handles single-column uploads)
+  const rawDirect = fields.dailyTotalKwh ?? fields.daily_total_kwh ?? fields.grandTotal ?? fields.grand_total ?? 0;
+  const directTotal = toNumber(rawDirect);
+  const dailyTotalKwh = invTotal > 0 ? invTotal : directTotal;
   return {
     id: fields.id || uid('dsg'),
     date: fields.date || new Date().toISOString().slice(0, 10),
-    u1Inv1Kwh: toNumber(fields.u1Inv1Kwh),
-    u1Inv2Kwh: toNumber(fields.u1Inv2Kwh),
-    u1Inv3Kwh: toNumber(fields.u1Inv3Kwh),
-    u1Inv4Kwh: toNumber(fields.u1Inv4Kwh),
-    u2Inv1Kwh: toNumber(fields.u2Inv1Kwh),
-    u2Inv2Kwh: toNumber(fields.u2Inv2Kwh),
-    u2Inv3Kwh: toNumber(fields.u2Inv3Kwh),
-    dailyTotalKwh: toNumber(fields.dailyTotalKwh),
+    u1Inv1Kwh,
+    u1Inv2Kwh,
+    u1Inv3Kwh,
+    u1Inv4Kwh,
+    u2Inv1Kwh,
+    u2Inv2Kwh,
+    u2Inv3Kwh,
+    dailyTotalKwh,
     createdAt: fields.createdAt || now(),
     updatedAt: fields.updatedAt || now(),
   };
@@ -3652,40 +3664,61 @@ export async function syncMachineRecordNow(machineId) {
 }
 
 // ---------------------------------------------------------------------------
-// Master Excel bulk import — runs PM, Breakdown, and Energy imports in one
-// call from the result of parseMasterImportFile(). Every upsert goes through
-// the standard commitAndQueue path so changes reach Supabase Realtime and
-// every connected client PC immediately.
+// Master Excel bulk import — runs ALL 12 modules in one call from
+// parseMasterImportFile(). Every upsert goes through commitAndQueue so changes
+// reach Supabase Realtime and every connected PC immediately.
 // ---------------------------------------------------------------------------
+const MASTER_IMPORTERS = {
+  pm: importPMBulk,
+  breakdowns: importBreakdownsBulk,
+  machineBreakdownLogs: importMachineBreakdownLogsBulk,
+  machines: importMachinesBulk,
+  machinePmRecords: importMachinePmRecordsBulk,
+  energy: importEnergyBulk,
+  energyDailyUtility: importDailyUtilityLogBulk,
+  energyMonthlyHerbicide: importMonthlyHerbicideBulk,
+  energyMonthlyInsecticide: importMonthlyInsecticideBulk,
+  energyMonthlyWater: importMonthlyWaterBulk,
+  energyMonthlyAirCompressor: importMonthlyAirCompressorBulk,
+  energyDailySolar: importDailySolarGenerationBulk,
+};
 
 /**
  * @param {import('./bulkImport.js').MasterImportResult} masterResult
  * @param {string} userName
- * @returns {{ pm: object, breakdowns: object, energy: object, total: number }}
+ * @returns {{ total: number, [moduleId: string]: object }}
  */
 export function importMasterExcelBulk(masterResult, userName) {
-  const pmResult = masterResult?.pm?.parsedRows?.length
-    ? importPMBulk(masterResult.pm.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const bdResult = masterResult?.breakdowns?.parsedRows?.length
-    ? importBreakdownsBulk(masterResult.breakdowns.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const energyResult = masterResult?.energy?.parsedRows?.length
-    ? importEnergyBulk(masterResult.energy.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const total = pmResult.total + bdResult.total + energyResult.total;
-
+  const results = {};
+  let total = 0;
+  const labels = [];
+  for (const [moduleId, importer] of Object.entries(MASTER_IMPORTERS)) {
+    const parsed = masterResult?.[moduleId]?.parsedRows || [];
+    if (parsed.length && typeof importer === 'function') {
+      try {
+        const r = importer(parsed, userName);
+        results[moduleId] = r;
+        total += r.total || 0;
+        labels.push(`${moduleId} ${r.total}`);
+      } catch (e) {
+        results[moduleId] = { created: 0, total: 0, error: e.message };
+      }
+    } else {
+      results[moduleId] = { created: 0, updated: 0, total: 0 };
+    }
+  }
+  // Provide legacy aliases for callers still expecting pm/breakdowns/energy
+  results.pm = results.pm || { total: 0 };
+  results.breakdowns = results.breakdowns || { total: 0 };
+  results.energy = results.energy || { total: 0 };
+  results.total = total;
   logActivity(
     userName,
     'master Excel import',
-    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows — syncing to all connected PCs`,
+    `${labels.join(' · ') || '0 rows'} — ${total} rows — syncing to all connected PCs`,
     'upload'
   );
-
-  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total };
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -3705,42 +3738,44 @@ let masterSheetPollingTimer = null;
 
 /**
  * Pull data from the configured remote sheet endpoint and apply it to the
- * store, syncing all three entities to Supabase.
+ * store, syncing ALL 12 entities to Supabase.
+ * Endpoint shape: { pm:[], breakdowns:[], machineBreakdownLogs:[], machines:[], machinePmRecords:[], energy:[], energyDailyUtility:[], energyMonthlyHerbicide:[], energyMonthlyInsecticide:[], energyMonthlyWater:[], energyMonthlyAirCompressor:[], energyDailySolar:[] }
+ * Legacy keys pm/breakdowns/energy are still supported.
  *
- * @returns {Promise<{ pm: object, breakdowns: object, energy: object, total: number, endpoint: string }>}
+ * @returns {Promise<{ total: number, endpoint: string, [k:string]: object }>}
  */
 export async function syncFromMasterSheet() {
   const endpoint = state.settings?.masterSheetEndpoint;
   if (!endpoint) {
     throw new Error('No masterSheetEndpoint configured. Add it via Settings → Master Sheet Sync.');
   }
-
   const response = await fetch(endpoint, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`Master sheet fetch failed: ${response.status} ${response.statusText}`);
   }
-
   const json = await response.json();
   const userName = 'Master Sheet Sync';
-
-  const pmRows = Array.isArray(json.pm) ? json.pm : [];
-  const bdRows = Array.isArray(json.breakdowns) ? json.breakdowns : [];
-  const energyRows = Array.isArray(json.energy) ? json.energy : [];
-
-  const pmResult = pmRows.length ? importPMBulk(pmRows, userName) : { created: 0, updated: 0, total: 0 };
-  const bdResult = bdRows.length ? importBreakdownsBulk(bdRows, userName) : { created: 0, updated: 0, total: 0 };
-  const energyResult = energyRows.length ? importEnergyBulk(energyRows, userName) : { created: 0, updated: 0, total: 0 };
-
-  const total = pmResult.total + bdResult.total + energyResult.total;
-
-  logActivity(
-    userName,
-    'live sheet sync',
-    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows pulled from remote endpoint`,
-    'upload'
-  );
-
-  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total, endpoint };
+  const results = {};
+  let total = 0;
+  for (const [moduleId, importer] of Object.entries(MASTER_IMPORTERS)) {
+    const rows = Array.isArray(json[moduleId]) ? json[moduleId] : [];
+    if (rows.length && typeof importer === 'function') {
+      const r = importer(rows, userName);
+      results[moduleId] = r;
+      total += r.total || 0;
+    } else {
+      results[moduleId] = { created: 0, updated: 0, total: 0 };
+    }
+  }
+  // Provide legacy aliases
+  results.pm = results.pm || { total: 0 };
+  results.breakdowns = results.breakdowns || { total: 0 };
+  results.energy = results.energy || { total: 0 };
+  results.total = total;
+  results.endpoint = endpoint;
+  const active = Object.entries(results).filter(([k,v])=> MASTER_IMPORTERS[k] && v.total>0).map(([k,v])=>`${k} ${v.total}`).join(' · ');
+  logActivity(userName, 'live sheet sync', `${active || '0 rows'} pulled from remote endpoint`, 'upload');
+  return results;
 }
 
 /**

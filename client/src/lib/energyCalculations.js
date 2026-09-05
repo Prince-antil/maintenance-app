@@ -29,18 +29,22 @@ export function formatEnergyPrecise(value, decimals = 1) {
  * @returns {Object} { u1Total, u2Total, grandTotal, u1Inv1, u1Inv2, u1Inv3, u1Inv4, u2Inv1, u2Inv2, u2Inv3 }
  */
 export function getSolarDerived(row) {
-  const u1Inv1 = Number(row.u1Inv1Kwh || 0);
-  const u1Inv2 = Number(row.u1Inv2Kwh || 0);
-  const u1Inv3 = Number(row.u1Inv3Kwh || 0);
-  const u1Inv4 = Number(row.u1Inv4Kwh || 0);
-  const u2Inv1 = Number(row.u2Inv1Kwh || 0);
-  const u2Inv2 = Number(row.u2Inv2Kwh || 0);
-  const u2Inv3 = Number(row.u2Inv3Kwh || 0);
-
-  const u1Total = Number((u1Inv1 + u1Inv2 + u1Inv3 + u1Inv4).toFixed(2));
-  const u2Total = Number((u2Inv1 + u2Inv2 + u2Inv3).toFixed(2));
-  const grandTotal = Number((u1Total + u2Total).toFixed(2));
-
+  const u1Inv1 = Number(row.u1Inv1Kwh ?? row.u1_inv1_kwh ?? row.u1Inv1 ?? 0);
+  const u1Inv2 = Number(row.u1Inv2Kwh ?? row.u1_inv2_kwh ?? row.u1Inv2 ?? 0);
+  const u1Inv3 = Number(row.u1Inv3Kwh ?? row.u1_inv3_kwh ?? row.u1Inv3 ?? 0);
+  const u1Inv4 = Number(row.u1Inv4Kwh ?? row.u1_inv4_kwh ?? row.u1Inv4 ?? 0);
+  const u2Inv1 = Number(row.u2Inv1Kwh ?? row.u2_inv1_kwh ?? row.u2Inv1 ?? 0);
+  const u2Inv2 = Number(row.u2Inv2Kwh ?? row.u2_inv2_kwh ?? row.u2Inv2 ?? 0);
+  const u2Inv3 = Number(row.u2Inv3Kwh ?? row.u2_inv3_kwh ?? row.u2Inv3 ?? 0);
+  // Direct total fallback — handles single-column uploads (Daily Total / Grand Total) where inverter breakdown is absent
+  const directTotal = Number(row.dailyTotalKwh ?? row.daily_total_kwh ?? row.grandTotal ?? row.grand_total ?? row.daily_total ?? row.total_solar_kwh ?? row.solar_kwh ?? 0);
+  const u1TotalRaw = Number((u1Inv1 + u1Inv2 + u1Inv3 + u1Inv4).toFixed(2));
+  const u2TotalRaw = Number((u2Inv1 + u2Inv2 + u2Inv3).toFixed(2));
+  const invTotal = Number((u1TotalRaw + u2TotalRaw).toFixed(2));
+  const grandTotal = invTotal > 0 ? invTotal : Number((Number.isFinite(directTotal) ? directTotal : 0).toFixed(2));
+  // When only direct total exists, distribute 60/40 to U1/U2 for breakdown charts (mirrors engine)
+  const u1Total = u1TotalRaw > 0 ? u1TotalRaw : (invTotal === 0 && directTotal > 0 ? Number((directTotal * 0.6).toFixed(2)) : u1TotalRaw);
+  const u2Total = u2TotalRaw > 0 ? u2TotalRaw : (invTotal === 0 && directTotal > 0 ? Number((directTotal - u1Total).toFixed(2)) : u2TotalRaw);
   return {
     u1Inv1,
     u1Inv2,
@@ -87,17 +91,14 @@ export function computeSolarSummary(rows) {
     };
   }
 
-  // Ensure all rows have derived values
+  // Canonical: always derive via getSolarDerived (handles direct Total fallback); prefer stored totals only when derived would be 0
   const withDerived = rows.map(row => {
-    // If already has derived fields, use them; otherwise compute
-    const hasDerived = row.u1Total !== undefined || row.u1Total !== undefined;
-    const derived = hasDerived ? {
-      u1Total: Number(row.u1Total || 0),
-      u2Total: Number(row.u2Total || 0),
-      grandTotal: Number(row.grandTotal || row._sum || row.dailyTotalKwh || 0),
-    } : getSolarDerived(row);
-
-    return { ...row, ...derived };
+    const derived = getSolarDerived(row);
+    // If row already has explicit stored totals that non-zero, keep the max to avoid double-zero edge
+    const u1Total = derived.u1Total > 0 ? derived.u1Total : Number(row.u1Total || 0);
+    const u2Total = derived.u2Total > 0 ? derived.u2Total : Number(row.u2Total || 0);
+    const grandTotal = derived.grandTotal > 0 ? derived.grandTotal : Number(row.grandTotal || row._sum || row.dailyTotalKwh || 0);
+    return { ...row, u1Total, u2Total, grandTotal, ...derived, u1Total, u2Total, grandTotal };
   });
 
   // Sort by date descending for "latest"
@@ -137,10 +138,9 @@ export function getCurrentMonthSolarTotal(allRows) {
   if (!allRows || allRows.length === 0) return 0;
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  
   return allRows
     .filter(r => r.date?.slice(0, 7) === currentMonthKey)
-    .reduce((sum, r) => sum + Number(r.grandTotal || r._sum || r.dailyTotalKwh || getSolarDerived(r).grandTotal || 0), 0);
+    .reduce((sum, r) => sum + Number(getSolarDerived(r).grandTotal || r.grandTotal || r._sum || r.dailyTotalKwh || 0), 0);
 }
 
 /**

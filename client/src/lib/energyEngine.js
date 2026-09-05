@@ -204,16 +204,22 @@ export function processUtilityRow(row) {
 }
 
 export function processSolarRow(row) {
-  const u1_inv1 = Number(row.u1_inv1_kwh || row.u1_inv1 || 0);
-  const u1_inv2 = Number(row.u1_inv2_kwh || row.u1_inv2 || 0);
-  const u1_inv3 = Number(row.u1_inv3_kwh || row.u1_inv3 || 0);
-  const u1_inv4 = Number(row.u1_inv4_kwh || row.u1_inv4 || 0);
-  const u2_inv1 = Number(row.u2_inv1_kwh || row.u2_inv1 || 0);
-  const u2_inv2 = Number(row.u2_inv2_kwh || row.u2_inv2 || 0);
-  const u2_inv3 = Number(row.u2_inv3_kwh || row.u2_inv3 || 0);
+  const u1_inv1 = Number(row.u1_inv1_kwh ?? row.u1_inv1 ?? row.u1Inv1Kwh ?? 0);
+  const u1_inv2 = Number(row.u1_inv2_kwh ?? row.u1_inv2 ?? row.u1Inv2Kwh ?? 0);
+  const u1_inv3 = Number(row.u1_inv3_kwh ?? row.u1_inv3 ?? row.u1Inv3Kwh ?? 0);
+  const u1_inv4 = Number(row.u1_inv4_kwh ?? row.u1_inv4 ?? row.u1Inv4Kwh ?? 0);
+  const u2_inv1 = Number(row.u2_inv1_kwh ?? row.u2_inv1 ?? row.u2Inv1Kwh ?? 0);
+  const u2_inv2 = Number(row.u2_inv2_kwh ?? row.u2_inv2 ?? row.u2Inv2Kwh ?? 0);
+  const u2_inv3 = Number(row.u2_inv3_kwh ?? row.u2_inv3 ?? row.u2Inv3Kwh ?? 0);
+  const directTotal = Number(row.daily_total_kwh ?? row.dailyTotalKwh ?? row.grand_total ?? row.total_solar_kwh ?? row.solar_kwh ?? 0);
   const u1_total = Number((u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4).toFixed(2));
   const u2_total = Number((u2_inv1 + u2_inv2 + u2_inv3).toFixed(2));
-  const grand_total = Number((u1_total + u2_total).toFixed(2));
+  const invTotal = Number((u1_total + u2_total).toFixed(2));
+  // If inverter breakdown sums to 0 but a direct daily total is provided (e.g., single-column upload), use direct
+  const grand_total = invTotal > 0 ? invTotal : Number((Number.isFinite(directTotal) ? directTotal : 0).toFixed(2));
+  // Distribute direct total to u1/u2 if needed for downstream display when inv breakdown missing
+  const finalU1 = u1_total > 0 ? u1_total : (invTotal === 0 && directTotal > 0 ? Number((directTotal * 0.6).toFixed(2)) : u1_total);
+  const finalU2 = u2_total > 0 ? u2_total : (invTotal === 0 && directTotal > 0 ? Number((directTotal - finalU1).toFixed(2)) : u2_total);
   return {
     ...row,
     u1_inv1_kwh: u1_inv1,
@@ -223,8 +229,8 @@ export function processSolarRow(row) {
     u2_inv1_kwh: u2_inv1,
     u2_inv2_kwh: u2_inv2,
     u2_inv3_kwh: u2_inv3,
-    u1_total,
-    u2_total,
+    u1_total: finalU1,
+    u2_total: finalU2,
     grand_total,
     daily_total_kwh: grand_total
   };
