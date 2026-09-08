@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   X, Upload, Download, FileSpreadsheet, CheckCircle2, AlertCircle,
-  ClipboardCheck, AlertOctagon, Zap, RefreshCw, Link, ChevronDown, ChevronRight,
+  ClipboardCheck, AlertOctagon, Zap, RefreshCw, Link, ChevronDown, ChevronRight, BarChart3,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
@@ -9,7 +9,7 @@ import { parseMasterImportFile, downloadMasterTemplate } from '../bulkImport.js'
 import { importMasterExcelBulk, syncFromMasterSheet, useStore, updateSettings } from '../store.js';
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
-const MASTER_ORDER = ['pm','breakdowns','machineBreakdownLogs','machines','machinePmRecords','energy','energyDailyUtility','energyMonthlyHerbicide','energyMonthlyInsecticide','energyMonthlyWater','energyMonthlyAirCompressor','energyDailySolar'];
+const MASTER_ORDER = ['pm','breakdowns','machineBreakdownLogs','machines','machinePmRecords','energy','energyDailyUtility','energyMonthlyHerbicide','energyMonthlyInsecticide','energyMonthlyWater','energyMonthlyAirCompressor','energyDailySolar','kpi'];
 const MODULE_META = {
   pm:                         { label: 'PM Monthly Summary',      icon: ClipboardCheck, color: 'text-cyan-400',   bg: 'bg-cyan-400/10',   border: 'border-cyan-400/25' },
   breakdowns:                 { label: 'Breakdown Summary',        icon: AlertOctagon,   color: 'text-red-400',    bg: 'bg-red-400/10',    border: 'border-red-400/25' },
@@ -23,6 +23,7 @@ const MODULE_META = {
   energyMonthlyWater:         { label: 'Water STP',                icon: Zap,            color: 'text-sky-400',    bg: 'bg-sky-400/10',    border: 'border-sky-400/25' },
   energyMonthlyAirCompressor: { label: 'Air Compressor',           icon: Zap,            color: 'text-amber-400',  bg: 'bg-amber-400/10',  border: 'border-amber-400/25' },
   energyDailySolar:           { label: 'Solar Inverter',           icon: Zap,            color: 'text-yellow-400', bg: 'bg-yellow-400/10', border: 'border-yellow-400/25' },
+  kpi:                        { label: 'KPI Status',               icon: BarChart3,      color: 'text-emerald-400',bg: 'bg-emerald-400/10',border: 'border-emerald-400/25' },
 };
 
 function ProgressBar({ value, label }) {
@@ -149,7 +150,7 @@ function LiveSyncPanel({ onClose }) {
       <p className="text-meta text-xs">
         Point to a Google Apps Script Web App (or any endpoint) that returns{' '}
         <code className="bg-white/[0.06] rounded px-1 py-0.5 text-[11px]">{'{ pm:[], breakdowns:[], machines:[], machineBreakdownLogs:[], machinePmRecords:[], energy:[], energyDailyUtility:[], energyMonthlyHerbicide:[], energyMonthlyInsecticide:[], energyMonthlyWater:[], energyMonthlyAirCompressor:[], energyDailySolar:[] }'}</code>.
-        Kiro fetches it and syncs all 12 entities to Supabase Realtime.
+        Kiro fetches it and syncs all 13 entities to Supabase Realtime.
       </p>
 
       <div>
@@ -258,7 +259,7 @@ export default function MasterImportModal({ onClose, onSuccess }) {
     if (!parseResult?.hasData) return;
     setImporting(true);
     setProgress(40);
-    setProgressLabel('Importing 12 modules…');
+    setProgressLabel('Importing 13 modules…');
     try {
       for (const step of [55,70,85]) { await new Promise((r)=>setTimeout(r,80)); setProgress(step); }
       const result = importMasterExcelBulk(parseResult, userName);
@@ -299,10 +300,10 @@ export default function MasterImportModal({ onClose, onSuccess }) {
           <div>
             <h2 className="text-card-title flex items-center gap-2">
               <FileSpreadsheet size={17} className="text-emerald-400" aria-hidden="true" />
-              Master Excel Import — All 12 Sections
+              Master Excel Import — All 13 Sections
             </h2>
             <p className="text-meta mt-1 text-xs">
-              Upload one workbook with <span className="text-white">PM, Breakdown, Machine, Energy (Utility/Herbicide/Insecticide/Water/Air/Solar)</span> sheets — all 12 sync
+              Upload one workbook with <span className="text-white">PM, Breakdown, Machine, Energy (Utility/Herbicide/Insecticide/Water/Air/Solar), KPI</span> sheets — all 13 sync
               to Supabase Realtime and update every connected PC instantly.
             </p>
           </div>
@@ -340,7 +341,7 @@ export default function MasterImportModal({ onClose, onSuccess }) {
               <div className="rounded-card border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs text-white font-semibold flex items-center gap-1.5"><FileSpreadsheet size={12} className="text-emerald-400"/> Master Template — All 12 Sheets</p>
+                    <p className="text-xs text-white font-semibold flex items-center gap-1.5"><FileSpreadsheet size={12} className="text-emerald-400"/> Master Template — All 13 Sheets</p>
                     <p className="text-xs text-slate-400 mt-0.5">Pre-structured with exact headers for every section — paste your data and upload.</p>
                   </div>
                   <button type="button" onClick={downloadMasterTemplate} className="btn-ghost text-xs inline-flex items-center gap-1.5 flex-shrink-0 ml-4 border border-emerald-500/25 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20">
@@ -355,7 +356,7 @@ export default function MasterImportModal({ onClose, onSuccess }) {
                   <button type="button" onClick={()=>{ const url=`${window.location.origin}/CCPL_Master_Import_Template.xlsx`; navigator.clipboard.writeText(url); const t=window.__pushToast||(()=>{}); }} className="btn-ghost text-[11px] px-2 py-1 whitespace-nowrap" onMouseDown={e=>{ const url=`${window.location.origin}/CCPL_Master_Import_Template.xlsx`; navigator.clipboard.writeText(url); }}>Copy Link</button>
                   <a href="/CCPL_Master_Import_Template.xlsx" download className="btn-ghost text-[11px] px-2 py-1 whitespace-nowrap border border-white/10">Open</a>
                 </div>
-                <p className="text-[11px] text-slate-500">Share this direct link with your team — works in any browser / WhatsApp / Email. File is hosted on this deployment and always contains all 12 sheets.</p>
+                <p className="text-[11px] text-slate-500">Share this direct link with your team — works in any browser / WhatsApp / Email. File is hosted on this deployment and always contains All 13 Sheets.</p>
               </div>
 
               {/* Drop zone */}
@@ -394,7 +395,7 @@ export default function MasterImportModal({ onClose, onSuccess }) {
                     <div className="flex flex-col items-center gap-2 text-slate-400">
                       <Upload size={24} aria-hidden="true" />
                       <p className="text-sm">Drag & drop or click to select</p>
-                      <p className="text-xs text-slate-500">Master workbook with 12 sheets: PM, Breakdown, Machine, Energy (Utility/Herbicide/Insecticide/Water/Air/Solar)</p>
+                       <p className="text-xs text-slate-500">Master workbook with 13 sheets: PM, Breakdown, Machine, Energy (Utility/Herbicide/Insecticide/Water/Air/Solar), KPI</p>
                     </div>
                   )}
                 </div>
@@ -413,11 +414,11 @@ export default function MasterImportModal({ onClose, onSuccess }) {
                 <ProgressBar value={progress} label={progressLabel || (parsing ? 'Parsing…' : 'Processing…')} />
               )}
 
-              {/* Per-sheet summaries — all 12 */}
+              {/* Per-sheet summaries — all 13 */}
               {parseResult && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-slate-300">Sheet Detection Results — 12 modules</p>
+                    <p className="text-xs font-semibold text-slate-300">Sheet Detection Results — 13 modules</p>
                     <div className="flex items-center gap-3 text-xs">
                       <span className="text-emerald-400">{parseResult.totalValid} total valid rows</span>
                       {totalErrors > 0 && <span className="text-red-400">{totalErrors} issues</span>}
@@ -434,7 +435,7 @@ export default function MasterImportModal({ onClose, onSuccess }) {
                 </div>
               )}
 
-              {/* Import result — all 12 */}
+              {/* Import result — all 13 */}
               {importResult && (
                 <div className="rounded-card border border-emerald-400/25 bg-emerald-400/5 px-4 py-3 space-y-1 max-h-56 overflow-y-auto">
                   <p className="text-emerald-400 text-xs font-semibold flex items-center gap-1.5">
@@ -471,3 +472,4 @@ export default function MasterImportModal({ onClose, onSuccess }) {
     </div>
   );
 }
+

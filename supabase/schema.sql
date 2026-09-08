@@ -341,98 +341,61 @@ create table if not exists public.energy_settings (
 insert into public.energy_settings (id) values ('default') on conflict (id) do nothing;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 16. TESTING CERTIFICATES — Statutory Safety Certificates per machine
+-- 16. KPI STATUS — Monthly KPI records per section/machine (auto from PM/Breakdown)
 -- ─────────────────────────────────────────────────────────────────────────────
-create table if not exists public.testing_certificates (
-    id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-    machine_id TEXT NOT NULL,
-    cert_type TEXT NOT NULL,
-    cert_number TEXT,
-    agency_name TEXT,
-    issue_date DATE,
-    expiry_date DATE NOT NULL,
-    frequency_months INTEGER DEFAULT 12,
-    document_url TEXT,
-    notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+create table if not exists public.kpi_records (
+  id                              text primary key,
+  period                          text not null, -- YYYY-MM
+  month                           integer not null check (month between 1 and 12),
+  year                            integer not null check (year >= 2000),
+  section                         text not null,
+  machine_id                      text not null default '',
+  machine_code                    text not null default '',
+  machine_name                    text not null default '',
+  pm_compliance_pct               numeric(5,1) not null default 0,
+  breakdown_count                 integer not null default 0,
+  breakdown_hours                 numeric(10,1) not null default 0,
+  mttr                            numeric(10,1) not null default 0,
+  mtbf                            numeric(10,1) not null default 0,
+  availability_pct                numeric(5,1) not null default 0,
+  kpi_status                      text not null default 'Good' check (kpi_status in ('Good','Warning','Critical')),
+  remarks                         text not null default '',
+  is_manual_pm_compliance         boolean not null default false,
+  is_manual_breakdown_count       boolean not null default false,
+  is_manual_breakdown_hours       boolean not null default false,
+  is_manual_mttr                  boolean not null default false,
+  is_manual_mtbf                  boolean not null default false,
+  is_manual_availability          boolean not null default false,
+  is_manual_kpi_status            boolean not null default false,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now()),
+  unique (period, section, machine_id)
 );
 
--- Compatibility columns for client store (TEXT ids, extended fields)
-alter table public.testing_certificates add column if not exists machine_code TEXT DEFAULT '';
-alter table public.testing_certificates add column if not exists machine_name TEXT DEFAULT '';
-alter table public.testing_certificates add column if not exists plant_section TEXT DEFAULT '';
-alter table public.testing_certificates add column if not exists certificate_type TEXT;
-alter table public.testing_certificates add column if not exists certificate_number TEXT;
-alter table public.testing_certificates add column if not exists frequency TEXT;
-alter table public.testing_certificates add column if not exists document JSONB;
-alter table public.testing_certificates add column if not exists document_name TEXT;
-alter table public.testing_certificates add column if not exists document_path TEXT;
-alter table public.testing_certificates add column if not exists remarks TEXT DEFAULT '';
+create index if not exists idx_kpi_records_period on public.kpi_records (year desc, month desc, section);
+create index if not exists idx_kpi_records_machine on public.kpi_records (machine_id);
+create index if not exists idx_kpi_records_section on public.kpi_records (section);
 
--- Backfill compatibility columns from spec columns where needed
--- (no data migration needed; columns default to empty)
-
--- Notification settings table (for safety alerts dispatch)
-create table if not exists public.notification_settings (
-  id          text primary key default 'default',
-  recipients  jsonb not null default '[]'::jsonb,
-  enabled     boolean not null default true,
-  amc_expiry_30d  boolean not null default true,
-  amc_expiry_15d  boolean not null default true,
-  amc_expiry_7d   boolean not null default true,
-  amc_expiry_today boolean not null default true,
-  amc_visit_overdue boolean not null default true,
-  pm_overdue    boolean not null default true,
-  breakdown_open_hours integer not null default 24,
-  reminder_days jsonb not null default '[30,15,7]'::jsonb,
-  created_at   timestamptz not null default timezone('utc', now()),
-  updated_at   timestamptz not null default timezone('utc', now())
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 17. KPI SETTINGS — Thresholds for Good/Warning/Critical status
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.kpi_settings (
+  id                              text primary key default 'default',
+  pm_compliance_good              numeric(5,1) not null default 90,
+  pm_compliance_warning           numeric(5,1) not null default 75,
+  availability_good               numeric(5,1) not null default 95,
+  availability_warning            numeric(5,1) not null default 85,
+  mttr_good                       numeric(10,1) not null default 2,
+  mttr_warning                    numeric(10,1) not null default 5,
+  mtbf_good                       numeric(10,1) not null default 200,
+  mtbf_warning                    numeric(10,1) not null default 100,
+  breakdown_count_good            integer not null default 2,
+  breakdown_count_warning         integer not null default 5,
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now())
 );
 
-alter table public.notification_settings enable row level security;
-drop policy if exists "public notification settings access" on public.notification_settings;
-create policy "public notification settings access" on public.notification_settings for all to anon, authenticated using (true) with check (true);
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'notification_settings'
-  ) then
-    alter publication supabase_realtime add table public.notification_settings;
-  end if;
-end
-$$;
-alter table public.notification_settings replica identity full;
-
--- Enable RLS & set public access policies (per spec)
-alter table public.testing_certificates enable row level security;
-drop policy if exists "Allow read access for authenticated users" on public.testing_certificates;
-create policy "Allow read access for authenticated users" on public.testing_certificates for select using (true);
-drop policy if exists "Allow insert/update/delete access" on public.testing_certificates for all using (true);
-create policy "Allow insert/update/delete access" on public.testing_certificates for all using (true);
-drop policy if exists "public testing certificates access" on public.testing_certificates;
-create policy "public testing certificates access" on public.testing_certificates for all to anon, authenticated using (true) with check (true);
-
--- Ensure notification_settings table supports safety alerts (per spec)
-alter table if exists public.notification_settings add column if not exists notif_safety_expiry BOOLEAN DEFAULT true;
-alter table if exists public.notification_settings add column if not exists notif_safety_expired BOOLEAN DEFAULT true;
--- Legacy safety columns for backwards compat (from previous migration)
-alter table if exists public.notification_settings add column if not exists safety_expiry_warning BOOLEAN DEFAULT true;
-alter table if exists public.notification_settings add column if not exists safety_expired BOOLEAN DEFAULT true;
-
--- Enable Supabase Realtime for testing_certificates (per spec)
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables
-      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'testing_certificates'
-  ) then
-    alter publication supabase_realtime add table public.testing_certificates;
-  end if;
-end
-$$;
-alter table public.testing_certificates replica identity full;
+insert into public.kpi_settings (id) values ('default') on conflict (id) do nothing;
 
 -- =============================================================================
 -- ROW LEVEL SECURITY — Enable RLS on all tables and create permissive policies
@@ -452,6 +415,8 @@ alter table public.monthly_water_stp        enable row level security;
 alter table public.monthly_air_compressor   enable row level security;
 alter table public.daily_solar_generation   enable row level security;
 alter table public.energy_settings          enable row level security;
+alter table public.kpi_records              enable row level security;
+alter table public.kpi_settings             enable row level security;
 
 drop policy if exists "public machines access"              on public.machines;
 drop policy if exists "public breakdown access"             on public.breakdown_logs;
@@ -468,6 +433,8 @@ drop policy if exists "public monthly water stp access"     on public.monthly_wa
 drop policy if exists "public monthly air compressor access" on public.monthly_air_compressor;
 drop policy if exists "public daily solar access"           on public.daily_solar_generation;
 drop policy if exists "public energy settings access"       on public.energy_settings;
+drop policy if exists "public kpi records access"           on public.kpi_records;
+drop policy if exists "public kpi settings access"          on public.kpi_settings;
 
 create policy "public machines access"
   on public.machines for all to anon, authenticated
@@ -527,6 +494,14 @@ create policy "public daily solar access"
 
 create policy "public energy settings access"
   on public.energy_settings for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public kpi records access"
+  on public.kpi_records for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public kpi settings access"
+  on public.kpi_settings for all to anon, authenticated
   using (true) with check (true);
 
 -- =============================================================================
@@ -638,6 +613,20 @@ begin
   ) then
     alter publication supabase_realtime add table public.energy_settings;
   end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kpi_records'
+  ) then
+    alter publication supabase_realtime add table public.kpi_records;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kpi_settings'
+  ) then
+    alter publication supabase_realtime add table public.kpi_settings;
+  end if;
 end
 $$;
 
@@ -660,6 +649,8 @@ alter table public.monthly_water_stp       replica identity full;
 alter table public.monthly_air_compressor  replica identity full;
 alter table public.daily_solar_generation  replica identity full;
 alter table public.energy_settings         replica identity full;
+alter table public.kpi_records             replica identity full;
+alter table public.kpi_settings            replica identity full;
 
 -- =============================================================================
 -- SUPABASE STORAGE — AMC documents bucket

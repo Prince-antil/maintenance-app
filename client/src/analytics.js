@@ -1587,3 +1587,112 @@ export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6, periodFilter = 
     };
   });
 }
+
+// ── KPI Status Analytics — Reuses existing PM/Breakdown calculations ─────────
+
+// Default thresholds (overridden by kpi_settings via Settings UI)
+export const DEFAULT_KPI_THRESHOLDS = {
+  pmComplianceGood: 90,
+  pmComplianceWarning: 75,
+  availabilityGood: 95,
+  availabilityWarning: 85,
+  mttrGood: 2,
+  mttrWarning: 5,
+  mtbfGood: 200,
+  mtbfWarning: 100,
+  breakdownCountGood: 2,
+  breakdownCountWarning: 5,
+};
+
+export function computeKpiStatus(record, thresholds = DEFAULT_KPI_THRESHOLDS) {
+  const t = { ...DEFAULT_KPI_THRESHOLDS, ...(thresholds || {}) };
+  const avail = Number(record.availabilityPct ?? record.availability_pct ?? 0);
+  const pm = Number(record.pmCompliancePct ?? record.pm_compliance_pct ?? 0);
+  const mttr = Number(record.mttr ?? 0);
+  const mtbf = Number(record.mtbf ?? 0);
+  const bc = Number(record.breakdownCount ?? record.breakdown_count ?? 0);
+  let status = 'Good';
+  if (avail < t.availabilityWarning) status = 'Critical';
+  else if (avail < t.availabilityGood) status = status==='Critical'?'Critical':'Warning';
+  if (pm < t.pmComplianceWarning) status = 'Critical';
+  else if (pm < t.pmComplianceGood && status!=='Critical') status = 'Warning';
+  if (mttr > t.mttrWarning) status = 'Critical';
+  else if (mttr > t.mttrGood && status!=='Critical') status = 'Warning';
+  if (mtbf !==0 && mtbf < t.mtbfWarning) status = 'Critical';
+  else if (mtbf !==0 && mtbf < t.mtbfGood && status!=='Critical') status = 'Warning';
+  if (bc > t.breakdownCountWarning) status = 'Critical';
+  else if (bc > t.breakdownCountGood && status!=='Critical') status = 'Warning';
+  return status;
+}
+
+export function kpiStatusMeta(status) {
+  const s = String(status||'Good').toLowerCase();
+  if (s==='critical') return { label: 'Critical', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', dot: 'bg-red-400' };
+  if (s==='warning') return { label: 'Warning', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', dot: 'bg-amber-400' };
+  return { label: 'Good', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', dot: 'bg-emerald-400' };
+}
+
+// Aggregate KPI records for summary cards
+export function aggregateKpiRecords(kpiRecords, period = null, section = null, machineId = null) {
+  const filtered = (kpiRecords||[]).filter((r)=>{
+    if (period && r.period!==period) return false;
+    if (section && r.section!==section) return false;
+    if (machineId && (r.machineId||'')!==machineId) return false;
+    return true;
+  });
+  const count = filtered.length;
+  const avgPmCompliance = count ? round1(filtered.reduce((s,r)=>s+Number(r.pmCompliancePct||0),0)/count) : 0;
+  const totalBreakdowns = filtered.reduce((s,r)=>s+Number(r.breakdownCount||0),0);
+  const totalHours = round1(filtered.reduce((s,r)=>s+Number(r.breakdownHours||0),0));
+  const avgMttr = count ? round1(filtered.reduce((s,r)=>s+Number(r.mttr||0),0)/count) : 0;
+  const avgMtbf = count ? round1(filtered.reduce((s,r)=>s+Number(r.mtbf||0),0)/count) : 0;
+  const avgAvailability = count ? round1(filtered.reduce((s,r)=>s+Number(r.availabilityPct||0),0)/count) : 0;
+  const byStatus = { Good:0, Warning:0, Critical:0 };
+  filtered.forEach((r)=>{ const s=r.kpiStatus||'Good'; if(byStatus[s]!=null) byStatus[s]++; else byStatus.Good++; });
+  return { count, avgPmCompliance, totalBreakdowns, totalHours, avgMttr, avgMtbf, avgAvailability, byStatus, rows: filtered };
+}
+
+// Trends for 6/12 months — reuses existing lastNMonths
+export function kpiTrends(kpiRecords, n=6, section=null, machineId=null) {
+  const months = lastNMonths(n);
+  return months.map((m)=>{
+    const rows = (kpiRecords||[]).filter((r)=>r.period===m.key && (!section || r.section===section) && (!machineId || (r.machineId||'')===machineId));
+    const count = rows.length;
+    const avg = (key) => count ? round1(rows.reduce((s,r)=>s+Number(r[key]||0),0)/count) : 0;
+    return {
+      key: m.key,
+      label: m.label,
+      pmCompliance: avg('pmCompliancePct'),
+      breakdownCount: rows.reduce((s,r)=>s+Number(r.breakdownCount||0),0),
+      breakdownHours: round1(rows.reduce((s,r)=>s+Number(r.breakdownHours||0),0)),
+      mttr: avg('mttr'),
+      mtbf: avg('mtbf'),
+      availability: avg('availabilityPct'),
+      count,
+    };
+  });
+}
+
+export function kpiSectionBreakdown(kpiRecords, period=null) {
+  const filtered = period ? (kpiRecords||[]).filter((r)=>r.period===period) : (kpiRecords||[]);
+  const bySection = {};
+  filtered.forEach((r)=>{
+    const sec = r.section || 'Unknown';
+    if(!bySection[sec]) bySection[sec] = { section: sec, count:0, pmSum:0, availSum:0, mttrSum:0, mtbfSum:0, bdCount:0 };
+    bySection[sec].count++;
+    bySection[sec].pmSum += Number(r.pmCompliancePct||0);
+    bySection[sec].availSum += Number(r.availabilityPct||0);
+    bySection[sec].mttrSum += Number(r.mttr||0);
+    bySection[sec].mtbfSum += Number(r.mtbf||0);
+    bySection[sec].bdCount += Number(r.breakdownCount||0);
+  });
+  return Object.values(bySection).map((s)=>({
+    section: s.section,
+    count: s.count,
+    avgPmCompliance: s.count? round1(s.pmSum/s.count):0,
+    avgAvailability: s.count? round1(s.availSum/s.count):0,
+    avgMttr: s.count? round1(s.mttrSum/s.count):0,
+    avgMtbf: s.count? round1(s.mtbfSum/s.count):0,
+    breakdownCount: s.bdCount,
+  })).sort((a,b)=>b.count-a.count);
+}

@@ -4,7 +4,7 @@ import { processUtilityRow, processSolarRow } from './lib/energyEngine.js';
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
 
-const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'energyDailyUtility', 'energyMonthlyHerbicide', 'energyMonthlyInsecticide', 'energyMonthlyWater', 'energyMonthlyAirCompressor', 'energyDailySolar', 'machines', 'machinePmRecords'];
+const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'energyDailyUtility', 'energyMonthlyHerbicide', 'energyMonthlyInsecticide', 'energyMonthlyWater', 'energyMonthlyAirCompressor', 'energyDailySolar', 'machines', 'machinePmRecords', 'kpi'];
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -284,6 +284,42 @@ export const IMPORT_MODULES = {
       },
     ],
   },
+  kpi: {
+    id: 'kpi',
+    label: 'KPI Status',
+    shortLabel: 'KPI',
+    templateFilename: 'KPI_Status_Template.xlsx',
+    defaultCategory: 'Plantwise Breakdown Report',
+    required: ['period', 'section'],
+    sampleRows: [
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'Plant/Section': 'Herbi EC Packaging',
+        'Machine/Equipment': '',
+        'PM Compliance %': 92.5,
+        'Breakdown Count': 3,
+        'Breakdown Hours': 12.5,
+        'MTTR': 4.2,
+        'MTBF': 235.8,
+        'Availability %': 98.2,
+        'KPI Status': 'Good',
+        'Remarks': 'Auto calculated; manual override allowed',
+      },
+      {
+        'Month': new Date().toISOString().slice(0, 7),
+        'Plant/Section': 'EC INSEC Packaging',
+        'Machine/Equipment': 'Filling Machine #1',
+        'PM Compliance %': 85,
+        'Breakdown Count': 5,
+        'Breakdown Hours': 22,
+        'MTTR': 4.4,
+        'MTBF': 139.6,
+        'Availability %': 96.9,
+        'KPI Status': 'Warning',
+        'Remarks': 'Per-machine KPI',
+      },
+    ],
+  },
 };
 
 const FIELD_ALIASES = {
@@ -449,6 +485,19 @@ const FIELD_ALIASES = {
     u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2', 'u2 inverter 2'],
     u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3', 'u2 inverter 3'],
     dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum', 'daily total kwh', 'grandtotal', 'grand total', 'daily solar', 'solar generation', 'solartotal', 'generationkwh', 'solarkwh'],
+  },
+  kpi: {
+    period: ['month', 'period', 'reportingperiod', 'monthyear', 'kpiperiod', 'kpimonth'],
+    section: ['plantsection', 'section', 'plant', 'department', 'plant/section', 'plantsection', 'area'],
+    machine: ['machine', 'machine/equipment', 'machineequipment', 'equipment', 'machinename', 'machinecode', 'equipmentname', 'asset'],
+    pmCompliancePct: ['pmcompliance', 'pmcompliancepct', 'compliance', 'pmcompliance%', 'compliancepct', 'pm%', 'compliancepercent'],
+    breakdownCount: ['breakdowncount', 'totalbreakdowns', 'breakdowns', 'bdcount', 'numberofbreakdowns'],
+    breakdownHours: ['breakdownhours', 'downtimehours', 'breakdownhours', 'totalbreakdownhours', 'downtime', 'bdhours'],
+    mttr: ['mttr', 'meantimetorepair', 'mttrhrs'],
+    mtbf: ['mtbf', 'meantimebetweenfailures', 'mtbfhrs'],
+    availabilityPct: ['availability', 'availabilitypct', 'availability%', 'avail', 'availpct', 'uptime'],
+    kpiStatus: ['kpistatus', 'status', 'kpi', 'overallstatus'],
+    remarks: ['remarks', 'notes', 'comment', 'comments', 'observation'],
   },
 };
 
@@ -839,6 +888,54 @@ function parseModuleRow(moduleId, row, mapping, index) {
     return processSolarRow(rawRow);
   }
 
+  if (moduleId === 'kpi') {
+    const rawPeriod = String(getCell(row, mapping, 'period') || '').trim();
+    const period = /^\d{4}-\d{2}$/.test(rawPeriod) ? rawPeriod : parsePeriodValue(rawPeriod, '', '');
+    if (!period) return { error: `Row ${index}: Month (YYYY-MM) is required.` };
+    const section = String(getCell(row, mapping, 'section') || '').trim();
+    if (!section) return { error: `Row ${index}: Plant/Section is required.` };
+    const machineRaw = String(getCell(row, mapping, 'machine') || '').trim();
+    const pmCompliancePct = parseNumber(getCell(row, mapping, 'pmCompliancePct'));
+    const breakdownCount = parseNumber(getCell(row, mapping, 'breakdownCount'));
+    const breakdownHours = parseNumber(getCell(row, mapping, 'breakdownHours'));
+    let mttr = parseNumber(getCell(row, mapping, 'mttr'));
+    if (!mttr && breakdownCount > 0) mttr = Math.round((breakdownHours / breakdownCount) * 10) / 10;
+    let mtbf = parseNumber(getCell(row, mapping, 'mtbf'));
+    // mtbf will be recomputed via store auto logic if 0 and not manual
+    const availabilityPct = parseNumber(getCell(row, mapping, 'availabilityPct'));
+    let kpiStatus = String(getCell(row, mapping, 'kpiStatus') || '').trim();
+    if (kpiStatus && !['Good','Warning','Critical'].includes(kpiStatus)) {
+      const lk = kpiStatus.toLowerCase();
+      if (lk.startsWith('good')) kpiStatus='Good';
+      else if (lk.startsWith('warn')) kpiStatus='Warning';
+      else if (lk.startsWith('crit')) kpiStatus='Critical';
+      else kpiStatus='Good';
+    }
+    const remarks = String(getCell(row, mapping, 'remarks') || '').trim();
+    return {
+      period,
+      section,
+      machineId: '',
+      machineCode: machineRaw,
+      machineName: machineRaw,
+      pmCompliancePct,
+      breakdownCount,
+      breakdownHours,
+      mttr,
+      mtbf,
+      availabilityPct,
+      kpiStatus: kpiStatus || 'Good',
+      remarks,
+      isManualPmCompliance: getCell(row, mapping, 'pmCompliancePct') !== '',
+      isManualBreakdownCount: getCell(row, mapping, 'breakdownCount') !== '',
+      isManualBreakdownHours: getCell(row, mapping, 'breakdownHours') !== '',
+      isManualMttr: getCell(row, mapping, 'mttr') !== '',
+      isManualMtbf: getCell(row, mapping, 'mtbf') !== '',
+      isManualAvailability: getCell(row, mapping, 'availabilityPct') !== '',
+      isManualKpiStatus: getCell(row, mapping, 'kpiStatus') !== '',
+    };
+  }
+
   // ── Machines (fallback) ───────────────────────────────────────────────────
   const machineName = String(getCell(row, mapping, 'machineName') || '').trim();
   if (!machineName) return { error: `Row ${index}: machine name is required.` };
@@ -950,6 +1047,7 @@ const MASTER_SHEET_ALIASES = {
   energyMonthlyWater: ['water', 'monthlywater', 'waterdata', 'waterstp', 'stp', 'waterstpsheet'],
   energyMonthlyAirCompressor: ['aircompressor', 'monthlyaircompressor', 'aircompressordata', 'compressor', 'aircompsheet', 'air'],
   energyDailySolar: ['dailysolar', 'dailysolargeneration', 'solardata', 'solargeneration', 'solarinverter', 'solarlog', 'solar'],
+  kpi: ['kpi', 'kpistatus', 'kpidata', 'kpis', 'kpisummary', 'kpi_status', 'maintenancekpi'],
 };
 
 /**
@@ -1057,6 +1155,7 @@ export function downloadMasterTemplate() {
     energyMonthlyWater: 'Energy_Water_STP',
     energyMonthlyAirCompressor: 'Energy_Air_Compressor',
     energyDailySolar: 'Energy_Daily_Solar',
+    kpi: 'KPI_Status',
   };
   MODULE_ORDER.forEach((moduleId) => {
     const def = IMPORT_MODULES[moduleId];
@@ -1079,6 +1178,7 @@ export function downloadMasterTemplate() {
     { Sheet: 'Energy_Water_STP', Purpose: 'Monthly Water/STP/RO/PIAU (4 meters)', Required: 'Month (YYYY-MM)', Notes: 'Delta vs prior month' },
     { Sheet: 'Energy_Air_Compressor', Purpose: 'Monthly Air Compressor run/load hrs', Required: 'Month (YYYY-MM)', Notes: 'Unload & Load% auto' },
     { Sheet: 'Energy_Daily_Solar', Purpose: 'Daily solar inverter generation (7 inverters)', Required: 'Date', Notes: 'Daily Total = sum of 7 if blank; or enter total alone' },
+    { Sheet: 'KPI_Status', Purpose: 'Monthly KPI per Section/Machine (11 cols)', Required: 'Month, Plant/Section', Notes: 'KPI Status auto from thresholds if blank; values auto from PM/Breakdown if blank' },
     { Sheet: 'README', Purpose: 'This index', Required: '-', Notes: 'Keep headers exactly as in row 1 — aliases handle variants' },
   ];
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(readme), 'README');

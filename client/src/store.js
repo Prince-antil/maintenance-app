@@ -24,6 +24,8 @@ const KEYS = {
   dailySolarGeneration: 'CCPL_DAILY_SOLAR_GENERATION_V1',
   energySettings: 'CCPL_ENERGY_SETTINGS_V1',
   testingCertificates: 'CCPL_TESTING_CERTIFICATES_V1',
+  kpiRecords: 'CCPL_KPI_RECORDS_V1',
+  kpiSettings: 'CCPL_KPI_SETTINGS_V1',
 };
 
 const LEGACY_KEYS = {
@@ -45,6 +47,8 @@ const LEGACY_KEYS = {
   dailySolarGeneration: [],
   energySettings: [],
   testingCertificates: [],
+  kpiRecords: [],
+  kpiSettings: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -75,7 +79,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -1300,6 +1304,173 @@ function getTestingCertificateStatus(expiryDate) {
   return { status: 'VALID', daysLeft: diff, tone: 'success' };
 }
 
+// ── KPI Records (KPI Status) normalizers ──────────────────────────────────
+function normalizeKpiRecord(fields) {
+  const resolved = resolvePeriod({ period: fields.period, month: fields.month, year: fields.year });
+  const period = /^\d{4}-\d{02}$/.test(String(fields.period || '')) ? String(fields.period) : (fields.period && /^\d{4}-\d{2}$/.test(fields.period) ? fields.period : resolved.period);
+  // period fallback via resolvePeriod if not provided
+  const finalPeriod = period || resolved.period || new Date().toISOString().slice(0,7);
+  const [y, m] = finalPeriod.split('-').map(Number);
+  const section = String(fields.section || fields.plantSection || fields.plant_section || fields.plant || MASTER_SECTION).trim() || MASTER_SECTION;
+  const machineId = String(fields.machineId || fields.machine_id || '').trim();
+  const machineCode = String(fields.machineCode || fields.machine_code || fields.machineCode || fields.machine || '').trim();
+  const machineName = String(fields.machineName || fields.machine_name || fields.machine || '').trim();
+  // If machineName provided but machineCode empty, keep as is; UI will display machineName or code
+  const pmCompliancePct = Math.max(0, Math.min(100, round1(fields.pmCompliancePct ?? fields.pm_compliance_pct ?? fields.pmCompliance ?? 0)));
+  const breakdownCount = Math.max(0, Math.round(toNumber(fields.breakdownCount ?? fields.breakdown_count ?? fields.totalBreakdowns ?? 0)));
+  const breakdownHours = Math.max(0, round1(fields.breakdownHours ?? fields.breakdown_hours ?? fields.downtimeHours ?? 0));
+  const mttrRaw = fields.mttr ?? fields.MTTR ?? fields.mttr_hours;
+  const mttr = isPresent(mttrRaw) ? round1(mttrRaw) : (breakdownCount > 0 ? round1(breakdownHours / breakdownCount) : 0);
+  const mtbfRaw = fields.mtbf ?? fields.MTBF ?? fields.mtbf_hours;
+  // MTBF will be finalized via analytics helper if not manually provided; keep fallback as breakdown logic will recompute if needed
+  const mtbf = isPresent(mtbfRaw) ? round1(mtbfRaw) : 0;
+  const availabilityPct = Math.max(0, Math.min(100, round1(fields.availabilityPct ?? fields.availability_pct ?? fields.availability ?? fields.availabilityPercent ?? 0)));
+  const kpiStatusRaw = String(fields.kpiStatus || fields.kpi_status || fields.status || 'Good').trim();
+  const kpiStatus = ['Good','Warning','Critical'].includes(kpiStatusRaw) ? kpiStatusRaw : 'Good';
+  const remarks = String(fields.remarks || fields.notes || '').trim();
+  const isManual = (v) => v === true || String(v).toLowerCase() === 'true' || v === 1;
+  return {
+    id: fields.id || uid('kpi'),
+    period: finalPeriod,
+    month: m,
+    year: y,
+    section,
+    machineId,
+    machineCode,
+    machineName: machineName || machineCode || machineId || '',
+    pmCompliancePct,
+    breakdownCount,
+    breakdownHours,
+    mttr,
+    mtbf,
+    availabilityPct,
+    kpiStatus,
+    remarks,
+    isManualPmCompliance: isManual(fields.isManualPmCompliance ?? fields.is_manual_pm_compliance ?? false),
+    isManualBreakdownCount: isManual(fields.isManualBreakdownCount ?? fields.is_manual_breakdown_count ?? false),
+    isManualBreakdownHours: isManual(fields.isManualBreakdownHours ?? fields.is_manual_breakdown_hours ?? false),
+    isManualMttr: isManual(fields.isManualMttr ?? fields.is_manual_mttr ?? false),
+    isManualMtbf: isManual(fields.isManualMtbf ?? fields.is_manual_mtbf ?? false),
+    isManualAvailability: isManual(fields.isManualAvailability ?? fields.is_manual_availability ?? false),
+    isManualKpiStatus: isManual(fields.isManualKpiStatus ?? fields.is_manual_kpi_status ?? false),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiRecordCloudRow(row) {
+  return normalizeKpiRecord({
+    id: row.id,
+    period: row.period,
+    month: row.month,
+    year: row.year,
+    section: row.section,
+    machineId: row.machine_id,
+    machineCode: row.machine_code,
+    machineName: row.machine_name,
+    pmCompliancePct: row.pm_compliance_pct,
+    breakdownCount: row.breakdown_count,
+    breakdownHours: row.breakdown_hours,
+    mttr: row.mttr,
+    mtbf: row.mtbf,
+    availabilityPct: row.availability_pct,
+    kpiStatus: row.kpi_status,
+    remarks: row.remarks,
+    isManualPmCompliance: row.is_manual_pm_compliance,
+    isManualBreakdownCount: row.is_manual_breakdown_count,
+    isManualBreakdownHours: row.is_manual_breakdown_hours,
+    isManualMttr: row.is_manual_mttr,
+    isManualMtbf: row.is_manual_mtbf,
+    isManualAvailability: row.is_manual_availability,
+    isManualKpiStatus: row.is_manual_kpi_status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiRecordToCloudRow(record) {
+  return {
+    id: record.id,
+    period: record.period,
+    month: record.month,
+    year: record.year,
+    section: record.section,
+    machine_id: record.machineId || '',
+    machine_code: record.machineCode || '',
+    machine_name: record.machineName || '',
+    pm_compliance_pct: record.pmCompliancePct || 0,
+    breakdown_count: record.breakdownCount || 0,
+    breakdown_hours: record.breakdownHours || 0,
+    mttr: record.mttr || 0,
+    mtbf: record.mtbf || 0,
+    availability_pct: record.availabilityPct || 0,
+    kpi_status: record.kpiStatus || 'Good',
+    remarks: record.remarks || '',
+    is_manual_pm_compliance: !!record.isManualPmCompliance,
+    is_manual_breakdown_count: !!record.isManualBreakdownCount,
+    is_manual_breakdown_hours: !!record.isManualBreakdownHours,
+    is_manual_mttr: !!record.isManualMttr,
+    is_manual_mtbf: !!record.isManualMtbf,
+    is_manual_availability: !!record.isManualAvailability,
+    is_manual_kpi_status: !!record.isManualKpiStatus,
+    updated_at: record.updatedAt || now(),
+  };
+}
+
+// ── KPI Settings normalizer ───────────────────────────────────────────────
+function normalizeKpiSettings(fields) {
+  return {
+    id: fields.id || 'default',
+    pmComplianceGood: Math.max(0, Math.min(100, round1(fields.pmComplianceGood ?? fields.pm_compliance_good ?? 90))),
+    pmComplianceWarning: Math.max(0, Math.min(100, round1(fields.pmComplianceWarning ?? fields.pm_compliance_warning ?? 75))),
+    availabilityGood: Math.max(0, Math.min(100, round1(fields.availabilityGood ?? fields.availability_good ?? 95))),
+    availabilityWarning: Math.max(0, Math.min(100, round1(fields.availabilityWarning ?? fields.availability_warning ?? 85))),
+    mttrGood: Math.max(0, round1(fields.mttrGood ?? fields.mttr_good ?? 2)),
+    mttrWarning: Math.max(0, round1(fields.mttrWarning ?? fields.mttr_warning ?? 5)),
+    mtbfGood: Math.max(0, round1(fields.mtbfGood ?? fields.mtbf_good ?? 200)),
+    mtbfWarning: Math.max(0, round1(fields.mtbfWarning ?? fields.mtbf_warning ?? 100)),
+    breakdownCountGood: Math.max(0, Math.round(toNumber(fields.breakdownCountGood ?? fields.breakdown_count_good ?? 2))),
+    breakdownCountWarning: Math.max(0, Math.round(toNumber(fields.breakdownCountWarning ?? fields.breakdown_count_warning ?? 5))),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiSettingsCloudRow(row) {
+  return normalizeKpiSettings({
+    id: row.id,
+    pmComplianceGood: row.pm_compliance_good,
+    pmComplianceWarning: row.pm_compliance_warning,
+    availabilityGood: row.availability_good,
+    availabilityWarning: row.availability_warning,
+    mttrGood: row.mttr_good,
+    mttrWarning: row.mttr_warning,
+    mtbfGood: row.mtbf_good,
+    mtbfWarning: row.mtbf_warning,
+    breakdownCountGood: row.breakdown_count_good,
+    breakdownCountWarning: row.breakdown_count_warning,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiSettingsToCloudRow(record) {
+  return {
+    id: record.id || 'default',
+    pm_compliance_good: record.pmComplianceGood,
+    pm_compliance_warning: record.pmComplianceWarning,
+    availability_good: record.availabilityGood,
+    availability_warning: record.availabilityWarning,
+    mttr_good: record.mttrGood,
+    mttr_warning: record.mttrWarning,
+    mtbf_good: record.mtbfGood,
+    mtbf_warning: record.mtbfWarning,
+    breakdown_count_good: record.breakdownCountGood,
+    breakdown_count_warning: record.breakdownCountWarning,
+    updated_at: record.updatedAt || now(),
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -1397,6 +1568,18 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: testingCertificateToCloudRow,
     orderBy: [{ column: 'expiry_date', ascending: true }],
   },
+  kpiRecords: {
+    table: 'kpi_records',
+    fromRow: normalizeKpiRecordCloudRow,
+    toRow: kpiRecordToCloudRow,
+    orderBy: [{ column: 'year', ascending: false }, { column: 'month', ascending: false }, { column: 'section', ascending: true }],
+  },
+  kpiSettings: {
+    table: 'kpi_settings',
+    fromRow: normalizeKpiSettingsCloudRow,
+    toRow: kpiSettingsToCloudRow,
+    orderBy: [{ column: 'id', ascending: true }],
+  },
 };
 
 let version = 0;
@@ -1478,6 +1661,8 @@ let state = {
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
   testingCertificates: loadPersistedValue('testingCertificates', []).map(normalizeTestingCertificate),
+  kpiRecords: loadPersistedValue('kpiRecords', []).map(normalizeKpiRecord),
+  kpiSettings: loadPersistedValue('kpiSettings', normalizeKpiSettings({})),
   plantSections: loadPersistedValue('plantSections', []).map((s) =>
     typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
   ),
@@ -1668,8 +1853,8 @@ async function fetchCloudEntity(entity) {
 
   const { data, error } = await query;
   if (error) {
-    // For optional tables (testingCertificates) return empty rather than crashing sync
-    if (entity === 'testingCertificates') {
+    // For optional tables (testingCertificates, kpiRecords, kpiSettings) return empty rather than crashing sync (table may not exist yet before migration)
+    if (entity === 'testingCertificates' || entity === 'kpiRecords' || entity === 'kpiSettings') {
       rtLog('warn', `FETCH failed on ${config.table} (optional, returning empty):`, error.message);
       return [];
     }
@@ -1946,7 +2131,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -1963,6 +2148,8 @@ async function initializeCloudSync() {
       fetchCloudEntity('dailySolarGeneration'),
       fetchCloudEntity('energySettings'),
       fetchCloudEntity('testingCertificates'),
+      fetchCloudEntity('kpiRecords'),
+      fetchCloudEntity('kpiSettings'),
     ]);
 
     const remoteSnapshots = {
@@ -1982,6 +2169,8 @@ async function initializeCloudSync() {
       dailySolarGeneration: remoteDailySolarGeneration,
       energySettings: remoteEnergySettings,
       testingCertificates: remoteTestingCertificates,
+      kpiRecords: remoteKpiRecords,
+      kpiSettings: remoteKpiSettings,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -2026,6 +2215,11 @@ async function initializeCloudSync() {
       persistEntity('energySettings');
     }
     if (remoteTestingCertificates?.length) replaceEntityState('testingCertificates', remoteTestingCertificates, false);
+    if (remoteKpiRecords?.length) replaceEntityState('kpiRecords', remoteKpiRecords, false);
+    if (remoteKpiSettings?.length) {
+      state = { ...state, kpiSettings: normalizeKpiSettings(remoteKpiSettings[0] || {}) };
+      persistEntity('kpiSettings');
+    }
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet
@@ -2053,6 +2247,7 @@ async function initializeCloudSync() {
 
 function upsertSummary(entity, record, matchKey, userName, activityLabel, activityType) {
   const existing = state[entity].find((item) => item[matchKey] === record[matchKey] && item.section === record.section);
+  let result;
   if (existing) {
     const mergedRecord = { ...existing, ...record, id: existing.id };
     state = {
@@ -2061,13 +2256,16 @@ function upsertSummary(entity, record, matchKey, userName, activityLabel, activi
     };
     commitAndQueue(entity, 'upsert', mergedRecord);
     logActivity(userName, `updated ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
-    return { ...mergedRecord, mode: 'updated' };
+    result = { ...mergedRecord, mode: 'updated' };
+  } else {
+    state = { ...state, [entity]: [record, ...state[entity]] };
+    commitAndQueue(entity, 'upsert', record);
+    logActivity(userName, `logged ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
+    result = { ...record, mode: 'created' };
   }
-
-  state = { ...state, [entity]: [record, ...state[entity]] };
-  commitAndQueue(entity, 'upsert', record);
-  logActivity(userName, `logged ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
-  return { ...record, mode: 'created' };
+  // Auto-refresh KPI records that depend on PM/Breakdown summaries (if not manually overridden)
+  try { if (entity==='breakdowns' || entity==='pms') refreshKpiAutoValues(result.period, result.section); } catch {}
+  return result;
 }
 
 persistWholeState();
@@ -2294,6 +2492,7 @@ export function deleteBreakdown(id, userName) {
   state = { ...state, breakdowns: state.breakdowns.filter((item) => item.id !== id) };
   commitAndQueue('breakdowns', 'delete', id);
   logActivity(userName, 'deleted breakdown summary', record ? `${record.section} · ${periodLabel(record.period)}` : '', 'breakdown');
+  try { if (record) refreshKpiAutoValues(record.period, record.section); } catch {}
 }
 
 export function addPM(fields, userName) {
@@ -2322,6 +2521,7 @@ export function deletePM(id, userName) {
   state = { ...state, pms: state.pms.filter((item) => item.id !== id) };
   commitAndQueue('pms', 'delete', id);
   logActivity(userName, 'deleted PM summary', record ? `${record.section} · ${periodLabel(record.period)}` : '', 'pm');
+  try { if (record) refreshKpiAutoValues(record.period, record.section); } catch {}
 }
 
 export function addEnergyLog(fields, userName) {
@@ -2568,13 +2768,16 @@ export function addMachinePmRecord(fields, userName) {
   state = { ...state, machinePmRecords: [record, ...state.machinePmRecords] };
   commitAndQueue('machinePmRecords', 'upsert', record);
   logActivity(userName, 'logged machine PM', `${record.machineName} · ${record.pmDate} · ${record.task || record.pmType}`, 'pm');
+  try { refreshKpiAutoValues((record.pmDate||'').slice(0,7), record.plantSection, record.machineId); refreshKpiAutoValues((record.pmDate||'').slice(0,7), record.plantSection); } catch {}
   return record;
 }
 
 export function deleteMachinePmRecord(id, userName) {
+  const rec = state.machinePmRecords.find((r)=>r.id===id);
   state = { ...state, machinePmRecords: state.machinePmRecords.filter((r) => r.id !== id) };
   commitAndQueue('machinePmRecords', 'delete', id);
   logActivity(userName, 'deleted machine PM record', '', 'pm');
+  try { if(rec) { refreshKpiAutoValues((rec.pmDate||'').slice(0,7), rec.plantSection, rec.machineId); refreshKpiAutoValues((rec.pmDate||'').slice(0,7), rec.plantSection); } } catch {}
 }
 
 // ── Testing Certificates (Safety & Statutory) ─────────────────────────────────
@@ -2641,6 +2844,294 @@ export function getTestingCertificateAlertCount(certificates, machineId) {
 }
 
 export { getTestingCertificateStatus };
+
+// ── KPI Records (KPI Status) ───────────────────────────────────────────────
+export const getKpiRecords = () => state.kpiRecords || [];
+export const getKpiSettings = () => state.kpiSettings || normalizeKpiSettings({});
+
+function computeKpiAutoValues({ period, section, machineId }) {
+  // Reuse existing app calculations - do not create conflicting formulas
+  const targetPeriod = period || '';
+  const targetSection = section || MASTER_SECTION;
+  const targetMachineId = machineId || '';
+
+  // --- PM Compliance % ---
+  let pmCompliancePct = 0;
+  let pmSource = 'auto';
+  if (targetMachineId) {
+    const recs = (state.machinePmRecords || []).filter((r) => (r.machineId || '') === targetMachineId && (r.pmDate || '').slice(0,7) === targetPeriod);
+    if (recs.length > 0) {
+      const done = recs.filter((r) => String(r.status||'').toLowerCase()==='completed' || r.completed===true).length;
+      pmCompliancePct = recs.length > 0 ? Math.round((done / recs.length)*1000)/10 : 0;
+    } else {
+      // fallback to section PM logs if no per-machine records
+      const pmRows = (state.pms || []).filter((row) => row.period === targetPeriod && row.section === targetSection);
+      if (pmRows.length) {
+        const planned = pmRows.reduce((s,r)=>s+(r.plannedCount||0),0);
+        const done = pmRows.reduce((s,r)=>s+(r.doneCount||0),0);
+        pmCompliancePct = planned>0 ? Math.round((done/planned)*1000)/10 : 0;
+      }
+    }
+  } else {
+    // section-level: prefer machinePmRecords aggregated by section, fallback to pm_logs
+    const sectionMachineRecs = (state.machinePmRecords || []).filter((r) => (r.plantSection||'')===targetSection && (r.pmDate||'').slice(0,7)===targetPeriod);
+    if (sectionMachineRecs.length>0) {
+      const done = sectionMachineRecs.filter((r)=>String(r.status||'').toLowerCase()==='completed' || r.completed===true).length;
+      pmCompliancePct = Math.round((done/sectionMachineRecs.length)*1000)/10;
+    } else {
+      const pmRows = (state.pms || []).filter((row) => row.period === targetPeriod && (row.section === targetSection || targetSection===MASTER_SECTION));
+      if (pmRows.length) {
+        const planned = pmRows.reduce((s,r)=>s+(r.plannedCount||0),0);
+        const done = pmRows.reduce((s,r)=>s+(r.doneCount||0),0);
+        pmCompliancePct = planned>0 ? Math.round((done/planned)*1000)/10 : 0;
+      }
+    }
+  }
+
+  // --- Breakdown metrics ---
+  let breakdownCount = 0;
+  let breakdownHours = 0;
+  let operatingHours = 0;
+  let mttr = 0;
+  let mtbf = 0;
+  let availabilityPct = 0;
+
+  const machinesInSection = targetMachineId ? 1 : (targetSection===MASTER_SECTION ? (state.machines.length||1) : (state.machines.filter((m)=>m.section===targetSection).length||1));
+  const hoursPerMonth = 720;
+
+  if (targetMachineId) {
+    const logs = (state.machineBreakdownLogs || []).filter((r)=> (r.machineId||'')===targetMachineId && (r.date||'').slice(0,7)===targetPeriod);
+    breakdownCount = logs.length;
+    breakdownHours = Math.round(logs.reduce((s,r)=>s+Number(r.downtimeHours||0),0)*10)/10;
+    // Also consider breakdown_logs section summary for this machine's section? No, per-machine uses only machine logs
+    operatingHours = hoursPerMonth; // per-machine operating hours = 720
+    mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+    const availOpHours = operatingHours;
+    mtbf = breakdownCount>0 ? Math.round(Math.max(0, availOpHours - breakdownHours)/breakdownCount*10)/10 : 0;
+    availabilityPct = availOpHours>0 ? Math.max(0, Math.round(((availOpHours - breakdownHours)/availOpHours)*1000)/10) : 100;
+    // Check for override: if breakdown_logs has availability_override for this period/section, reuse exact value (per requirement 7)
+    const overrideRow = (state.breakdowns||[]).find((r)=>r.period===targetPeriod && r.section===targetSection && r.availability_override!=null);
+    if (overrideRow && overrideRow.availability_override!=null) {
+      availabilityPct = Number(overrideRow.availability_override);
+    }
+  } else {
+    // section-level: use breakdown_logs summary if exists, else derive from machine logs aggregated by section
+    const bdRows = (state.breakdowns||[]).filter((r)=>r.period===targetPeriod && (targetSection===MASTER_SECTION ? true : r.section===targetSection));
+    if (bdRows.length>0) {
+      breakdownCount = bdRows.reduce((s,r)=>s+(r.breakdownCount||0),0);
+      breakdownHours = Math.round(bdRows.reduce((s,r)=>s+(r.downtimeHours||0),0)*10)/10;
+      operatingHours = bdRows.reduce((s,r)=>s+(r.operatingHours||0),0);
+      if (!operatingHours) operatingHours = machinesInSection * hoursPerMonth;
+      // Reuse exact MTTR/MTBF if already calculated in breakdown row
+      const hasMttr = bdRows.some((r)=>r.mttr!=null && r.mttr!==0);
+      const hasMtbf = bdRows.some((r)=>r.mtbf!=null && r.mtbf!==0);
+      if (hasMttr && bdRows.length===1 && bdRows[0].mttr) mttr = Number(bdRows[0].mttr);
+      else mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+      if (hasMtbf && bdRows.length===1 && bdRows[0].mtbf) mtbf = Number(bdRows[0].mtbf);
+      else mtbf = breakdownCount>0 ? Math.round(Math.max(0, operatingHours - breakdownHours)/breakdownCount*10)/10 : 0;
+      const overrideRows = bdRows.filter((r)=>r.availability_override!=null);
+      if (overrideRows.length>0 && overrideRows.length===bdRows.length) {
+        const avg = overrideRows.reduce((s,r)=>s+Number(r.availability_override),0)/overrideRows.length;
+        availabilityPct = Math.round(avg*10)/10;
+      } else {
+        availabilityPct = operatingHours>0 ? Math.max(0, Math.round(((operatingHours - breakdownHours)/operatingHours)*1000)/10) : 100;
+      }
+    } else {
+      const logs = (state.machineBreakdownLogs||[]).filter((r)=> (r.plantSection||r.section||'')===targetSection && (r.date||'').slice(0,7)===targetPeriod);
+      // If MASTER_SECTION, use all logs for that period
+      const effectiveLogs = targetSection===MASTER_SECTION ? (state.machineBreakdownLogs||[]).filter((r)=>(r.date||'').slice(0,7)===targetPeriod) : logs;
+      breakdownCount = effectiveLogs.length;
+      breakdownHours = Math.round(effectiveLogs.reduce((s,r)=>s+Number(r.downtimeHours||0),0)*10)/10;
+      operatingHours = machinesInSection * hoursPerMonth;
+      mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+      mtbf = breakdownCount>0 ? Math.round(Math.max(0, operatingHours - breakdownHours)/breakdownCount*10)/10 : 0;
+      availabilityPct = operatingHours>0 ? Math.max(0, Math.round(((operatingHours - breakdownHours)/operatingHours)*1000)/10) : 100;
+    }
+  }
+
+  return { pmCompliancePct, breakdownCount, breakdownHours, mttr, mtbf, availabilityPct };
+}
+
+function deriveKpiStatus(record, thresholds) {
+  const t = thresholds || state.kpiSettings || normalizeKpiSettings({});
+  // Good if all metrics meet good thresholds, Warning if any meet warning, else Critical
+  // Use availability and PM compliance as primary, MTTR/MTBF and breakdown count as secondary
+  const avail = Number(record.availabilityPct || 0);
+  const pm = Number(record.pmCompliancePct || 0);
+  const mttr = Number(record.mttr || 0);
+  const mtbf = Number(record.mtbf || 0);
+  const bc = Number(record.breakdownCount || 0);
+  let status = 'Good';
+  // Availability: Good >= availabilityGood, Warning >= availabilityWarning
+  if (avail < t.availabilityWarning) status = 'Critical';
+  else if (avail < t.availabilityGood) status = status==='Critical'?'Critical':'Warning';
+  // PM Compliance
+  if (pm < t.pmComplianceWarning) status = 'Critical';
+  else if (pm < t.pmComplianceGood && status!=='Critical') status = 'Warning';
+  // MTTR: Good <= mttrGood, Warning <= mttrWarning
+  if (mttr > t.mttrWarning) status = 'Critical';
+  else if (mttr > t.mttrGood && status!=='Critical') status = 'Warning';
+  // MTBF: Good >= mtbfGood, Warning >= mtbfWarning
+  if (mtbf !==0 && mtbf < t.mtbfWarning) status = 'Critical';
+  else if (mtbf !==0 && mtbf < t.mtbfGood && status!=='Critical') status = 'Warning';
+  // Breakdown count
+  if (bc > t.breakdownCountWarning) status = 'Critical';
+  else if (bc > t.breakdownCountGood && status!=='Critical') status = 'Warning';
+  return status;
+}
+
+export function addKpiRecord(fields, userName) {
+  // Auto-calculate missing values from existing PM/Breakdown data
+  const auto = computeKpiAutoValues({ period: fields.period || fields.month, section: fields.section || fields.plantSection, machineId: fields.machineId || fields.machine_id });
+  const mergedFields = { ...fields };
+  // For each KPI field, if not manually provided (isManual false and no value), use auto
+  const isManual = (k) => fields[k]===true || fields['isManual'+k.charAt(0).toUpperCase()+k.slice(1)]===true;
+  // Actually check isManual flags from input
+  if (!isManual('pmCompliancePct') && !fields.isManualPmCompliance && (fields.pmCompliancePct==null || fields.pmCompliancePct==='')) mergedFields.pmCompliancePct = auto.pmCompliancePct;
+  if (!isManual('breakdownCount') && !fields.isManualBreakdownCount && (fields.breakdownCount==null || fields.breakdownCount==='')) mergedFields.breakdownCount = auto.breakdownCount;
+  if (!isManual('breakdownHours') && !fields.isManualBreakdownHours && (fields.breakdownHours==null || fields.breakdownHours==='')) mergedFields.breakdownHours = auto.breakdownHours;
+  if (!isManual('mttr') && !fields.isManualMttr && (fields.mttr==null || fields.mttr==='')) mergedFields.mttr = auto.mttr;
+  else if (fields.mttr==null && mergedFields.breakdownCount>0) mergedFields.mttr = auto.mttr;
+  if (!isManual('mtbf') && !fields.isManualMttr && (fields.mtbf==null || fields.mtbf==='')) mergedFields.mtbf = auto.mtbf;
+  if (!isManual('availabilityPct') && !fields.isManualAvailability && (fields.availabilityPct==null || fields.availabilityPct==='')) mergedFields.availabilityPct = auto.availabilityPct;
+  // KPI Status auto if not manual
+  if (!fields.isManualKpiStatus && !fields.is_manual_kpi_status && (fields.kpiStatus==null || fields.kpiStatus==='')) {
+    mergedFields.kpiStatus = deriveKpiStatus(mergedFields, state.kpiSettings);
+  }
+  const record = normalizeKpiRecord({ ...mergedFields, createdAt: now(), updatedAt: now() });
+  // Upsert logic: unique by period+section+machineId
+  const existing = state.kpiRecords.find((r)=>r.period===record.period && r.section===record.section && (r.machineId||'')===(record.machineId||''));
+  if (existing) {
+    const updated = { ...existing, ...record, id: existing.id, createdAt: existing.createdAt, updatedAt: now() };
+    state = { ...state, kpiRecords: state.kpiRecords.map((r)=>r.id===existing.id ? updated : r) };
+    commitAndQueue('kpiRecords','upsert',updated);
+    logActivity(userName,'updated KPI status',`${record.section} · ${record.period}${record.machineName? ' · '+record.machineName:''}`,'kpi');
+    return { ...updated, mode: 'updated' };
+  }
+  state = { ...state, kpiRecords: [record, ...state.kpiRecords] };
+  commitAndQueue('kpiRecords','upsert',record);
+  logActivity(userName,'added KPI status',`${record.section} · ${record.period}${record.machineName? ' · '+record.machineName:''}`,'kpi');
+  return { ...record, mode: 'created' };
+}
+
+export function updateKpiRecord(id, patch, userName) {
+  const existing = state.kpiRecords.find((r)=>r.id===id);
+  if (!existing) return null;
+  // If patch changes period/section/machine, need to handle uniqueness
+  const updatedFields = { ...existing, ...patch, id, updatedAt: now() };
+  // Re-derive auto values for fields not marked manual and not provided in patch
+  // Keep manual flags as in patch or existing
+  const record = normalizeKpiRecord(updatedFields);
+  state = { ...state, kpiRecords: state.kpiRecords.map((r)=>r.id===id ? record : r) };
+  commitAndQueue('kpiRecords','upsert',record);
+  logActivity(userName,'updated KPI status',`${record.section} · ${record.period}`,'kpi');
+  return record;
+}
+
+export function deleteKpiRecord(id, userName) {
+  const rec = state.kpiRecords.find((r)=>r.id===id);
+  state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>r.id!==id) };
+  commitAndQueue('kpiRecords','delete',id);
+  logActivity(userName,'deleted KPI status',rec? `${rec.section} · ${rec.period}`:'','kpi');
+}
+
+export async function purgeKpiRecords(userName, periodFrom, periodTo) {
+  // If period range provided, delete only those; else purge all
+  let toDelete = [...state.kpiRecords];
+  if (periodFrom && periodTo) {
+    toDelete = toDelete.filter((r)=>r.period>=periodFrom && r.period<=periodTo);
+    state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>!(r.period>=periodFrom && r.period<=periodTo)) };
+  } else if (periodFrom || periodTo) {
+    const from = periodFrom || '0000-00';
+    const to = periodTo || '9999-99';
+    toDelete = toDelete.filter((r)=>r.period>=from && r.period<=to);
+    state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>!(r.period>=from && r.period<=to)) };
+  } else {
+    state = { ...state, kpiRecords: [] };
+  }
+  commit('kpiRecords');
+  if (supabase && isSupabaseConfigured) {
+    try {
+      let q = supabase.from('kpi_records').delete().neq('id','00000000-0000-0000-0000-000000000000');
+      if (periodFrom && periodTo) { q = q.gte('period', periodFrom).lte('period', periodTo); }
+      else if (periodFrom || periodTo) { const f=periodFrom||'0000-00'; const t=periodTo||'9999-99'; q=q.gte('period',f).lte('period',t); }
+      await q;
+    } catch {}
+  }
+  logActivity(userName,'purged KPI records',`${toDelete.length} removed`,'kpi');
+  return { purged: toDelete.length };
+}
+
+export function upsertKpiSettings(fields, userName) {
+  const existing = state.kpiSettings || normalizeKpiSettings({});
+  const updated = normalizeKpiSettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
+  state = { ...state, kpiSettings: updated };
+  commit('kpiSettings');
+  queueCloudMutation('kpiSettings','upsert',updated);
+  // Recompute auto KPI Status for records where status is not manual
+  try {
+    let changed = [];
+    (state.kpiRecords||[]).forEach((rec)=>{
+      if (!rec.isManualKpiStatus) {
+        const newStatus = deriveKpiStatus(rec, updated);
+        if (newStatus !== rec.kpiStatus) changed.push({ ...rec, kpiStatus: newStatus, updatedAt: now() });
+      }
+    });
+    if (changed.length) {
+      const map = new Map(changed.map((c)=>[c.id,c]));
+      state = { ...state, kpiRecords: state.kpiRecords.map((r)=> map.has(r.id) ? map.get(r.id) : r) };
+      changed.forEach((upd)=> queueCloudMutation('kpiRecords','upsert',upd));
+      commit('kpiRecords');
+    }
+  } catch {}
+  logActivity(userName,'updated KPI thresholds','','kpi');
+  return updated;
+}
+
+// Bulk import helper for KPI
+export function importKpiRecordsBulk(parsedRows, userName) {
+  let created = 0; let updated = 0;
+  parsedRows.forEach((raw)=>{
+    let machineId = raw.machineId || '';
+    const rawMachine = String(raw.machineCode || raw.machineName || '').trim();
+    if (!machineId && rawMachine) {
+      const hit = state.machines.find((m)=> normalizeText(m.machineCode)===normalizeText(rawMachine) || normalizeText(m.name)===normalizeText(rawMachine));
+      if (hit) { machineId = hit.id; raw.machineCode = hit.machineCode; raw.machineName = hit.name; }
+    }
+    const rec = { ...raw, machineId };
+    const result = addKpiRecord(rec, userName);
+    if (result && result.mode==='created') created++; else updated++;
+  });
+  localImportSuppressUntil.kpiRecords = Date.now() + 3000;
+  return { total: parsedRows.length, created, updated };
+}
+
+// Auto-refresh KPI records where values are not manual, after PM/Breakdown changes
+export function refreshKpiAutoValues(period, section, machineId) {
+  // period can be specific YYYY-MM or undefined for all
+  let affected = state.kpiRecords.filter((r)=>{
+    if (period && r.period!==period) return false;
+    if (section && r.section!==section) return false;
+    if (machineId && (r.machineId||'')!==machineId) return false;
+    // only auto fields where not manual
+    return !r.isManualPmCompliance || !r.isManualBreakdownCount || !r.isManualBreakdownHours || !r.isManualMttr || !r.isManualMtbf || !r.isManualAvailability;
+  });
+  affected.forEach((rec)=>{
+    const auto = computeKpiAutoValues({ period: rec.period, section: rec.section, machineId: rec.machineId });
+    const patch = {};
+    if (!rec.isManualPmCompliance) patch.pmCompliancePct = auto.pmCompliancePct;
+    if (!rec.isManualBreakdownCount) patch.breakdownCount = auto.breakdownCount;
+    if (!rec.isManualBreakdownHours) patch.breakdownHours = auto.breakdownHours;
+    if (!rec.isManualMttr) patch.mttr = auto.mttr;
+    if (!rec.isManualMtbf) patch.mtbf = auto.mtbf;
+    if (!rec.isManualAvailability) patch.availabilityPct = auto.availabilityPct;
+    if (!rec.isManualKpiStatus) {
+      const draft = { ...rec, ...patch };
+      patch.kpiStatus = deriveKpiStatus(draft);
+    }
+    if (Object.keys(patch).length) updateKpiRecord(rec.id, patch, 'System Auto-Refresh');
+  });
+}
 
 export async function purgePmRecords(userName) {
   const previousPmCount = state.machinePmRecords.length;
@@ -3121,6 +3612,7 @@ export function addMachineBreakdownLog(fields, userName) {
     }, userName || 'System');
   }
 
+  try { refreshKpiAutoValues(log.date.slice(0,7), log.plantSection, log.machineId); refreshKpiAutoValues(log.date.slice(0,7), log.plantSection); } catch {}
   return log;
 }
 
@@ -3131,6 +3623,7 @@ export function updateMachineBreakdownLog(id, patch, userName) {
   state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.map((r) => (r.id === id ? updated : r)) };
   commitAndQueue('machineBreakdownLogs', 'upsert', updated);
   logActivity(userName, 'updated machine breakdown log', `${updated.machineName}`, 'breakdown');
+  try { refreshKpiAutoValues(updated.date.slice(0,7), updated.plantSection, updated.machineId); refreshKpiAutoValues(updated.date.slice(0,7), updated.plantSection); } catch {}
   return updated;
 }
 
@@ -3158,6 +3651,7 @@ export function deleteMachineBreakdownLog(id, userName) {
       }, userName || 'System');
     }
   }
+  try { if (log) { refreshKpiAutoValues(log.date.slice(0,7), log.plantSection, log.machineId); refreshKpiAutoValues(log.date.slice(0,7), log.plantSection); } } catch {}
 }
 
 /**
@@ -3694,6 +4188,7 @@ const MASTER_IMPORTERS = {
   energyMonthlyWater: importMonthlyWaterBulk,
   energyMonthlyAirCompressor: importMonthlyAirCompressorBulk,
   energyDailySolar: importDailySolarGenerationBulk,
+  kpi: importKpiRecordsBulk,
 };
 
 /**

@@ -49,6 +49,10 @@ const SHEETS = {
     { Date: today, 'U1 INV1 KWh': 320, 'U1 INV2 KWh': 290, 'U1 INV3 KWh': 310, 'U1 INV4 KWh': 280, 'U2 INV1 KWh': 180, 'U2 INV2 KWh': 170, 'U2 INV3 KWh': 160, 'Daily Total KWh': '', Remarks: '(Daily Total auto = sum of 7 inverters if blank; or enter total alone)' },
     { Date: today, 'U1 INV1 KWh': '', 'U1 INV2 KWh': '', 'U1 INV3 KWh': '', 'U1 INV4 KWh': '', 'U2 INV1 KWh': '', 'U2 INV2 KWh': '', 'U2 INV3 KWh': '', 'Daily Total KWh': 1747, Remarks: 'Example: single-column upload (total only) — also works' },
   ],
+  KPI_Status: [
+    { Month: month, 'Plant/Section': 'Herbi EC Packaging', 'Machine/Equipment': '', 'PM Compliance %': 92.5, 'Breakdown Count': 3, 'Breakdown Hours': 12.5, MTTR: 4.2, MTBF: 235.8, 'Availability %': 98.2, 'KPI Status': 'Good', Remarks: 'Auto calculated; manual override allowed' },
+    { Month: month, 'Plant/Section': 'EC INSEC Packaging', 'Machine/Equipment': 'Filling Machine #1', 'PM Compliance %': 85, 'Breakdown Count': 5, 'Breakdown Hours': 22, MTTR: 4.4, MTBF: 139.6, 'Availability %': 96.9, 'KPI Status': 'Warning', Remarks: 'Per-machine KPI' },
+  ],
 };
 
 const README = [
@@ -64,6 +68,7 @@ const README = [
   { Sheet: 'Energy_Water_STP', Purpose: 'Monthly Water/STP/RO/PIAU', Required: 'Month YYYY-MM', Notes: 'Delta vs prior month' },
   { Sheet: 'Energy_Air_Compressor', Purpose: 'Monthly Air Compressor run/load', Required: 'Month YYYY-MM', Notes: 'Unload & Load% auto' },
   { Sheet: 'Energy_Daily_Solar', Purpose: 'Daily solar inverter (7 inv) ', Required: 'Date', Notes: 'Daily Total = sum if blank; or total alone' },
+  { Sheet: 'KPI_Status', Purpose: 'Monthly KPI per Section/Machine (11 cols)', Required: 'Month, Plant/Section', Notes: 'KPI Status auto from thresholds if blank; values auto from PM/Breakdown if blank' },
   { Sheet: 'README', Purpose: 'This index', Required: '-', Notes: 'Keep headers exactly as row 1 — aliases handle variants' },
 ];
 
@@ -95,7 +100,7 @@ XLSX.writeFile(wb, path.join(distDir, filename));
 XLSX.writeFile(wb, path.join(distDir, legacy));
 console.log(`Generated ${filename} + ${legacy} in public/ and dist/`);
 console.log(`Sheets: ${wb.SheetNames.join(', ')}`);
-console.log(`Workbook sheets count: ${wb.SheetNames.length} (expected 13 inc README)`);
+console.log(`Workbook sheets count: ${wb.SheetNames.length} (expected 14 inc README)`);
 for (const name of wb.SheetNames) {
   const ws = wb.Sheets[name];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });

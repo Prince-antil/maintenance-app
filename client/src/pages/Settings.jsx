@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData, getEnergySettings, upsertEnergySettings } from '../store.js';
+import { useStore, updateSettings, exportBackup, importBackup, logActivity, resetPersistentData, getEnergySettings, upsertEnergySettings, getKpiSettings, upsertKpiSettings } from '../store.js';
 import { clearReportVault, listReportMetadata } from '../reportVault.js';
 import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
@@ -9,7 +9,7 @@ import { sendTestNotification } from '../lib/notificationService.js';
 import {
   Settings as SettingsIcon, Factory, User, Shield, Database,
   DownloadCloud, UploadCloud, CheckCircle2, AlertCircle, Info,
-  Cog, AlertOctagon, ClipboardCheck, Zap, History, Trash2, Bell, Mail, MessageSquare,
+  Cog, AlertOctagon, ClipboardCheck, Zap, History, Trash2, Bell, Mail, MessageSquare, BarChart3,
 } from 'lucide-react';
 
 const NOTIF_STORAGE_KEY = 'ccpl_notification_settings';
@@ -148,6 +148,24 @@ export default function Settings() {
   });
   const [energySaved, setEnergySaved] = useState(false);
 
+  const currentKpi = getKpiSettings();
+  const [kpiEditing, setKpiEditing] = useState(false);
+  const [kpiForm, setKpiForm] = useState({
+    pmComplianceGood: currentKpi.pmComplianceGood ?? 90,
+    pmComplianceWarning: currentKpi.pmComplianceWarning ?? 75,
+    availabilityGood: currentKpi.availabilityGood ?? 95,
+    availabilityWarning: currentKpi.availabilityWarning ?? 85,
+    mttrGood: currentKpi.mttrGood ?? 2,
+    mttrWarning: currentKpi.mttrWarning ?? 5,
+    mtbfGood: currentKpi.mtbfGood ?? 200,
+    mtbfWarning: currentKpi.mtbfWarning ?? 100,
+    breakdownCountGood: currentKpi.breakdownCountGood ?? 2,
+    breakdownCountWarning: currentKpi.breakdownCountWarning ?? 5,
+  });
+  const [kpiSaved, setKpiSaved] = useState(false);
+  // Sync form when store updates (e.g. after Realtime)
+  useEffect(()=>{ const k=getKpiSettings(); setKpiForm({ pmComplianceGood:k.pmComplianceGood, pmComplianceWarning:k.pmComplianceWarning, availabilityGood:k.availabilityGood, availabilityWarning:k.availabilityWarning, mttrGood:k.mttrGood, mttrWarning:k.mttrWarning, mtbfGood:k.mtbfGood, mtbfWarning:k.mtbfWarning, breakdownCountGood:k.breakdownCountGood, breakdownCountWarning:k.breakdownCountWarning}); }, [store.kpiSettings]);
+
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
 
@@ -213,6 +231,15 @@ export default function Settings() {
     setEnergyEditing(false);
     setEnergySaved(true);
     setTimeout(() => setEnergySaved(false), 2500);
+  };
+
+  const saveKpi = () => {
+    const numeric = {};
+    for (const [k,v] of Object.entries(kpiForm)) numeric[k] = v==='' ? null : Number(v);
+    upsertKpiSettings(numeric, userName);
+    setKpiEditing(false);
+    setKpiSaved(true);
+    setTimeout(()=> setKpiSaved(false), 2500);
   };
 
   const DATA_ROWS = [
@@ -487,6 +514,99 @@ export default function Settings() {
                     <CheckCircle2 size={13} aria-hidden="true" /> Saved
                   </span>
                 )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* KPI Thresholds */}
+      <div className="glass-card p-5">
+        <h3 className="text-card-title flex items-center gap-2 mb-4">
+          <BarChart3 size={15} className="text-emerald-400" aria-hidden="true" /> KPI Status Thresholds
+        </h3>
+        <p className="text-meta text-xs mb-4">Configure Good / Warning / Critical cut-offs for auto-calculated KPI Status. Uses existing PM/Breakdown availability logic — values not hard-coded.</p>
+        {kpiEditing ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-meta block mb-1.5">PM Compliance Good ≥ (%)</label>
+                <input type="number" min="0" max="100" step="0.1" className="input-field text-xs w-full" value={kpiForm.pmComplianceGood} onChange={(e)=>setKpiForm({...kpiForm, pmComplianceGood:e.target.value})} />
+                <p className="text-[10px] text-slate-500 mt-1">Warning &lt; Good, Critical &lt; Warning</p>
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">PM Compliance Warning ≥ (%)</label>
+                <input type="number" min="0" max="100" step="0.1" className="input-field text-xs w-full" value={kpiForm.pmComplianceWarning} onChange={(e)=>setKpiForm({...kpiForm, pmComplianceWarning:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Availability Good ≥ (%)</label>
+                <input type="number" min="0" max="100" step="0.1" className="input-field text-xs w-full" value={kpiForm.availabilityGood} onChange={(e)=>setKpiForm({...kpiForm, availabilityGood:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Availability Warning ≥ (%)</label>
+                <input type="number" min="0" max="100" step="0.1" className="input-field text-xs w-full" value={kpiForm.availabilityWarning} onChange={(e)=>setKpiForm({...kpiForm, availabilityWarning:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">MTTR Good ≤ (hrs)</label>
+                <input type="number" min="0" step="0.1" className="input-field text-xs w-full" value={kpiForm.mttrGood} onChange={(e)=>setKpiForm({...kpiForm, mttrGood:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">MTTR Warning ≤ (hrs)</label>
+                <input type="number" min="0" step="0.1" className="input-field text-xs w-full" value={kpiForm.mttrWarning} onChange={(e)=>setKpiForm({...kpiForm, mttrWarning:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">MTBF Good ≥ (hrs)</label>
+                <input type="number" min="0" step="0.1" className="input-field text-xs w-full" value={kpiForm.mtbfGood} onChange={(e)=>setKpiForm({...kpiForm, mtbfGood:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">MTBF Warning ≥ (hrs)</label>
+                <input type="number" min="0" step="0.1" className="input-field text-xs w-full" value={kpiForm.mtbfWarning} onChange={(e)=>setKpiForm({...kpiForm, mtbfWarning:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Breakdown Count Good ≤</label>
+                <input type="number" min="0" step="1" className="input-field text-xs w-full" value={kpiForm.breakdownCountGood} onChange={(e)=>setKpiForm({...kpiForm, breakdownCountGood:e.target.value})} />
+              </div>
+              <div>
+                <label className="text-meta block mb-1.5">Breakdown Count Warning ≤</label>
+                <input type="number" min="0" step="1" className="input-field text-xs w-full" value={kpiForm.breakdownCountWarning} onChange={(e)=>setKpiForm({...kpiForm, breakdownCountWarning:e.target.value})} />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button onClick={saveKpi} className="btn-primary text-xs inline-flex items-center gap-2"><CheckCircle2 size={13} aria-hidden="true" /> Save KPI Thresholds</button>
+              <button onClick={()=>setKpiEditing(false)} className="btn-ghost text-xs">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+              {[
+                { label: 'PM Compliance Good ≥', value: `${currentKpi.pmComplianceGood}%` },
+                { label: 'PM Compliance Warning ≥', value: `${currentKpi.pmComplianceWarning}%` },
+                { label: 'Availability Good ≥', value: `${currentKpi.availabilityGood}%` },
+                { label: 'Availability Warning ≥', value: `${currentKpi.availabilityWarning}%` },
+                { label: 'MTTR Good ≤', value: `${currentKpi.mttrGood} hrs` },
+                { label: 'MTTR Warning ≤', value: `${currentKpi.mttrWarning} hrs` },
+                { label: 'MTBF Good ≥', value: `${currentKpi.mtbfGood} hrs` },
+                { label: 'MTBF Warning ≥', value: `${currentKpi.mtbfWarning} hrs` },
+                { label: 'Breakdown Count Good ≤', value: currentKpi.breakdownCountGood },
+                { label: 'Breakdown Count Warning ≤', value: currentKpi.breakdownCountWarning },
+              ].map((row)=> (
+                <div key={row.label} className="flex items-center justify-between rounded-control bg-white/[0.03] border border-white/[0.06] px-3 py-2">
+                  <span className="text-slate-400 text-xs">{row.label}</span>
+                  <span className="text-white text-sm font-semibold">{row.value ?? '—'}</span>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400"></span> Good</span>
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400"></span> Warning</span>
+              <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400"></span> Critical</span>
+              <span className="ml-2">Uses existing MTTR/MTBF/Availability/PM calculations.</span>
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-3 pt-1">
+                <button onClick={()=>setKpiEditing(true)} className="btn-ghost text-xs inline-flex items-center gap-2"><Cog size={13} aria-hidden="true" /> Edit Thresholds</button>
+                {kpiSaved && <span className="inline-flex items-center gap-1.5 text-emerald-400 text-xs" role="status"><CheckCircle2 size={13} aria-hidden="true" /> Saved — KPI Status will recompute</span>}
               </div>
             )}
           </div>
