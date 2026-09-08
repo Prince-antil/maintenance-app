@@ -1405,6 +1405,28 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
         <Toolbar isAdmin={isAdmin} onAdd={() => onAdd({ date: todayStr })} onUpload={() => onUpload({ kind: 'bulk', module: 'energyDailySolar' })} onDownload={() => downloadTemplate('energyDailySolar')} label="Daily Reading" />
         {isAdmin && dailySolarGeneration.length > 0 && <button onClick={() => setConfirmPurge(true)} className="btn-danger inline-flex items-center gap-1.5 text-xs"><Trash2 size={13} /> Purge Data</button>}
       </div>
+      {/* Warning for legacy rows where inverter breakdown was saved as 0 due to key mismatch - snapshot will now show truthful 0 for U1/U2, grand remains correct */}
+      {filteredCalc.some((r) => {
+        const invSum = toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh) + toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh);
+        const grand = Number(r.grandTotal || r.dailyTotalKwh || 0);
+        return invSum === 0 && grand > 0;
+      }) && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-control px-4 py-3 flex items-start gap-3">
+          <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-amber-300 text-xs font-semibold">Inverter breakdown missing — re-upload required for U1 (4 inv) / U2 (3 inv) accuracy</p>
+            <p className="text-amber-200/70 text-[11px] mt-1 leading-relaxed">
+              {filteredCalc.filter((r) => {
+                const s = toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh) + toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh);
+                return s === 0 && Number(r.grandTotal || 0) > 0;
+              }).length} row(s) have Grand Total = {filteredCalc.filter((r) => {
+                const s = toN(r.u1Inv1Kwh) + toN(r.u1Inv2Kwh) + toN(r.u1Inv3Kwh) + toN(r.u1Inv4Kwh) + toN(r.u2Inv1Kwh) + toN(r.u2Inv2Kwh) + toN(r.u2Inv3Kwh);
+                return s === 0 && Number(r.grandTotal || 0) > 0;
+              }).reduce((a, r) => a + Number(r.grandTotal || 0), 0).toLocaleString()} kWh correctly (sum of 7 inverters from original Excel), but U1 Total (= sum of U1 Inv1-4) and U2 Total (= sum of U2 Inv1-3) are 0 because those inverter columns were saved as 0 due to key mismatch before fix. No code can recover the lost 4+3 breakdown without source file — please re-upload the original Excel for those dates (or purge that period and re-import). New uploads after this fix will store U1= sum 4, U2= sum 3, Grand= sum 7 correctly and table will no longer show 0.
+            </p>
+          </div>
+        </div>
+      )}
       {filteredCalc.length > 0 ? (
         <>
           <div className="space-y-4">

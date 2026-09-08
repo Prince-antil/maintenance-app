@@ -45,12 +45,17 @@ export function getSolarDerived(row) {
   const u1TotalRaw = Number((u1Inv1 + u1Inv2 + u1Inv3 + u1Inv4).toFixed(2));
   const u2TotalRaw = Number((u2Inv1 + u2Inv2 + u2Inv3).toFixed(2));
   const invTotal = Number((u1TotalRaw + u2TotalRaw).toFixed(2));
-  // Prefer inverter sum, else stored totals, else direct total distribution
+  // Prefer inverter sum; for snapshot we MUST show true inverter sums (U1=4 inv, U2=3 inv), not 60/40 estimate.
+  // effectiveDirect is grandTotal fallback when inverter breakdown is missing (single-total upload)
   const effectiveDirect = storedGrand > 0 ? storedGrand : (Number.isFinite(directTotal) ? directTotal : 0);
   const grandTotal = invTotal > 0 ? invTotal : Number(Number.isFinite(effectiveDirect) ? effectiveDirect.toFixed(2) : '0');
-  // When only direct total exists, distribute 60/40 to U1/U2 for breakdown charts (mirrors engine) - also respect stored U1/U2 totals if present
-  const u1Total = u1TotalRaw > 0 ? u1TotalRaw : (storedU1Total > 0 ? storedU1Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : u1TotalRaw));
-  const u2Total = u2TotalRaw > 0 ? u2TotalRaw : (storedU2Total > 0 ? storedU2Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - u1Total).toFixed(2)) : u2TotalRaw));
+  // Snapshot totals: strictly sum of respective inverters (or stored totals if present and inverter sum is 0 but stored totals are explicit)
+  // Do NOT distribute 60/40 here - that masks missing breakdown as if it were correct. Charts may use estimated distribution separately.
+  const u1Total = u1TotalRaw > 0 ? u1TotalRaw : (storedU1Total > 0 ? storedU1Total : 0);
+  const u2Total = u2TotalRaw > 0 ? u2TotalRaw : (storedU2Total > 0 ? storedU2Total : 0);
+  // Estimated distribution for charts when only grand total exists (kept separate so snapshot stays truthful)
+  const u1TotalEstimated = u1Total > 0 ? u1Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : 0);
+  const u2TotalEstimated = u2Total > 0 ? u2Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - u1TotalEstimated).toFixed(2)) : 0);
   return {
     u1Inv1,
     u1Inv2,
@@ -62,6 +67,9 @@ export function getSolarDerived(row) {
     u1Total,
     u2Total,
     grandTotal,
+    // Estimated 60/40 distribution for charts when only grand total exists (single-total uploads)
+    u1TotalEstimated,
+    u2TotalEstimated,
     // Aliases for flexible key mapping - ensures table renders regardless of accessor naming convention
     u1Inv1Kwh: u1Inv1,
     u1Inv2Kwh: u1Inv2,
@@ -89,6 +97,9 @@ export function getSolarDerived(row) {
     grand_total: grandTotal,
     dailyTotalKwh: grandTotal,
     daily_total_kwh: grandTotal,
+    // estimated aliases for chart fallback
+    u1_total_estimated: u1TotalEstimated,
+    u2_total_estimated: u2TotalEstimated,
   };
 }
 

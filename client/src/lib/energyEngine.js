@@ -221,9 +221,12 @@ export function processSolarRow(row) {
   const invTotal = Number((u1_total + u2_total).toFixed(2));
   // If inverter breakdown sums to 0 but a direct daily total is provided (e.g., single-column upload), use direct
   const grand_total = invTotal > 0 ? invTotal : Number((Number.isFinite(effectiveDirect) ? effectiveDirect : 0).toFixed(2));
-  // Distribute direct total to u1/u2 if needed for downstream display when inv breakdown missing - also respect stored totals if present
-  const finalU1 = u1_total > 0 ? u1_total : (storedU1 > 0 ? storedU1 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : u1_total));
-  const finalU2 = u2_total > 0 ? u2_total : (storedU2 > 0 ? storedU2 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - finalU1).toFixed(2)) : u2_total));
+  // Snapshot totals: strictly sum of respective inverters (U1=4, U2=3). Do NOT 60/40 distribute here - snapshot must be truthful sum.
+  const finalU1 = u1_total > 0 ? u1_total : (storedU1 > 0 ? storedU1 : 0);
+  const finalU2 = u2_total > 0 ? u2_total : (storedU2 > 0 ? storedU2 : 0);
+  // Estimated distribution for charts when only grand total exists
+  const finalU1Estimated = finalU1 > 0 ? finalU1 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : 0);
+  const finalU2Estimated = finalU2 > 0 ? finalU2 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - finalU1Estimated).toFixed(2)) : 0);
   return {
     ...row,
     u1_inv1_kwh: u1_inv1,
@@ -237,6 +240,10 @@ export function processSolarRow(row) {
     u2_total: finalU2,
     grand_total,
     daily_total_kwh: grand_total,
+    // estimated distribution for charts (single-total uploads)
+    u1_total_estimated: finalU1Estimated,
+    u2_total_estimated: finalU2Estimated,
+    grand_total_estimated: grand_total,
     // camelCase aliases for UI store compatibility
     u1Inv1Kwh: u1_inv1,
     u1Inv2Kwh: u1_inv2,
@@ -249,6 +256,8 @@ export function processSolarRow(row) {
     u2Total: finalU2,
     grandTotal: grand_total,
     dailyTotalKwh: grand_total,
+    u1TotalEstimated: finalU1Estimated,
+    u2TotalEstimated: finalU2Estimated,
     // snake without _kwh and inverter variants for robustness
     u1_inv1,
     u1_inv2,
