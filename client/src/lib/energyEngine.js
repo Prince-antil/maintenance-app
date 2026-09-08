@@ -204,22 +204,26 @@ export function processUtilityRow(row) {
 }
 
 export function processSolarRow(row) {
-  const u1_inv1 = Number(row.u1_inv1_kwh ?? row.u1_inv1 ?? row.u1Inv1Kwh ?? 0);
-  const u1_inv2 = Number(row.u1_inv2_kwh ?? row.u1_inv2 ?? row.u1Inv2Kwh ?? 0);
-  const u1_inv3 = Number(row.u1_inv3_kwh ?? row.u1_inv3 ?? row.u1Inv3Kwh ?? 0);
-  const u1_inv4 = Number(row.u1_inv4_kwh ?? row.u1_inv4 ?? row.u1Inv4Kwh ?? 0);
-  const u2_inv1 = Number(row.u2_inv1_kwh ?? row.u2_inv1 ?? row.u2Inv1Kwh ?? 0);
-  const u2_inv2 = Number(row.u2_inv2_kwh ?? row.u2_inv2 ?? row.u2Inv2Kwh ?? 0);
-  const u2_inv3 = Number(row.u2_inv3_kwh ?? row.u2_inv3 ?? row.u2Inv3Kwh ?? 0);
-  const directTotal = Number(row.daily_total_kwh ?? row.dailyTotalKwh ?? row.grand_total ?? row.total_solar_kwh ?? row.solar_kwh ?? 0);
+  const u1_inv1 = Number(row.u1_inv1_kwh ?? row.u1_inv1 ?? row.u1Inv1Kwh ?? row.u1Inv1 ?? row.u1_inverter1 ?? row.u1_inverter_1 ?? row.u1Inverter1 ?? 0);
+  const u1_inv2 = Number(row.u1_inv2_kwh ?? row.u1_inv2 ?? row.u1Inv2Kwh ?? row.u1Inv2 ?? row.u1_inverter2 ?? row.u1_inverter_2 ?? row.u1Inverter2 ?? 0);
+  const u1_inv3 = Number(row.u1_inv3_kwh ?? row.u1_inv3 ?? row.u1Inv3Kwh ?? row.u1Inv3 ?? row.u1_inverter3 ?? row.u1_inverter_3 ?? row.u1Inverter3 ?? 0);
+  const u1_inv4 = Number(row.u1_inv4_kwh ?? row.u1_inv4 ?? row.u1Inv4Kwh ?? row.u1Inv4 ?? row.u1_inverter4 ?? row.u1_inverter_4 ?? row.u1Inverter4 ?? 0);
+  const u2_inv1 = Number(row.u2_inv1_kwh ?? row.u2_inv1 ?? row.u2Inv1Kwh ?? row.u2Inv1 ?? row.u2_inverter1 ?? row.u2_inverter_1 ?? row.u2Inverter1 ?? 0);
+  const u2_inv2 = Number(row.u2_inv2_kwh ?? row.u2_inv2 ?? row.u2Inv2Kwh ?? row.u2Inv2 ?? row.u2_inverter2 ?? row.u2_inverter_2 ?? row.u2Inverter2 ?? 0);
+  const u2_inv3 = Number(row.u2_inv3_kwh ?? row.u2_inv3 ?? row.u2Inv3Kwh ?? row.u2Inv3 ?? row.u2_inverter3 ?? row.u2_inverter_3 ?? row.u2Inverter3 ?? 0);
+  const directTotal = Number(row.daily_total_kwh ?? row.dailyTotalKwh ?? row.grand_total ?? row.grand_total_kwh ?? row.grandTotal ?? row.total_solar_kwh ?? row.solar_kwh ?? 0);
+  const storedU1 = Number(row.u1_total ?? row.u1Total ?? row.u1_total_kwh ?? row.u1TotalKwh ?? 0);
+  const storedU2 = Number(row.u2_total ?? row.u2Total ?? row.u2_total_kwh ?? row.u2TotalKwh ?? 0);
+  const storedGrand = Number(row.grand_total ?? row.grandTotal ?? row.grand_total_kwh ?? row.grandTotalKwh ?? row.daily_total_kwh ?? row.dailyTotalKwh ?? 0);
+  const effectiveDirect = storedGrand > 0 ? storedGrand : directTotal;
   const u1_total = Number((u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4).toFixed(2));
   const u2_total = Number((u2_inv1 + u2_inv2 + u2_inv3).toFixed(2));
   const invTotal = Number((u1_total + u2_total).toFixed(2));
   // If inverter breakdown sums to 0 but a direct daily total is provided (e.g., single-column upload), use direct
-  const grand_total = invTotal > 0 ? invTotal : Number((Number.isFinite(directTotal) ? directTotal : 0).toFixed(2));
-  // Distribute direct total to u1/u2 if needed for downstream display when inv breakdown missing
-  const finalU1 = u1_total > 0 ? u1_total : (invTotal === 0 && directTotal > 0 ? Number((directTotal * 0.6).toFixed(2)) : u1_total);
-  const finalU2 = u2_total > 0 ? u2_total : (invTotal === 0 && directTotal > 0 ? Number((directTotal - finalU1).toFixed(2)) : u2_total);
+  const grand_total = invTotal > 0 ? invTotal : Number((Number.isFinite(effectiveDirect) ? effectiveDirect : 0).toFixed(2));
+  // Distribute direct total to u1/u2 if needed for downstream display when inv breakdown missing - also respect stored totals if present
+  const finalU1 = u1_total > 0 ? u1_total : (storedU1 > 0 ? storedU1 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : u1_total));
+  const finalU2 = u2_total > 0 ? u2_total : (storedU2 > 0 ? storedU2 : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - finalU1).toFixed(2)) : u2_total));
   return {
     ...row,
     u1_inv1_kwh: u1_inv1,
@@ -232,7 +236,34 @@ export function processSolarRow(row) {
     u1_total: finalU1,
     u2_total: finalU2,
     grand_total,
-    daily_total_kwh: grand_total
+    daily_total_kwh: grand_total,
+    // camelCase aliases for UI store compatibility
+    u1Inv1Kwh: u1_inv1,
+    u1Inv2Kwh: u1_inv2,
+    u1Inv3Kwh: u1_inv3,
+    u1Inv4Kwh: u1_inv4,
+    u2Inv1Kwh: u2_inv1,
+    u2Inv2Kwh: u2_inv2,
+    u2Inv3Kwh: u2_inv3,
+    u1Total: finalU1,
+    u2Total: finalU2,
+    grandTotal: grand_total,
+    dailyTotalKwh: grand_total,
+    // snake without _kwh and inverter variants for robustness
+    u1_inv1,
+    u1_inv2,
+    u1_inv3,
+    u1_inv4,
+    u2_inv1,
+    u2_inv2,
+    u2_inv3,
+    u1_inverter1: u1_inv1,
+    u1_inverter2: u1_inv2,
+    u1_inverter3: u1_inv3,
+    u1_inverter4: u1_inv4,
+    u2_inverter1: u2_inv1,
+    u2_inverter2: u2_inv2,
+    u2_inverter3: u2_inv3,
   };
 }
 

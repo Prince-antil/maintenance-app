@@ -465,18 +465,24 @@ function monthlyAirCompressorToCloudRow(record) {
 
 // ── Daily Solar Generation normalizer ────────────────────────────────────
 function normalizeDailySolarGeneration(fields) {
-  const u1Inv1Kwh = toNumber(fields.u1Inv1Kwh);
-  const u1Inv2Kwh = toNumber(fields.u1Inv2Kwh);
-  const u1Inv3Kwh = toNumber(fields.u1Inv3Kwh);
-  const u1Inv4Kwh = toNumber(fields.u1Inv4Kwh);
-  const u2Inv1Kwh = toNumber(fields.u2Inv1Kwh);
-  const u2Inv2Kwh = toNumber(fields.u2Inv2Kwh);
-  const u2Inv3Kwh = toNumber(fields.u2Inv3Kwh);
+  // Handle multiple naming conventions: snake_case, camelCase, _kwh suffix, inverter variants
+  const u1Inv1Kwh = toNumber(fields.u1Inv1Kwh ?? fields.u1_inv1_kwh ?? fields.u1_inv1 ?? fields.u1Inv1 ?? fields.u1_inverter1 ?? fields.u1_inverter_1 ?? fields.u1Inverter1 ?? 0);
+  const u1Inv2Kwh = toNumber(fields.u1Inv2Kwh ?? fields.u1_inv2_kwh ?? fields.u1_inv2 ?? fields.u1Inv2 ?? fields.u1_inverter2 ?? fields.u1_inverter_2 ?? fields.u1Inverter2 ?? 0);
+  const u1Inv3Kwh = toNumber(fields.u1Inv3Kwh ?? fields.u1_inv3_kwh ?? fields.u1_inv3 ?? fields.u1Inv3 ?? fields.u1_inverter3 ?? fields.u1_inverter_3 ?? fields.u1Inverter3 ?? 0);
+  const u1Inv4Kwh = toNumber(fields.u1Inv4Kwh ?? fields.u1_inv4_kwh ?? fields.u1_inv4 ?? fields.u1Inv4 ?? fields.u1_inverter4 ?? fields.u1_inverter_4 ?? fields.u1Inverter4 ?? 0);
+  const u2Inv1Kwh = toNumber(fields.u2Inv1Kwh ?? fields.u2_inv1_kwh ?? fields.u2_inv1 ?? fields.u2Inv1 ?? fields.u2_inverter1 ?? fields.u2_inverter_1 ?? fields.u2Inverter1 ?? 0);
+  const u2Inv2Kwh = toNumber(fields.u2Inv2Kwh ?? fields.u2_inv2_kwh ?? fields.u2_inv2 ?? fields.u2Inv2 ?? fields.u2_inverter2 ?? fields.u2_inverter_2 ?? fields.u2Inverter2 ?? 0);
+  const u2Inv3Kwh = toNumber(fields.u2Inv3Kwh ?? fields.u2_inv3_kwh ?? fields.u2_inv3 ?? fields.u2Inv3 ?? fields.u2_inverter3 ?? fields.u2_inverter_3 ?? fields.u2Inverter3 ?? 0);
   const invTotal = round1(u1Inv1Kwh + u1Inv2Kwh + u1Inv3Kwh + u1Inv4Kwh + u2Inv1Kwh + u2Inv2Kwh + u2Inv3Kwh);
-  // Prefer inverter sum; fall back to explicit daily total (handles single-column uploads)
-  const rawDirect = fields.dailyTotalKwh ?? fields.daily_total_kwh ?? fields.grandTotal ?? fields.grand_total ?? 0;
+  // Prefer inverter sum; fall back to explicit daily total (handles single-column uploads) and stored totals
+  const rawDirect = fields.dailyTotalKwh ?? fields.daily_total_kwh ?? fields.grandTotal ?? fields.grand_total ?? fields.grand_total_kwh ?? fields.daily_total ?? fields.total_solar_kwh ?? fields.u1_total ?? fields.u1Total ?? fields.u2_total ?? fields.u2Total ?? 0;
   const directTotal = toNumber(rawDirect);
-  const dailyTotalKwh = invTotal > 0 ? invTotal : directTotal;
+  // Also handle case where directTotal is sum of stored u1_total/u2_total separate columns
+  const storedU1 = toNumber(fields.u1_total ?? fields.u1Total ?? fields.u1_total_kwh ?? fields.u1TotalKwh ?? 0);
+  const storedU2 = toNumber(fields.u2_total ?? fields.u2Total ?? fields.u2_total_kwh ?? fields.u2TotalKwh ?? 0);
+  const storedGrand = toNumber(fields.grand_total ?? fields.grandTotal ?? fields.grand_total_kwh ?? fields.grandTotalKwh ?? fields.dailyTotalKwh ?? fields.daily_total_kwh ?? 0);
+  const effectiveDirect = storedGrand > 0 ? storedGrand : (directTotal > 0 ? directTotal : (storedU1 + storedU2 > 0 ? storedU1 + storedU2 : 0));
+  const dailyTotalKwh = invTotal > 0 ? invTotal : effectiveDirect;
   return {
     id: fields.id || uid('dsg'),
     date: fields.date || new Date().toISOString().slice(0, 10),
@@ -497,14 +503,21 @@ function normalizeDailySolarGenerationCloudRow(row) {
   return normalizeDailySolarGeneration({
     id: row.id,
     date: row.date,
-    u1Inv1Kwh: row.u1_inv1_kwh,
-    u1Inv2Kwh: row.u1_inv2_kwh,
-    u1Inv3Kwh: row.u1_inv3_kwh,
-    u1Inv4Kwh: row.u1_inv4_kwh,
-    u2Inv1Kwh: row.u2_inv1_kwh,
-    u2Inv2Kwh: row.u2_inv2_kwh,
-    u2Inv3Kwh: row.u2_inv3_kwh,
-    dailyTotalKwh: row.daily_total_kwh,
+    u1Inv1Kwh: row.u1_inv1_kwh ?? row.u1_inv1 ?? row.u1_inverter1 ?? row.u1_inverter_1,
+    u1Inv2Kwh: row.u1_inv2_kwh ?? row.u1_inv2 ?? row.u1_inverter2 ?? row.u1_inverter_2,
+    u1Inv3Kwh: row.u1_inv3_kwh ?? row.u1_inv3 ?? row.u1_inverter3 ?? row.u1_inverter_3,
+    u1Inv4Kwh: row.u1_inv4_kwh ?? row.u1_inv4 ?? row.u1_inverter4 ?? row.u1_inverter_4,
+    u2Inv1Kwh: row.u2_inv1_kwh ?? row.u2_inv1 ?? row.u2_inverter1 ?? row.u2_inverter_1,
+    u2Inv2Kwh: row.u2_inv2_kwh ?? row.u2_inv2 ?? row.u2_inverter2 ?? row.u2_inverter_2,
+    u2Inv3Kwh: row.u2_inv3_kwh ?? row.u2_inv3 ?? row.u2_inverter3 ?? row.u2_inverter_3,
+    dailyTotalKwh: row.daily_total_kwh ?? row.daily_total ?? row.grand_total ?? row.grand_total_kwh ?? row.grandTotal ?? row.total_solar_kwh,
+    // also pass through stored totals if present for fallback
+    u1_total: row.u1_total ?? row.u1_total_kwh,
+    u2_total: row.u2_total ?? row.u2_total_kwh,
+    grand_total: row.grand_total ?? row.grand_total_kwh,
+    u1Total: row.u1Total ?? row.u1_total,
+    u2Total: row.u2Total ?? row.u2_total,
+    grandTotal: row.grandTotal ?? row.grand_total,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });

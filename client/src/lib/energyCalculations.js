@@ -29,22 +29,28 @@ export function formatEnergyPrecise(value, decimals = 1) {
  * @returns {Object} { u1Total, u2Total, grandTotal, u1Inv1, u1Inv2, u1Inv3, u1Inv4, u2Inv1, u2Inv2, u2Inv3 }
  */
 export function getSolarDerived(row) {
-  const u1Inv1 = Number(row.u1Inv1Kwh ?? row.u1_inv1_kwh ?? row.u1Inv1 ?? 0);
-  const u1Inv2 = Number(row.u1Inv2Kwh ?? row.u1_inv2_kwh ?? row.u1Inv2 ?? 0);
-  const u1Inv3 = Number(row.u1Inv3Kwh ?? row.u1_inv3_kwh ?? row.u1Inv3 ?? 0);
-  const u1Inv4 = Number(row.u1Inv4Kwh ?? row.u1_inv4_kwh ?? row.u1Inv4 ?? 0);
-  const u2Inv1 = Number(row.u2Inv1Kwh ?? row.u2_inv1_kwh ?? row.u2Inv1 ?? 0);
-  const u2Inv2 = Number(row.u2Inv2Kwh ?? row.u2_inv2_kwh ?? row.u2Inv2 ?? 0);
-  const u2Inv3 = Number(row.u2Inv3Kwh ?? row.u2_inv3_kwh ?? row.u2Inv3 ?? 0);
-  // Direct total fallback — handles single-column uploads (Daily Total / Grand Total) where inverter breakdown is absent
-  const directTotal = Number(row.dailyTotalKwh ?? row.daily_total_kwh ?? row.grandTotal ?? row.grand_total ?? row.daily_total ?? row.total_solar_kwh ?? row.solar_kwh ?? 0);
+  const u1Inv1 = Number(row.u1Inv1Kwh ?? row.u1_inv1_kwh ?? row.u1Inv1 ?? row.u1_inv1 ?? row.u1_inverter1 ?? row.u1_inverter_1 ?? row.u1Inverter1 ?? 0);
+  const u1Inv2 = Number(row.u1Inv2Kwh ?? row.u1_inv2_kwh ?? row.u1Inv2 ?? row.u1_inv2 ?? row.u1_inverter2 ?? row.u1_inverter_2 ?? row.u1Inverter2 ?? 0);
+  const u1Inv3 = Number(row.u1Inv3Kwh ?? row.u1_inv3_kwh ?? row.u1Inv3 ?? row.u1_inv3 ?? row.u1_inverter3 ?? row.u1_inverter_3 ?? row.u1Inverter3 ?? 0);
+  const u1Inv4 = Number(row.u1Inv4Kwh ?? row.u1_inv4_kwh ?? row.u1Inv4 ?? row.u1_inv4 ?? row.u1_inverter4 ?? row.u1_inverter_4 ?? row.u1Inverter4 ?? 0);
+  const u2Inv1 = Number(row.u2Inv1Kwh ?? row.u2_inv1_kwh ?? row.u2Inv1 ?? row.u2_inv1 ?? row.u2_inverter1 ?? row.u2_inverter_1 ?? row.u2Inverter1 ?? 0);
+  const u2Inv2 = Number(row.u2Inv2Kwh ?? row.u2_inv2_kwh ?? row.u2Inv2 ?? row.u2_inv2 ?? row.u2_inverter2 ?? row.u2_inverter_2 ?? row.u2Inverter2 ?? 0);
+  const u2Inv3 = Number(row.u2Inv3Kwh ?? row.u2_inv3_kwh ?? row.u2Inv3 ?? row.u2_inv3 ?? 0);
+  // Direct total fallback — handles single-column uploads (Daily Total / Grand Total) where inverter breakdown is absent and snake_case totals
+  const directTotal = Number(row.dailyTotalKwh ?? row.daily_total_kwh ?? row.grandTotal ?? row.grand_total ?? row.grand_total_kwh ?? row.daily_total ?? row.total_solar_kwh ?? row.solar_kwh ?? row.u1_total ?? row.u1Total ?? row.u2_total ?? row.u2Total ?? 0);
+  // Also consider u1_total/u2_total stored separately: if directTotal is sum of those, use it; otherwise inverters sum will be used
+  const storedU1Total = Number(row.u1Total ?? row.u1_total ?? row.u1_total_kwh ?? row.u1TotalKwh ?? 0);
+  const storedU2Total = Number(row.u2Total ?? row.u2_total ?? row.u2_total_kwh ?? row.u2TotalKwh ?? 0);
+  const storedGrand = Number(row.grandTotal ?? row.grand_total ?? row.grand_total_kwh ?? row.dailyTotalKwh ?? row.daily_total_kwh ?? 0);
   const u1TotalRaw = Number((u1Inv1 + u1Inv2 + u1Inv3 + u1Inv4).toFixed(2));
   const u2TotalRaw = Number((u2Inv1 + u2Inv2 + u2Inv3).toFixed(2));
   const invTotal = Number((u1TotalRaw + u2TotalRaw).toFixed(2));
-  const grandTotal = invTotal > 0 ? invTotal : Number((Number.isFinite(directTotal) ? directTotal : 0).toFixed(2));
-  // When only direct total exists, distribute 60/40 to U1/U2 for breakdown charts (mirrors engine)
-  const u1Total = u1TotalRaw > 0 ? u1TotalRaw : (invTotal === 0 && directTotal > 0 ? Number((directTotal * 0.6).toFixed(2)) : u1TotalRaw);
-  const u2Total = u2TotalRaw > 0 ? u2TotalRaw : (invTotal === 0 && directTotal > 0 ? Number((directTotal - u1Total).toFixed(2)) : u2TotalRaw);
+  // Prefer inverter sum, else stored totals, else direct total distribution
+  const effectiveDirect = storedGrand > 0 ? storedGrand : (Number.isFinite(directTotal) ? directTotal : 0);
+  const grandTotal = invTotal > 0 ? invTotal : Number(Number.isFinite(effectiveDirect) ? effectiveDirect.toFixed(2) : '0');
+  // When only direct total exists, distribute 60/40 to U1/U2 for breakdown charts (mirrors engine) - also respect stored U1/U2 totals if present
+  const u1Total = u1TotalRaw > 0 ? u1TotalRaw : (storedU1Total > 0 ? storedU1Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect * 0.6).toFixed(2)) : u1TotalRaw));
+  const u2Total = u2TotalRaw > 0 ? u2TotalRaw : (storedU2Total > 0 ? storedU2Total : (invTotal === 0 && effectiveDirect > 0 ? Number((effectiveDirect - u1Total).toFixed(2)) : u2TotalRaw));
   return {
     u1Inv1,
     u1Inv2,
@@ -56,6 +62,33 @@ export function getSolarDerived(row) {
     u1Total,
     u2Total,
     grandTotal,
+    // Aliases for flexible key mapping - ensures table renders regardless of accessor naming convention
+    u1Inv1Kwh: u1Inv1,
+    u1Inv2Kwh: u1Inv2,
+    u1Inv3Kwh: u1Inv3,
+    u1Inv4Kwh: u1Inv4,
+    u2Inv1Kwh: u2Inv1,
+    u2Inv2Kwh: u2Inv2,
+    u2Inv3Kwh: u2Inv3,
+    u1_inv1: u1Inv1,
+    u1_inv2: u1Inv2,
+    u1_inv3: u1Inv3,
+    u1_inv4: u1Inv4,
+    u2_inv1: u2Inv1,
+    u2_inv2: u2Inv2,
+    u2_inv3: u2Inv3,
+    u1_inv1_kwh: u1Inv1,
+    u1_inv2_kwh: u1Inv2,
+    u1_inv3_kwh: u1Inv3,
+    u1_inv4_kwh: u1Inv4,
+    u2_inv1_kwh: u2Inv1,
+    u2_inv2_kwh: u2Inv2,
+    u2_inv3_kwh: u2Inv3,
+    u1_total: u1Total,
+    u2_total: u2Total,
+    grand_total: grandTotal,
+    dailyTotalKwh: grandTotal,
+    daily_total_kwh: grandTotal,
   };
 }
 

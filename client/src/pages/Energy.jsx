@@ -91,6 +91,102 @@ const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.
 const lblCls = 'block text-xs text-slate-400 mb-1';
 const nf = (key, label, step) => ({ key, label, type: 'number', step: step || '0.1' });
 
+// Normalize solar row handling multiple database naming conventions (snake_case, camelCase, _kwh suffix, inverter variants)
+// Fixes zero-value mapping where DB stores lowercased/snake_case keys but UI expects camelCase Kwh keys
+const normalizeSolarRow = (row) => {
+  const pick = (...keys) => {
+    for (const k of keys) {
+      const v = row[k];
+      if (v !== undefined && v !== null && v !== '') {
+        const n = Number(v);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return undefined;
+  };
+  const toNum = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  // Normalize U1 Inverter keys - spec requires handling u1_inv1 / u1Inv1 / u1_inverter1 variants plus _kwh suffix for Supabase store
+  const u1_inv1 = toNum(pick('u1_inv1', 'u1_inv1_kwh', 'u1Inv1', 'u1Inv1Kwh', 'u1_inverter1', 'u1_inverter_1', 'u1Inverter1') ?? Number(row.u1_inv1 ?? row.u1Inv1 ?? row.u1_inverter1 ?? 0));
+  const u1_inv2 = toNum(pick('u1_inv2', 'u1_inv2_kwh', 'u1Inv2', 'u1Inv2Kwh', 'u1_inverter2', 'u1_inverter_2', 'u1Inverter2') ?? Number(row.u1_inv2 ?? row.u1Inv2 ?? row.u1_inverter2 ?? 0));
+  const u1_inv3 = toNum(pick('u1_inv3', 'u1_inv3_kwh', 'u1Inv3', 'u1Inv3Kwh', 'u1_inverter3', 'u1_inverter_3', 'u1Inverter3') ?? Number(row.u1_inv3 ?? row.u1Inv3 ?? row.u1_inverter3 ?? 0));
+  const u1_inv4 = toNum(pick('u1_inv4', 'u1_inv4_kwh', 'u1Inv4', 'u1Inv4Kwh', 'u1_inverter4', 'u1_inverter_4', 'u1Inverter4') ?? Number(row.u1_inv4 ?? row.u1Inv4 ?? row.u1_inverter4 ?? 0));
+  // Normalize U2 Inverter keys
+  const u2_inv1 = toNum(pick('u2_inv1', 'u2_inv1_kwh', 'u2Inv1', 'u2Inv1Kwh', 'u2_inverter1', 'u2_inverter_1', 'u2Inverter1') ?? Number(row.u2_inv1 ?? row.u2Inv1 ?? row.u2_inverter1 ?? 0));
+  const u2_inv2 = toNum(pick('u2_inv2', 'u2_inv2_kwh', 'u2Inv2', 'u2Inv2Kwh', 'u2_inverter2', 'u2_inverter_2', 'u2Inverter2') ?? Number(row.u2_inv2 ?? row.u2Inv2 ?? row.u2_inverter2 ?? 0));
+  const u2_inv3 = toNum(pick('u2_inv3', 'u2_inv3_kwh', 'u2Inv3', 'u2Inv3Kwh', 'u2_inverter3', 'u2_inverter_3', 'u2Inverter3') ?? Number(row.u2_inv3 ?? row.u2Inv3 ?? row.u2_inverter3 ?? 0));
+  // Recompute totals dynamically if u1_total or u2_total are missing/zero - spec fallback || sum of normalized inverters
+  const rawU1Total = pick('u1_total', 'u1_total_kwh', 'u1Total', 'u1TotalKwh', 'u1_totalKwh');
+  const rawU2Total = pick('u2_total', 'u2_total_kwh', 'u2Total', 'u2TotalKwh', 'u2_totalKwh');
+  const rawGrand = pick('grand_total', 'grand_total_kwh', 'grandTotal', 'grandTotalKwh', 'daily_total_kwh', 'dailyTotalKwh', 'daily_total', 'total_solar_kwh');
+  // Spec-required logic: Number(row.u1_total ?? row.u1Total) || (sum of row.u1_inv1...)
+  const specU1Total = Number(row.u1_total ?? row.u1Total) || (Number(row.u1_inv1 || 0) + Number(row.u1_inv2 || 0) + Number(row.u1_inv3 || 0) + Number(row.u1_inv4 || 0));
+  const specU2Total = Number(row.u2_total ?? row.u2Total) || (Number(row.u2_inv1 || 0) + Number(row.u2_inv2 || 0) + Number(row.u2_inv3 || 0));
+  // Enhanced totals using normalized inverter sums when spec yields 0
+  const calcU1 = u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4;
+  const calcU2 = u2_inv1 + u2_inv2 + u2_inv3;
+  const calcGrand = calcU1 + calcU2;
+  const u1_total = toNum(rawU1Total) || calcU1 || specU1Total || 0;
+  const u2_total = toNum(rawU2Total) || calcU2 || specU2Total || 0;
+  const grand_total = toNum(rawGrand) || (u1_total + u2_total) || calcGrand || 0;
+  return {
+    ...row,
+    // Spec-required snake_case keys
+    u1_inv1,
+    u1_inv2,
+    u1_inv3,
+    u1_inv4,
+    u2_inv1,
+    u2_inv2,
+    u2_inv3,
+    u1_total,
+    u2_total,
+    grand_total,
+    // Aliases for _kwh suffix (Supabase column naming)
+    u1_inv1_kwh: u1_inv1,
+    u1_inv2_kwh: u1_inv2,
+    u1_inv3_kwh: u1_inv3,
+    u1_inv4_kwh: u1_inv4,
+    u2_inv1_kwh: u2_inv1,
+    u2_inv2_kwh: u2_inv2,
+    u2_inv3_kwh: u2_inv3,
+    u1_total_kwh: u1_total,
+    u2_total_kwh: u2_total,
+    grand_total_kwh: grand_total,
+    daily_total_kwh: grand_total,
+    // CamelCase keys used by UI table (Energy.jsx) and energyCalculations store
+    u1Inv1Kwh: u1_inv1,
+    u1Inv2Kwh: u1_inv2,
+    u1Inv3Kwh: u1_inv3,
+    u1Inv4Kwh: u1_inv4,
+    u2Inv1Kwh: u2_inv1,
+    u2Inv2Kwh: u2_inv2,
+    u2Inv3Kwh: u2_inv3,
+    // Also provide without Kwh suffix for getSolarDerived fallback
+    u1Inv1: u1_inv1,
+    u1Inv2: u1_inv2,
+    u1Inv3: u1_inv3,
+    u1Inv4: u1_inv4,
+    u2Inv1: u2_inv1,
+    u2Inv2: u2_inv2,
+    u2Inv3: u2_inv3,
+    u1Total: u1_total,
+    u2Total: u2_total,
+    grandTotal: grand_total,
+    dailyTotalKwh: grand_total,
+    // Inverter alias without underscore (spec fallback)
+    u1Inverter1: u1_inv1,
+    u1Inverter2: u1_inv2,
+    u1Inverter3: u1_inv3,
+    u1Inverter4: u1_inv4,
+    u2Inverter1: u2_inv1,
+    u2Inverter2: u2_inv2,
+    u2Inverter3: u2_inv3,
+  };
+};
+
 function KpiCard({ label, value, unit, color = 'text-white', bg = 'bg-white/[0.04] border-white/[0.10]' }) {
   return (
     <div className={`rounded-control border p-4 ${bg}`}>
@@ -1160,8 +1256,11 @@ function SolarTab({ store, userName, isAdmin, dateFrom, dateTo, onAdd, onEdit, o
   const sorted = useMemo(() => [...dailySolarGeneration].sort((a, b) => (b.date || '').localeCompare(a.date || '')), [dailySolarGeneration]);
   const filtered = useMemo(() => sorted.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [sorted, dateFrom, dateTo]);
   
-  // Use canonical solar calculations - single source of truth
-  const withCalc = useMemo(() => sorted.map((r) => ({ ...r, ...getSolarDerived(r) })), [sorted]);
+  // Use canonical solar calculations - single source of truth with normalization for key mismatches
+  const withCalc = useMemo(() => sorted.map((r) => {
+    const normalized = normalizeSolarRow(r);
+    return { ...normalized, ...getSolarDerived(normalized) };
+  }), [sorted]);
   const filteredCalc = useMemo(() => withCalc.filter((r) => dateInRange(r.date, dateFrom, dateTo)), [withCalc, dateFrom, dateTo]);
   const pageData = useMemo(() => filteredCalc.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filteredCalc, page]);
 
