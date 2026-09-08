@@ -26,6 +26,7 @@ const KEYS = {
   testingCertificates: 'CCPL_TESTING_CERTIFICATES_V1',
   kpiRecords: 'CCPL_KPI_RECORDS_V1',
   kpiSettings: 'CCPL_KPI_SETTINGS_V1',
+  kpiFySheet: 'CCPL_KPI_FY_SHEET_V1',
 };
 
 const LEGACY_KEYS = {
@@ -49,6 +50,7 @@ const LEGACY_KEYS = {
   testingCertificates: [],
   kpiRecords: [],
   kpiSettings: [],
+  kpiFySheet: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -79,7 +81,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings', 'kpiFySheet'];
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
@@ -1471,6 +1473,134 @@ function kpiSettingsToCloudRow(record) {
   };
 }
 
+// ── KPI FY Sheet (Plant-level PQSCDM Goal Cascade FY 2026-27) ─────────────────
+const KPI_FY_TEMPLATE_ROWS = [
+  { sn: 1, focusPillar: 'P – Productivity', kpiMetric: 'Asset / Equipment Availability – Plant', uom: '%', kpiWt: 12, pillarWt: 37, annualTarget: '>=95', rating4: '>=97', rating5: '>=99', parentTarget: '>=95% (Engg Head)' },
+  { sn: 2, focusPillar: 'P – Productivity', kpiMetric: 'PM Schedule Adherence – Plant', uom: '%', kpiWt: 10, pillarWt: '', annualTarget: '>=90', rating4: '>=95', rating5: '>=98', parentTarget: '>=90% (Engg Head)' },
+  { sn: 3, focusPillar: 'P – Productivity', kpiMetric: 'Breakdown Frequency Reduction (MTBF improvement)', uom: '% improve', kpiWt: 7, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
+  { sn: 4, focusPillar: 'P – Productivity', kpiMetric: 'MTTR – Mean Time to Repair Reduction', uom: '% improve', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
+  { sn: 5, focusPillar: 'Q – Quality', kpiMetric: 'Equipment Calibration Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: 12, annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98% (Engg Head)' },
+  { sn: 6, focusPillar: 'Q – Quality', kpiMetric: 'Audit/ Regulatory NC – Engineering – Plant', uom: 'No. NCs', kpiWt: 5, pillarWt: '', annualTarget: '<=1', rating4: '0', rating5: '0', parentTarget: '<=2 consolidated' },
+  { sn: 7, focusPillar: 'S – Safety & Environment', kpiMetric: 'Zero LTI – Engineering / Maintenance – Plant', uom: 'No. LTI', kpiWt: 8, pillarWt: 20, annualTarget: '0', rating4: '0', rating5: '0', parentTarget: '0 (Engg Head)' },
+  { sn: 8, focusPillar: 'S – Safety & Environment', kpiMetric: 'Near Miss Reporting – Production Team', uom: 'No./Person/Mo', kpiWt: 3, pillarWt: '', annualTarget: '>=2', rating4: '>=2.5', rating5: '>=3', parentTarget: '>=2 (HSE Head)' },
+  { sn: 9, focusPillar: 'S – Safety & Environment', kpiMetric: 'LOTO / PTW Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: '', annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98%' },
+  { sn: 10, focusPillar: 'S – Safety & Environment', kpiMetric: 'ETP / STP Efficiency – Plant', uom: '%', kpiWt: 5, pillarWt: '', annualTarget: '>=80', rating4: '>=85', rating5: '>=90', parentTarget: '>=80% (Engg Head)' },
+  { sn: 11, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Energy Cost Reduction – Plant', uom: '% vs LY', kpiWt: 10, pillarWt: 23, annualTarget: '>=5', rating4: '>=8', rating5: '>=10', parentTarget: '>=5% (Engg Head)' },
+  { sn: 12, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Maintenance Cost vs Budget – Plant', uom: '%', kpiWt: 8, pillarWt: '', annualTarget: '<=100', rating4: '<=98', rating5: '<=95', parentTarget: '<=100%' },
+  { sn: 13, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Spare Parts Inventory Optimisation – Plant', uom: '% reduction', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10%' },
+  { sn: 14, focusPillar: 'D – Delivery / OTIF', kpiMetric: 'Engineering Clearance for Production – On Time', uom: '% requests', kpiWt: 5, pillarWt: 5, annualTarget: '>=95', rating4: '>=97', rating5: '100', parentTarget: '>=95%' },
+  { sn: 15, focusPillar: 'M – Morale & People', kpiMetric: 'Engg Team Training Mandays – Plant', uom: 'Mandays/Yr', kpiWt: 2, pillarWt: 4, annualTarget: '>=2', rating4: '>=3', rating5: '>=4', parentTarget: '>=2%' },
+  { sn: 16, focusPillar: 'M – Morale & People', kpiMetric: '5S – Engineering Areas – Plant', uom: '%', kpiWt: 2, pillarWt: '', annualTarget: '>=75', rating4: '>=85', rating5: '>=95', parentTarget: '>=75%' },
+];
+
+function getKpiFyTemplateRows() {
+  return KPI_FY_TEMPLATE_ROWS.map((r) => ({ ...r }));
+}
+
+function normalizeKpiFySheet(fields) {
+  const fy = String(fields.fy || fields.FY || '2026-27').trim() || '2026-27';
+  const id = String(fields.id || fy).trim() || fy;
+  let data = fields.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch { data = []; }
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    // Initialize with template rows and empty monthly actuals
+    data = getKpiFyTemplateRows().map((row) => ({
+      ...row,
+      q1: row.annualTarget, q2: row.annualTarget, q3: row.annualTarget, q4: row.annualTarget,
+      apr: '', may: '', jun: '', jul: '', aug: '', sep: '', oct: '', nov: '', dec: '', jan: '', feb: '', mar: '',
+      ytdAvg: '',
+      remarks: '',
+      isManualQ1: false, isManualQ2: false, isManualQ3: false, isManualQ4: false,
+      isManualApr: false, isManualMay: false, isManualJun: false, isManualJul: false, isManualAug: false, isManualSep: false, isManualOct: false, isManualNov: false, isManualDec: false, isManualJan: false, isManualFeb: false, isManualMar: false,
+    }));
+  } else {
+    // Ensure all template fields present and ytdAvg computed if missing
+    const templateMap = new Map(getKpiFyTemplateRows().map((r) => [r.sn, r]));
+    data = data.map((row) => {
+      const tpl = templateMap.get(Number(row.sn)) || {};
+      return {
+        sn: Number(row.sn || tpl.sn),
+        focusPillar: String(row.focusPillar || tpl.focusPillar || ''),
+        kpiMetric: String(row.kpiMetric || tpl.kpiMetric || ''),
+        uom: String(row.uom || tpl.uom || ''),
+        kpiWt: row.kpiWt ?? tpl.kpiWt ?? '',
+        pillarWt: row.pillarWt ?? tpl.pillarWt ?? '',
+        annualTarget: String(row.annualTarget ?? tpl.annualTarget ?? ''),
+        rating4: String(row.rating4 ?? tpl.rating4 ?? ''),
+        rating5: String(row.rating5 ?? tpl.rating5 ?? ''),
+        parentTarget: String(row.parentTarget ?? tpl.parentTarget ?? ''),
+        q1: row.q1 ?? tpl.annualTarget ?? '',
+        q2: row.q2 ?? tpl.annualTarget ?? '',
+        q3: row.q3 ?? tpl.annualTarget ?? '',
+        q4: row.q4 ?? tpl.annualTarget ?? '',
+        apr: row.apr ?? '', may: row.may ?? '', jun: row.jun ?? '', jul: row.jul ?? '', aug: row.aug ?? '', sep: row.sep ?? '',
+        oct: row.oct ?? '', nov: row.nov ?? '', dec: row.dec ?? '', jan: row.jan ?? '', feb: row.feb ?? '', mar: row.mar ?? '',
+        ytdAvg: row.ytdAvg ?? '',
+        remarks: row.remarks ?? '',
+        isManualQ1: !!row.isManualQ1, isManualQ2: !!row.isManualQ2, isManualQ3: !!row.isManualQ3, isManualQ4: !!row.isManualQ4,
+        isManualApr: !!row.isManualApr, isManualMay: !!row.isManualMay, isManualJun: !!row.isManualJun, isManualJul: !!row.isManualJul, isManualAug: !!row.isManualAug, isManualSep: !!row.isManualSep, isManualOct: !!row.isManualOct, isManualNov: !!row.isManualNov, isManualDec: !!row.isManualDec, isManualJan: !!row.isManualJan, isManualFeb: !!row.isManualFeb, isManualMar: !!row.isManualMar,
+        ...row,
+      };
+    });
+    // Add missing SNs if data was partial
+    const existingSns = new Set(data.map((r) => Number(r.sn)));
+    getKpiFyTemplateRows().forEach((tpl) => {
+      if (!existingSns.has(tpl.sn)) {
+        data.push({
+          ...tpl,
+          q1: tpl.annualTarget, q2: tpl.annualTarget, q3: tpl.annualTarget, q4: tpl.annualTarget,
+          apr: '', may: '', jun: '', jul: '', aug: '', sep: '', oct: '', nov: '', dec: '', jan: '', feb: '', mar: '', ytdAvg: '', remarks: '',
+          isManualQ1: false, isManualQ2: false, isManualQ3: false, isManualQ4: false,
+          isManualApr: false, isManualMay: false, isManualJun: false, isManualJul: false, isManualAug: false, isManualSep: false, isManualOct: false, isManualNov: false, isManualDec: false, isManualJan: false, isManualFeb: false, isManualMar: false,
+        });
+      }
+    });
+    data.sort((a,b)=>a.sn-b.sn);
+  }
+  // Compute YTD Avg for each row if not manually set and monthly data exists
+  data = data.map((row) => {
+    const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+    const vals = months.map((m) => row[m]).filter((v)=> v!=='' && v!=null && String(v).toLowerCase()!=='na' && String(v).trim()!=='' ).map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const ytd = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : '';
+    const ytdAvg = vals.length ? (Math.round(ytd*10)/10) : '';
+    return { ...row, ytdAvg: row.ytdAvg!=='' && row.ytdAvg!=null ? row.ytdAvg : ytdAvg };
+  });
+  return {
+    id,
+    fy,
+    title: String(fields.title || 'FY 2026-27 ◆ PQSCDM Goal Cascade ◆ Plant Engg Manager'),
+    subtitle: String(fields.subtitle || 'Plant Engineering / Maintenance Manager | Reports to Engg Head | Plant-specific | FY 2026-27'),
+    data,
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiFySheetCloudRow(row) {
+  return normalizeKpiFySheet({
+    id: row.id,
+    fy: row.fy,
+    title: row.title,
+    subtitle: row.subtitle,
+    data: row.data,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiFySheetToCloudRow(record) {
+  return {
+    id: record.id || record.fy || '2026-27',
+    fy: record.fy || '2026-27',
+    title: record.title,
+    subtitle: record.subtitle,
+    data: record.data,
+    updated_at: record.updatedAt || now(),
+  };
+}
+
 const CLOUD_ENTITY_CONFIG = {
   machines: {
     table: 'machines',
@@ -1580,6 +1710,12 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: kpiSettingsToCloudRow,
     orderBy: [{ column: 'id', ascending: true }],
   },
+  kpiFySheet: {
+    table: 'kpi_fy_sheet',
+    fromRow: normalizeKpiFySheetCloudRow,
+    toRow: kpiFySheetToCloudRow,
+    orderBy: [{ column: 'fy', ascending: true }],
+  },
 };
 
 let version = 0;
@@ -1663,6 +1799,7 @@ let state = {
   testingCertificates: loadPersistedValue('testingCertificates', []).map(normalizeTestingCertificate),
   kpiRecords: loadPersistedValue('kpiRecords', []).map(normalizeKpiRecord),
   kpiSettings: loadPersistedValue('kpiSettings', normalizeKpiSettings({})),
+  kpiFySheet: loadPersistedValue('kpiFySheet', [normalizeKpiFySheet({ fy: '2026-27' })]),
   plantSections: loadPersistedValue('plantSections', []).map((s) =>
     typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
   ),
@@ -1853,8 +1990,8 @@ async function fetchCloudEntity(entity) {
 
   const { data, error } = await query;
   if (error) {
-    // For optional tables (testingCertificates, kpiRecords, kpiSettings) return empty rather than crashing sync (table may not exist yet before migration)
-    if (entity === 'testingCertificates' || entity === 'kpiRecords' || entity === 'kpiSettings') {
+    // For optional tables (testingCertificates, kpiRecords, kpiSettings, kpiFySheet) return empty rather than crashing sync (table may not exist yet before migration)
+    if (entity === 'testingCertificates' || entity === 'kpiRecords' || entity === 'kpiSettings' || entity === 'kpiFySheet') {
       rtLog('warn', `FETCH failed on ${config.table} (optional, returning empty):`, error.message);
       return [];
     }
@@ -2131,7 +2268,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -2150,6 +2287,7 @@ async function initializeCloudSync() {
       fetchCloudEntity('testingCertificates'),
       fetchCloudEntity('kpiRecords'),
       fetchCloudEntity('kpiSettings'),
+      fetchCloudEntity('kpiFySheet'),
     ]);
 
     const remoteSnapshots = {
@@ -2171,6 +2309,7 @@ async function initializeCloudSync() {
       testingCertificates: remoteTestingCertificates,
       kpiRecords: remoteKpiRecords,
       kpiSettings: remoteKpiSettings,
+      kpiFySheet: remoteKpiFySheet,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -2219,6 +2358,16 @@ async function initializeCloudSync() {
     if (remoteKpiSettings?.length) {
       state = { ...state, kpiSettings: normalizeKpiSettings(remoteKpiSettings[0] || {}) };
       persistEntity('kpiSettings');
+    }
+    if (remoteKpiFySheet?.length) {
+      // kpi_fy_sheet is single FY row; replace local if cloud has data
+      const cloudSheet = remoteKpiFySheet[0];
+      if (cloudSheet && Array.isArray(cloudSheet.data) && cloudSheet.data.length) {
+        state = { ...state, kpiFySheet: [normalizeKpiFySheet(cloudSheet)] };
+        persistEntity('kpiFySheet');
+      }
+    } else if (!remoteKpiFySheet?.length && state.kpiFySheet?.length) {
+      // keep local default if cloud empty
     }
     notifyStoreUpdate();
 
@@ -3090,6 +3239,54 @@ export function upsertKpiSettings(fields, userName) {
 
 // Bulk import helper for KPI
 export function importKpiRecordsBulk(parsedRows, userName) {
+  // Detect FY Goal Cascade format (has sn) vs legacy machine-wise format (has period/section)
+  const isFySheet = parsedRows.length && parsedRows[0] && parsedRows[0].sn != null;
+  if (isFySheet) {
+    // FY 2026-27 sheet: update kpi_fy_sheet data array
+    let sheet = (state.kpiFySheet && state.kpiFySheet[0]) ? normalizeKpiFySheet(state.kpiFySheet[0]) : normalizeKpiFySheet({ fy: '2026-27' });
+    let data = [...sheet.data];
+    let updatedCount = 0;
+    parsedRows.forEach((row)=>{
+      const sn = Number(row.sn);
+      const idx = data.findIndex((r)=> Number(r.sn)===sn);
+      if (idx >=0) {
+        const existing = data[idx];
+        // Merge: keep static fields from template, update monthly actuals and quarterly targets where provided (non-empty)
+        const merged = { ...existing };
+        // Update all 27-col fields where imported row has non-empty value
+        const fields = ['focusPillar','kpiMetric','uom','kpiWt','pillarWt','annualTarget','rating4','rating5','parentTarget','q1','q2','q3','q4','apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+        fields.forEach((k)=>{
+          const val = row[k];
+          if (val !== undefined && String(val).trim() !== '') {
+            merged[k] = val;
+            // Mark manual for monthly/quarterly cells
+            const manualKey = 'isManual' + k.charAt(0).toUpperCase() + k.slice(1);
+            if (manualKey in merged) merged[manualKey] = true;
+          }
+        });
+        // Recompute YTD Avg
+        const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+        const vals = months.map((m)=> merged[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+        const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
+        merged.ytdAvg = ytd;
+        data[idx] = merged;
+        updatedCount++;
+      } else {
+        // New SN not in template — add as custom row
+        data.push(row);
+        updatedCount++;
+      }
+    });
+    data.sort((a,b)=>a.sn-b.sn);
+    const updatedSheet = normalizeKpiFySheet({ ...sheet, data, updatedAt: now() });
+    state = { ...state, kpiFySheet: [updatedSheet] };
+    commit('kpiFySheet');
+    queueCloudMutation('kpiFySheet','upsert',updatedSheet);
+    localImportSuppressUntil.kpiFySheet = Date.now() + 3000;
+    logActivity(userName, 'bulk imported KPI FY 2026-27 sheet', `${parsedRows.length} KPI rows`, 'kpi');
+    return { total: parsedRows.length, created: 0, updated: updatedCount };
+  }
+  // Legacy fallback: old machine-wise kpiRecords (for backwards compat)
   let created = 0; let updated = 0;
   parsedRows.forEach((raw)=>{
     let machineId = raw.machineId || '';
@@ -3104,6 +3301,35 @@ export function importKpiRecordsBulk(parsedRows, userName) {
   });
   localImportSuppressUntil.kpiRecords = Date.now() + 3000;
   return { total: parsedRows.length, created, updated };
+}
+
+export const getKpiFySheet = () => (state.kpiFySheet && state.kpiFySheet[0]) ? state.kpiFySheet[0] : normalizeKpiFySheet({ fy: '2026-27' });
+
+export function upsertKpiFySheet(sheet, userName) {
+  const normalized = normalizeKpiFySheet({ ...sheet, updatedAt: now() });
+  state = { ...state, kpiFySheet: [normalized] };
+  commit('kpiFySheet');
+  queueCloudMutation('kpiFySheet','upsert', normalized);
+  logActivity(userName || 'System', 'updated KPI FY 2026-27 sheet', '', 'kpi');
+  return normalized;
+}
+
+export function updateKpiFyCell(fy, sn, monthKey, value, userName) {
+  let sheet = getKpiFySheet();
+  const data = sheet.data.map((row)=>{
+    if (Number(row.sn) !== Number(sn)) return row;
+    const updated = { ...row, [monthKey]: value };
+    const manualKey = 'isManual' + monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
+    updated[manualKey] = value !== '';
+    // Recompute YTD
+    const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+    const vals = months.map((m)=> updated[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
+    updated.ytdAvg = ytd;
+    updated.updatedAt = now();
+    return updated;
+  });
+  return upsertKpiFySheet({ ...sheet, data }, userName);
 }
 
 // Auto-refresh KPI records where values are not manual, after PM/Breakdown changes

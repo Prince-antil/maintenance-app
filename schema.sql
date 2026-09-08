@@ -401,6 +401,23 @@ create table if not exists public.kpi_settings (
 
 insert into public.kpi_settings (id) values ('default') on conflict (id) do nothing;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 18. KPI FY SHEET — Plant-level PQSCDM Goal Cascade FY 2026-27 (27-col sheet)
+-- Stores monthly actuals Apr-Mar and quarterly targets for the 16 KPI rows as JSON
+-- Preserves old kpi_records/kpi_settings for backwards compatibility (no DROP)
+-- ─────────────────────────────────────────────────────────────────────────────
+create table if not exists public.kpi_fy_sheet (
+  id                              text primary key,
+  fy                              text not null unique, -- e.g., '2026-27'
+  title                           text not null default 'FY 2026-27 ◆ PQSCDM Goal Cascade ◆ Plant Engg Manager',
+  subtitle                        text not null default 'Plant Engineering / Maintenance Manager | Reports to Engg Head | Plant-specific | FY 2026-27',
+  data                            jsonb not null default '[]'::jsonb, -- array of KPI rows with Apr..Mar, Q1..Q4, YTD
+  created_at                      timestamptz not null default timezone('utc', now()),
+  updated_at                      timestamptz not null default timezone('utc', now())
+);
+
+insert into public.kpi_fy_sheet (id, fy, data) values ('2026-27', '2026-27', '[]'::jsonb) on conflict (fy) do nothing;
+
 -- =============================================================================
 -- ROW LEVEL SECURITY — Enable RLS on all tables and create permissive policies
 -- =============================================================================
@@ -421,6 +438,7 @@ alter table public.daily_solar_generation   enable row level security;
 alter table public.energy_settings          enable row level security;
 alter table public.kpi_records              enable row level security;
 alter table public.kpi_settings             enable row level security;
+alter table public.kpi_fy_sheet             enable row level security;
 
 drop policy if exists "public machines access"              on public.machines;
 drop policy if exists "public breakdown access"             on public.breakdown_logs;
@@ -439,6 +457,7 @@ drop policy if exists "public daily solar access"           on public.daily_sola
 drop policy if exists "public energy settings access"       on public.energy_settings;
 drop policy if exists "public kpi records access"           on public.kpi_records;
 drop policy if exists "public kpi settings access"          on public.kpi_settings;
+drop policy if exists "public kpi fy sheet access"         on public.kpi_fy_sheet;
 
 create policy "public machines access"
   on public.machines for all to anon, authenticated
@@ -506,6 +525,10 @@ create policy "public kpi records access"
 
 create policy "public kpi settings access"
   on public.kpi_settings for all to anon, authenticated
+  using (true) with check (true);
+
+create policy "public kpi fy sheet access"
+  on public.kpi_fy_sheet for all to anon, authenticated
   using (true) with check (true);
 
 -- =============================================================================
@@ -631,6 +654,13 @@ begin
   ) then
     alter publication supabase_realtime add table public.kpi_settings;
   end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'kpi_fy_sheet'
+  ) then
+    alter publication supabase_realtime add table public.kpi_fy_sheet;
+  end if;
 end
 $$;
 
@@ -655,6 +685,7 @@ alter table public.daily_solar_generation  replica identity full;
 alter table public.energy_settings         replica identity full;
 alter table public.kpi_records             replica identity full;
 alter table public.kpi_settings            replica identity full;
+alter table public.kpi_fy_sheet            replica identity full;
 
 -- =============================================================================
 -- SUPABASE STORAGE — AMC documents bucket

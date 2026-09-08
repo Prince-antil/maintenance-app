@@ -1,578 +1,505 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addKpiRecord, updateKpiRecord, deleteKpiRecord, purgeKpiRecords } from '../store.js';
-import { aggregateKpiRecords, kpiTrends, kpiSectionBreakdown, kpiStatusMeta, computeKpiStatus, formatPeriodKey, lastNMonths } from '../analytics.js';
-import { getAllSections } from '../constants.js';
-import EmptyState from '../components/EmptyState.jsx';
-import SectionSelect from '../components/SectionSelect.jsx';
-import { exportToCSV } from '../utils.js';
+import { useStore, upsertKpiFySheet } from '../store.js';
+import { aggregateBreakdownRecords, aggregatePMRecords, computeAvailability, formatPeriodKey } from '../analytics.js';
 import { downloadTemplate } from '../bulkImport.js';
+import EmptyState from '../components/EmptyState.jsx';
+import { exportToCSV } from '../utils.js';
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ComposedChart, Line, Tooltip, Legend, AreaChart, Area,
-} from 'recharts';
-import {
-  Activity, AlertTriangle, CheckCircle2, ClipboardCheck, Gauge, TrendingUp, Timer, TimerReset, Plus, Pencil, Trash2, Upload, Download, Eye, Search, X, BarChart3, Wrench,
+  Activity, Download, Upload, Save, Pencil, Trash2, AlertTriangle, CheckCircle2, Info, Eye,
 } from 'lucide-react';
 
-const PAGE_SIZE = 15;
-const currentPeriod = () => new Date().toISOString().slice(0, 7);
-const GRID = 'rgba(148,163,184,0.08)';
-const AXIS = { fill: '#64748B', fontSize: 11 };
-const TOOLTIP_STYLE = {
-  backgroundColor: '#0F172A',
-  border: '1px solid rgba(148,163,184,0.2)',
-  borderRadius: '10px',
-  fontSize: '12px',
-  color: '#E2E8F0',
-  boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-};
-function ChartTooltip(props) {
-  return <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(148,163,184,0.06)' }} {...props} />;
+// ── FY 2026-27 months in order Apr-Mar ─────────────────────────────────────
+const FY_MONTHS = [
+  { key: 'apr', label: 'Apr', period: '2026-04' },
+  { key: 'may', label: 'May', period: '2026-05' },
+  { key: 'jun', label: 'Jun', period: '2026-06' },
+  { key: 'jul', label: 'Jul', period: '2026-07' },
+  { key: 'aug', label: 'Aug', period: '2026-08' },
+  { key: 'sep', label: 'Sep', period: '2026-09' },
+  { key: 'oct', label: 'Oct', period: '2026-10' },
+  { key: 'nov', label: 'Nov', period: '2026-11' },
+  { key: 'dec', label: 'Dec', period: '2026-12' },
+  { key: 'jan', label: 'Jan', period: '2027-01' },
+  { key: 'feb', label: 'Feb', period: '2027-02' },
+  { key: 'mar', label: 'Mar', period: '2027-03' },
+];
+
+// Template rows are defined in store.js KPI_FY_TEMPLATE_ROWS and normalized via normalizeKpiFySheet
+// We reuse that via store.kpiFySheet[0].data — no hardcoding here to keep single source of truth
+
+function parseNumericMaybe(val) {
+  if (val === '' || val == null) return null;
+  const s = String(val).trim();
+  if (s.toLowerCase() === 'na' || s.toLowerCase() === 'n/a') return null;
+  const n = Number(String(s).replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-function StatusBadge({ status }) {
-  const meta = kpiStatusMeta(status);
-  return <span className={`badge text-[10px] px-2 py-0.5 rounded-full border ${meta.bg} ${meta.border} ${meta.color} font-semibold`}>{meta.label}</span>;
-}
-function AutoManualBadge({ isManual }) {
-  return isManual ? (
-    <span className="text-[9px] px-1 py-0 rounded border bg-amber-500/10 border-amber-500/30 text-amber-400 ml-1">Manual</span>
-  ) : (
-    <span className="text-[9px] px-1 py-0 rounded border bg-cyan-500/10 border-cyan-500/20 text-cyan-400 ml-1">Auto</span>
-  );
+function computeYtdAvg(row) {
+  const vals = FY_MONTHS.map((m) => parseNumericMaybe(row[m.key])).filter((n) => n !== null);
+  if (vals.length === 0) return '';
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return String(Math.round(avg * 10) / 10);
 }
 
-// ── KPI Form Modal ────────────────────────────────────────────────────────
-function KpiFormModal({ mode, initial, machines, sections, userName, onClose, pushToast }) {
-  const isEdit = mode === 'edit';
-  // Derive auto values for display when not manual
-  const [form, setForm] = useState(() => {
-    const base = initial || {};
-    return {
-      period: base.period || currentPeriod(),
-      section: base.section || '',
-      machineId: base.machineId || '',
-      machineRaw: base.machineName || base.machineCode || '',
-      pmCompliancePct: base.pmCompliancePct ?? '',
-      breakdownCount: base.breakdownCount ?? '',
-      breakdownHours: base.breakdownHours ?? '',
-      mttr: base.mttr ?? '',
-      mtbf: base.mtbf ?? '',
-      availabilityPct: base.availabilityPct ?? '',
-      kpiStatus: base.kpiStatus || 'Good',
-      remarks: base.remarks || '',
-      isManualPmCompliance: !!base.isManualPmCompliance,
-      isManualBreakdownCount: !!base.isManualBreakdownCount,
-      isManualBreakdownHours: !!base.isManualBreakdownHours,
-      isManualMttr: !!base.isManualMttr,
-      isManualMtbf: !!base.isManualMtbf,
-      isManualAvailability: !!base.isManualAvailability,
-      isManualKpiStatus: !!base.isManualKpiStatus,
-    };
-  });
-  const [error, setError] = useState('');
-  const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
-  const setCheck = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.checked }));
-  const setMachine = (val) => {
-    // val is machineId or '' for section-level
-    if (!val) { setForm((p) => ({ ...p, machineId: '', machineRaw: '' })); return; }
-    const m = machines.find((x) => x.id === val);
-    setForm((p) => ({ ...p, machineId: m ? m.id : '', machineRaw: m ? (m.name || m.machineCode) : val }));
-  };
-  const filteredMachines = form.section ? machines.filter((m) => m.section === form.section) : machines;
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!form.period || !form.section) { setError('Month and Plant/Section are required.'); return; }
-    const payload = {
-      period: form.period,
-      section: form.section,
-      machineId: form.machineId || '',
-      machineCode: form.machineRaw || '',
-      machineName: form.machineRaw || '',
-      pmCompliancePct: form.isManualPmCompliance ? Number(form.pmCompliancePct) : undefined,
-      breakdownCount: form.isManualBreakdownCount ? Number(form.breakdownCount) : undefined,
-      breakdownHours: form.isManualBreakdownHours ? Number(form.breakdownHours) : undefined,
-      mttr: form.isManualMttr ? Number(form.mttr) : undefined,
-      mtbf: form.isManualMtbf ? Number(form.mtbf) : undefined,
-      availabilityPct: form.isManualAvailability ? Number(form.availabilityPct) : undefined,
-      kpiStatus: form.isManualKpiStatus ? form.kpiStatus : undefined,
-      remarks: form.remarks,
-      isManualPmCompliance: form.isManualPmCompliance,
-      isManualBreakdownCount: form.isManualBreakdownCount,
-      isManualBreakdownHours: form.isManualBreakdownHours,
-      isManualMttr: form.isManualMttr,
-      isManualMtbf: form.isManualMtbf,
-      isManualAvailability: form.isManualAvailability,
-      isManualKpiStatus: form.isManualKpiStatus,
-    };
-    // Remove undefined to let auto logic fill
-    Object.keys(payload).forEach((k) => payload[k]===undefined && delete payload[k]);
-    if (isEdit) {
-      updateKpiRecord(initial.id, payload, userName);
-      pushToast({ type: 'success', title: 'KPI updated', message: `${form.section} · ${form.period}` });
-    } else {
-      addKpiRecord(payload, userName);
-      pushToast({ type: 'success', title: 'KPI added', message: `${form.section} · ${form.period}` });
+// Auto-calculate monthly actual from existing app data where applicable
+function getAutoMonthlyValue(sn, period, store) {
+  // period is YYYY-MM like 2026-04
+  const { breakdowns, machines, machineBreakdownLogs, pms, machinePmRecords, dailyUtilityLog } = store;
+  const section = null; // plant-level
+  switch (sn) {
+    case 1: { // Asset / Equipment Availability – Plant
+      // Use existing computeAvailability logic: (Available Hours - Breakdown Hours)/Available Hours *100
+      // For plant-level, available hours = machines.length * 720
+      const mCount = machines?.length || 1;
+      const bdRows = (breakdowns || []).filter((r) => r.period === period);
+      if (bdRows.length > 0) {
+        // Reuse exact value if already calculated
+        const hasOverride = bdRows.every((r) => r.availability_override != null);
+        if (hasOverride) {
+          const avg = bdRows.reduce((s, r) => s + Number(r.availability_override), 0) / bdRows.length;
+          return String(Math.round(avg * 10) / 10);
+        }
+        const totalHours = bdRows.reduce((s, r) => s + Number(r.downtimeHours || 0), 0);
+        const opHours = bdRows.reduce((s, r) => s + Number(r.operatingHours || 0), 0) || mCount * 720;
+        const avail = opHours > 0 ? Math.max(0, Math.round(((opHours - totalHours) / opHours) * 1000) / 10) : 100;
+        return String(avail);
+      }
+      // Fallback to machine logs aggregated
+      const logs = (machineBreakdownLogs || []).filter((r) => (r.date || '').slice(0, 7) === period);
+      if (logs.length > 0) {
+        const totalHours = logs.reduce((s, r) => s + Number(r.downtimeHours || 0), 0);
+        const opHours = mCount * 720;
+        const avail = opHours > 0 ? Math.max(0, Math.round(((opHours - totalHours) / opHours) * 1000) / 10) : 100;
+        return String(avail);
+      }
+      return '';
     }
-    onClose();
-  };
-
-  const inputCls = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
-  const labelCls = 'block text-xs text-slate-400 mb-1';
-  const checkCls = 'flex items-center gap-1.5 text-[10px] text-slate-400 mt-1';
-
-  return (
-    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label={isEdit ? 'Edit KPI' : 'Add KPI'}>
-      <div className="modal-content glass-card p-6 w-full max-w-2xl max-h-[92vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-card-title flex items-center gap-2">
-            <Activity size={16} className="text-cyan-400" aria-hidden="true" /> {isEdit ? 'Edit KPI Status' : 'Add KPI Status'}
-          </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close"><X size={18} aria-hidden="true" /></button>
-        </div>
-        <p className="text-meta mb-5 text-xs">Values auto-calculate from existing PM and Breakdown records for the selected Month/Section/Machine. Check <span className="text-amber-400">Manual</span> to override — auto values remain the default. Status is <span className="text-emerald-400">Auto</span> unless manually set.</p>
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className={labelCls} htmlFor="kpi-period">Month *</label>
-            <input id="kpi-period" type="month" className="input-field" value={form.period} onChange={set('period')} />
-          </div>
-          <div>
-            <label className={labelCls} htmlFor="kpi-section">Plant / Section *</label>
-            <SectionSelect value={form.section} onChange={(v) => setForm((p)=> ({...p, section: v}))} id="kpi-section" ariaLabel="Plant section" />
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelCls} htmlFor="kpi-machine">Machine / Equipment (optional)</label>
-            <select id="kpi-machine" className="select-field" value={form.machineId} onChange={(e)=>setMachine(e.target.value)}>
-              <option value="">Section-level (no machine)</option>
-              {filteredMachines.map((m)=> <option key={m.id} value={m.id}>{m.name || m.machineCode} — {m.section}</option>)}
-            </select>
-            {!form.machineId && (
-              <input type="text" className={`${inputCls} mt-2 text-xs`} placeholder="Or type machine name/code manually (for import)" value={form.machineRaw} onChange={set('machineRaw')} />
-            )}
-          </div>
-
-          {/* PM Compliance */}
-          <div>
-            <label className={labelCls}>PM Compliance % <AutoManualBadge isManual={form.isManualPmCompliance} /></label>
-            <input type="number" min="0" max="100" step="0.1" className={inputCls} value={form.pmCompliancePct} onChange={set('pmCompliancePct')} disabled={!form.isManualPmCompliance} placeholder={form.isManualPmCompliance ? 'e.g. 92.5' : 'Auto from PM records'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualPmCompliance} onChange={setCheck('isManualPmCompliance')} className="rounded" /> Manual override</label>
-          </div>
-          <div>
-            <label className={labelCls}>Breakdown Count <AutoManualBadge isManual={form.isManualBreakdownCount} /></label>
-            <input type="number" min="0" className={inputCls} value={form.breakdownCount} onChange={set('breakdownCount')} disabled={!form.isManualBreakdownCount} placeholder={form.isManualBreakdownCount ? '' : 'Auto from Breakdown logs'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualBreakdownCount} onChange={setCheck('isManualBreakdownCount')} className="rounded" /> Manual</label>
-          </div>
-          <div>
-            <label className={labelCls}>Breakdown Hours <AutoManualBadge isManual={form.isManualBreakdownHours} /></label>
-            <input type="number" min="0" step="0.1" className={inputCls} value={form.breakdownHours} onChange={set('breakdownHours')} disabled={!form.isManualBreakdownHours} placeholder={form.isManualBreakdownHours ? '' : 'Auto'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualBreakdownHours} onChange={setCheck('isManualBreakdownHours')} className="rounded" /> Manual</label>
-          </div>
-          <div>
-            <label className={labelCls}>MTTR (hrs) <AutoManualBadge isManual={form.isManualMttr} /></label>
-            <input type="number" min="0" step="0.1" className={inputCls} value={form.mttr} onChange={set('mttr')} disabled={!form.isManualMttr} placeholder={form.isManualMttr ? '' : 'Auto = Hours/Count'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualMttr} onChange={setCheck('isManualMttr')} className="rounded" /> Manual</label>
-          </div>
-          <div>
-            <label className={labelCls}>MTBF (hrs) <AutoManualBadge isManual={form.isManualMtbf} /></label>
-            <input type="number" min="0" step="0.1" className={inputCls} value={form.mtbf} onChange={set('mtbf')} disabled={!form.isManualMtbf} placeholder={form.isManualMtbf ? '' : 'Auto from Availability logic'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualMtbf} onChange={setCheck('isManualMtbf')} className="rounded" /> Manual</label>
-          </div>
-          <div>
-            <label className={labelCls}>Availability % <AutoManualBadge isManual={form.isManualAvailability} /></label>
-            <input type="number" min="0" max="100" step="0.1" className={inputCls} value={form.availabilityPct} onChange={set('availabilityPct')} disabled={!form.isManualAvailability} placeholder={form.isManualAvailability ? '' : 'Auto ((Avail-BD)/Avail)*100'} />
-            <label className={checkCls}><input type="checkbox" checked={form.isManualAvailability} onChange={setCheck('isManualAvailability')} className="rounded" /> Manual</label>
-          </div>
-          <div>
-            <label className={labelCls}>KPI Status <AutoManualBadge isManual={form.isManualKpiStatus} /></label>
-            <select className="select-field" value={form.kpiStatus} onChange={set('kpiStatus')} disabled={!form.isManualKpiStatus}>
-              <option>Good</option><option>Warning</option><option>Critical</option>
-            </select>
-            <label className={checkCls}><input type="checkbox" checked={form.isManualKpiStatus} onChange={setCheck('isManualKpiStatus')} className="rounded" /> Manual</label>
-          </div>
-          <div className="sm:col-span-2">
-            <label className={labelCls} htmlFor="kpi-remarks">Remarks</label>
-            <textarea id="kpi-remarks" rows={2} className="input-field resize-none" value={form.remarks} onChange={set('remarks')} placeholder="Optional notes" />
-          </div>
-          {error && (
-            <div className="sm:col-span-2 bg-red-500/10 border border-red-500/30 rounded-control px-3 py-2 text-red-400 text-xs flex items-center gap-2" role="alert">
-              <AlertTriangle size={13} aria-hidden="true" /> {error}
-            </div>
-          )}
-          <button type="submit" className="sm:col-span-2 btn-primary flex items-center justify-center gap-2">
-            <Plus size={14} aria-hidden="true" /> {isEdit ? 'Save Changes' : 'Add KPI Record'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
+    case 2: { // PM Schedule Adherence – Plant
+      const pmRows = (pms || []).filter((r) => r.period === period);
+      const machineRecs = (machinePmRecords || []).filter((r) => (r.pmDate || '').slice(0, 7) === period);
+      if (machineRecs.length > 0) {
+        const done = machineRecs.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
+        const pct = machineRecs.length > 0 ? Math.round((done / machineRecs.length) * 1000) / 10 : 0;
+        return String(pct);
+      }
+      if (pmRows.length > 0) {
+        const planned = pmRows.reduce((s, r) => s + Number(r.plannedCount || 0), 0);
+        const done = pmRows.reduce((s, r) => s + Number(r.doneCount || 0), 0);
+        const pct = planned > 0 ? Math.round((done / planned) * 1000) / 10 : 0;
+        return String(pct);
+      }
+      return '';
+    }
+    case 3: { // Breakdown Frequency Reduction (MTBF improvement) % improve
+      // Use MTBF for this month vs previous month or vs baseline. If no baseline, show MTBF value as reference
+      // We will show MTBF improvement % if we have previous month MTBF, otherwise show MTBF itself and let user interpret
+      const mCount = machines?.length || 1;
+      const curr = aggregateBreakdownRecords(breakdowns || [], period);
+      const currMtbf = curr.mtbf || 0;
+      if (!currMtbf) return '';
+      // Try previous month
+      const [y, m] = period.split('-').map(Number);
+      const prevD = new Date(y, m - 2, 1);
+      const prevPeriod = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}`;
+      const prev = aggregateBreakdownRecords(breakdowns || [], prevPeriod);
+      const prevMtbf = prev.mtbf || 0;
+      if (prevMtbf > 0) {
+        const improve = Math.round(((currMtbf - prevMtbf) / prevMtbf) * 1000) / 10;
+        return String(improve);
+      }
+      // No previous, return MTBF itself as actual (user can see improvement vs target)
+      return String(currMtbf);
+    }
+    case 4: { // MTTR – Mean Time to Repair Reduction % improve
+      const curr = aggregateBreakdownRecords(breakdowns || [], period);
+      const currMttr = curr.mttr || 0;
+      if (!currMttr) return '';
+      const [y, m] = period.split('-').map(Number);
+      const prevD = new Date(y, m - 2, 1);
+      const prevPeriod = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}`;
+      const prev = aggregateBreakdownRecords(breakdowns || [], prevPeriod);
+      const prevMttr = prev.mttr || 0;
+      if (prevMttr > 0) {
+        const improve = Math.round(((prevMttr - currMttr) / prevMttr) * 1000) / 10; // reduction
+        return String(improve);
+      }
+      return String(currMttr);
+    }
+    case 11: { // Energy Cost Reduction – Plant % vs LY
+      // Use Energy module where sufficient data exists: total energy consumption for this month vs same month last year
+      // If not enough data, return blank for manual
+      const curMonthRows = (store.energy || []).filter((e) => (e.date || '').slice(0, 7) === period);
+      if (curMonthRows.length === 0) {
+        // Try dailyUtilityLog
+        const curUtil = (dailyUtilityLog || []).filter((r) => (r.date || '').slice(0, 7) === period);
+        if (curUtil.length === 0) return '';
+      }
+      // For now, if we have current month data but no LY, return blank to allow manual (as spec: otherwise manual)
+      const [y, m] = period.split('-').map(Number);
+      const lyPeriod = `${y - 1}-${String(m).padStart(2, '0')}`;
+      const lyRows = (store.energy || []).filter((e) => (e.date || '').slice(0, 7) === lyPeriod);
+      const curTotal = curMonthRows.reduce((s, e) => s + Number(e.totalKwh || e.kwh || 0), 0);
+      const lyTotal = lyRows.reduce((s, e) => s + Number(e.totalKwh || e.kwh || 0), 0);
+      if (curTotal > 0 && lyTotal > 0) {
+        const reduction = Math.round(((lyTotal - curTotal) / lyTotal) * 1000) / 10;
+        return String(reduction);
+      }
+      return '';
+    }
+    default:
+      return '';
+  }
 }
 
-// ── Detail Modal ───────────────────────────────────────────────────────────
-function DetailModal({ row, onClose }) {
-  if (!row) return null;
-  const details = [
-    ['Month', formatPeriodKey(row.period, true)],
-    ['Plant / Section', row.section],
-    ['Machine / Equipment', row.machineName || row.machineCode || '— (Section-level)'],
-    ['PM Compliance %', `${row.pmCompliancePct}%`, row.isManualPmCompliance ? 'Manual' : 'Auto'],
-    ['Breakdown Count', row.breakdownCount, row.isManualBreakdownCount ? 'Manual' : 'Auto'],
-    ['Breakdown Hours', `${row.breakdownHours} hrs`, row.isManualBreakdownHours ? 'Manual' : 'Auto'],
-    ['MTTR', `${row.mttr} hrs`, row.isManualMttr ? 'Manual' : 'Auto'],
-    ['MTBF', `${row.mtbf} hrs`, row.isManualMtbf ? 'Manual' : 'Auto'],
-    ['Availability %', `${row.availabilityPct}%`, row.isManualAvailability ? 'Manual' : 'Auto'],
-    ['KPI Status', row.kpiStatus, row.isManualKpiStatus ? 'Manual' : 'Auto'],
-    ['Remarks', row.remarks || '—', ''],
-  ];
-  return (
-    <div className="modal-overlay" onClick={(e)=>e.target===e.currentTarget&&onClose()} role="dialog" aria-modal="true" aria-label="KPI detail">
-      <div className="modal-content glass-card p-6 w-full max-w-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-card-title">KPI Detail</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close"><X size={18} aria-hidden="true" /></button>
-        </div>
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
-          {details.map(([label, value, src])=>(
-            <div key={label} className={label==='Remarks' ? 'sm:col-span-2' : ''}>
-              <dt className="text-slate-500 text-[10px] uppercase tracking-wider flex items-center gap-1">{label} {src && <span className={`text-[9px] px-1 py-0 rounded border ${src==='Manual'?'bg-amber-500/10 border-amber-500/30 text-amber-400':'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'}`}>{src}</span>}</dt>
-              <dd className="text-slate-200 text-[13px] mt-0.5 break-words">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
-    </div>
-  );
-}
-
-// ── Summary Cards ──────────────────────────────────────────────────────────
-function KpiSummaryCards({ summary }) {
-  const cards = [
-    { icon: ClipboardCheck, label: 'Avg PM Compliance', value: `${summary.avgPmCompliance}%`, tone: summary.avgPmCompliance>=90?'success':summary.avgPmCompliance>=75?'warning':'danger', sub: `${summary.count} records` },
-    { icon: AlertTriangle, label: 'Total Breakdowns', value: summary.totalBreakdowns, tone: summary.totalBreakdowns<=2?'success':summary.totalBreakdowns<=5?'warning':'danger', sub: `${summary.totalHours} hrs` },
-    { icon: Timer, label: 'Avg MTTR', value: `${summary.avgMttr}h`, tone: summary.avgMttr<=2?'success':summary.avgMttr<=5?'warning':'danger' },
-    { icon: TimerReset, label: 'Avg MTBF', value: `${summary.avgMtbf}h`, tone: summary.avgMtbf>=200?'success':summary.avgMtbf>=100?'warning':'danger' },
-    { icon: Gauge, label: 'Avg Availability', value: `${summary.avgAvailability}%`, tone: summary.avgAvailability>=95?'success':summary.avgAvailability>=85?'warning':'danger' },
-    { icon: Activity, label: 'KPI Status Mix', value: `G:${summary.byStatus.Good} W:${summary.byStatus.Warning} C:${summary.byStatus.Critical}`, tone: summary.byStatus.Critical>0?'danger':summary.byStatus.Warning>0?'warning':'success', sub: 'Good/Warning/Critical' },
-  ];
-  // Map tone to KPIStat style
-  const toneMap = { success:'success', warning:'warning', danger:'danger' };
-  return (
-    <section aria-label="KPI summary" className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-4">
-      {cards.map((c)=>(
-        <div key={c.label} className="glass-card p-4 flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <div className={`w-8 h-8 rounded-control flex items-center justify-center bg-white/[0.06] ${c.tone==='success'?'text-emerald-400':c.tone==='warning'?'text-amber-400':c.tone==='danger'?'text-red-400':'text-cyan-400'}`}>
-              <c.icon size={16} aria-hidden="true" />
-            </div>
-            <span className="text-slate-400 text-[11px] font-medium leading-tight">{c.label}</span>
-          </div>
-          <p className={`text-white text-xl font-bold leading-none tabular-nums ${c.tone==='success'?'text-emerald-400':c.tone==='warning'?'text-amber-400':c.tone==='danger'?'text-red-400':''}`}>{c.value}</p>
-          {c.sub && <p className="text-slate-500 text-[11px]">{c.sub}</p>}
-        </div>
-      ))}
-    </section>
-  );
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────
 export default function KPIStatus() {
   const { user } = useAuth();
-  const { openUpload, pushToast } = useUI();
+  const { pushToast } = useUI();
   const store = useStore();
-  const { kpiRecords = [], kpiSettings, machines = [], breakdowns = [], pms = [], machineBreakdownLogs = [], machinePmRecords = [] } = store;
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
 
-  const [monthFilter, setMonthFilter] = useState('');
-  const [sectionFilter, setSectionFilter] = useState('');
-  const [machineFilter, setMachineFilter] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [viewing, setViewing] = useState(null);
-  const [deleting, setDeleting] = useState(null);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [confirmPurge, setConfirmPurge] = useState(false);
-
-  const sections = getAllSections(store.plantSections);
-  const machineOptions = machines;
-
-  // Auto-refresh: when PM/Breakdown source data changes, KPI records auto-update via store refreshKpiAutoValues
-  // Also ensure derived display stays in sync with Realtime
-  const filtered = useMemo(() => {
-    let rows = [...(kpiRecords||[])];
-    if (monthFilter) rows = rows.filter((r)=>r.period===monthFilter);
-    if (sectionFilter) rows = rows.filter((r)=>r.section===sectionFilter);
-    if (machineFilter) rows = rows.filter((r)=>(r.machineId||'')===machineFilter);
-    if (search) {
-      const q = search.toLowerCase();
-      rows = rows.filter((r)=> (r.section||'').toLowerCase().includes(q) || (r.machineName||'').toLowerCase().includes(q) || (r.machineCode||'').toLowerCase().includes(q) || (r.period||'').toLowerCase().includes(q));
+  // FY sheet is single record with fy='2026-27'
+  const sheet = useMemo(() => {
+    const raw = (store.kpiFySheet && store.kpiFySheet[0]) ? store.kpiFySheet[0] : { fy: '2026-27', data: [] };
+    // Ensure data is normalized (store does, but also handle empty)
+    if (!raw.data || raw.data.length === 0) {
+      // Fallback to template via store helper (if store hasn't initialized yet)
+      // We will let store's normalize handle, but provide empty to avoid crash
+      return raw;
     }
-    return rows.sort((a,b)=> b.period.localeCompare(a.period) || a.section.localeCompare(b.section));
-  }, [kpiRecords, monthFilter, sectionFilter, machineFilter, search]);
+    return raw;
+  }, [store.kpiFySheet]);
 
-  const summary = useMemo(()=> aggregateKpiRecords(filtered), [filtered]);
-  const trends = useMemo(()=> kpiTrends(kpiRecords, 6, sectionFilter||null, machineFilter||null), [kpiRecords, sectionFilter, machineFilter]);
-  const sectionBreakdown = useMemo(()=> kpiSectionBreakdown(filtered), [filtered]);
+  const rows = useMemo(() => {
+    const data = Array.isArray(sheet.data) ? sheet.data : [];
+    // Sort by Sn
+    return [...data].sort((a, b) => Number(a.sn) - Number(b.sn));
+  }, [sheet]);
 
-  const monthOptions = useMemo(()=>{
-    const set = new Set((kpiRecords||[]).map((r)=>r.period).filter(Boolean));
-    // also include months from PM/Breakdown for auto-create convenience
-    [...breakdowns.map((r)=>r.period), ...pms.map((r)=>r.period)].forEach((p)=>p&&set.add(p));
-    return [...set].sort((a,b)=>b.localeCompare(a));
-  }, [kpiRecords, breakdowns, pms]);
+  // Local edit state for monthly cells: { `${sn}-${monthKey}`: value }
+  const [edits, setEdits] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page-1)*PAGE_SIZE, page*PAGE_SIZE);
+  // When store updates (e.g., Realtime or auto), clear local edits that are now synced
+  useEffect(() => {
+    setEdits({});
+  }, [sheet.updatedAt]);
 
-  const handleExport = () => exportToCSV(filtered, [
-    { key: 'period', label: 'Month' },
-    { key: 'section', label: 'Plant/Section' },
-    { key: 'machineName', label: 'Machine/Equipment' },
-    { key: 'pmCompliancePct', label: 'PM Compliance %' },
-    { key: 'breakdownCount', label: 'Breakdown Count' },
-    { key: 'breakdownHours', label: 'Breakdown Hours' },
-    { key: 'mttr', label: 'MTTR' },
-    { key: 'mtbf', label: 'MTBF' },
-    { key: 'availabilityPct', label: 'Availability %' },
-    { key: 'kpiStatus', label: 'KPI Status' },
-    { key: 'remarks', label: 'Remarks' },
-  ], `kpi-status-${monthFilter||'all'}.csv`);
+  const handleCellChange = (sn, monthKey, value) => {
+    const k = `${sn}-${monthKey}`;
+    setEdits((prev) => ({ ...prev, [k]: value }));
+  };
+
+  const handleQuarterChange = (sn, qKey, value) => {
+    const k = `${sn}-${qKey}`;
+    setEdits((prev) => ({ ...prev, [k]: value }));
+  };
+
+  const handleSave = async () => {
+    if (!isAdmin) { pushToast({ type: 'error', title: 'Not allowed', message: 'Only admin can edit KPI sheet' }); return; }
+    setSaving(true);
+    try {
+      const newData = rows.map((row) => {
+        const sn = row.sn;
+        const updated = { ...row };
+        let changed = false;
+        // Quarterly
+        ['q1', 'q2', 'q3', 'q4'].forEach((q) => {
+          const k = `${sn}-${q}`;
+          if (k in edits) {
+            updated[q] = edits[k];
+            updated[`isManual${q.charAt(0).toUpperCase()}${q.slice(1)}`] = edits[k] !== '';
+            changed = true;
+          }
+        });
+        // Monthly
+        FY_MONTHS.forEach((m) => {
+          const k = `${sn}-${m.key}`;
+          if (k in edits) {
+            updated[m.key] = edits[k];
+            const manualKey = `isManual${m.key.charAt(0).toUpperCase()}${m.key.slice(1)}`;
+            updated[manualKey] = edits[k] !== '';
+            changed = true;
+          }
+        });
+        // Recompute YTD
+        if (changed) {
+          const vals = FY_MONTHS.map((mm) => updated[mm.key]).filter((v) => v !== '' && String(v).toLowerCase() !== 'na').map((v) => Number(String(v).replace(/[^0-9.\-]/g, ''))).filter((n) => Number.isFinite(n));
+          const ytd = vals.length ? String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10) : '';
+          updated.ytdAvg = ytd;
+        }
+        return updated;
+      });
+      const updatedSheet = { ...sheet, data: newData, updatedAt: new Date().toISOString() };
+      upsertKpiFySheet(updatedSheet, userName);
+      pushToast({ type: 'success', title: 'KPI FY 2026-27 saved', message: `${newData.length} KPIs updated` });
+      setEdits({});
+    } catch (e) {
+      pushToast({ type: 'error', title: 'Save failed', message: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleExport = () => {
+    // Export exactly 27 columns in order specified
+    const headers = ['Sn','Focus Pillar','KPI / Metric','UoM','KPI Wt %','Pillar Wt %','Annual Target (Rating 3)','Rating 4','Rating 5','Parent Target','Q1 Apr–Jun','Q2 Jul–Sep','Q3 Oct–Dec','Q4 Jan–Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','YTD Avg'];
+    const exportRows = rows.map((r) => ({
+      'Sn': r.sn,
+      'Focus Pillar': r.focusPillar,
+      'KPI / Metric': r.kpiMetric,
+      'UoM': r.uom,
+      'KPI Wt %': r.kpiWt,
+      'Pillar Wt %': r.pillarWt,
+      'Annual Target (Rating 3)': r.annualTarget,
+      'Rating 4': r.rating4,
+      'Rating 5': r.rating5,
+      'Parent Target': r.parentTarget,
+      'Q1 Apr–Jun': r.q1,
+      'Q2 Jul–Sep': r.q2,
+      'Q3 Oct–Dec': r.q3,
+      'Q4 Jan–Mar': r.q4,
+      'Apr': r.apr,
+      'May': r.may,
+      'Jun': r.jun,
+      'Jul': r.jul,
+      'Aug': r.aug,
+      'Sep': r.sep,
+      'Oct': r.oct,
+      'Nov': r.nov,
+      'Dec': r.dec,
+      'Jan': r.jan,
+      'Feb': r.feb,
+      'Mar': r.mar,
+      'YTD Avg': r.ytdAvg,
+    }));
+    exportToCSV(exportRows, headers.map((h) => ({ key: h, label: h })), `KPI_FY2026-27_Goal_Cascade_${new Date().toISOString().slice(0,10)}.csv`);
+  };
+
+  const handleImportReset = async () => {
+    if (!isAdmin) return;
+    const updatedSheet = { ...sheet, data: sheet.data.map((r) => {
+      // For auto KPIs, recalculate monthly actuals from current source data where blank and not manual
+      const autoSns = [1,2,3,4,11];
+      if (!autoSns.includes(Number(r.sn))) return r;
+      const updated = { ...r };
+      FY_MONTHS.forEach((m) => {
+        const manualKey = `isManual${m.key.charAt(0).toUpperCase()}${m.key.slice(1)}`;
+        if (!updated[manualKey] && (updated[m.key] === '' || updated[m.key] == null)) {
+          const autoVal = getAutoMonthlyValue(Number(r.sn), m.period, store);
+          if (autoVal !== '') {
+            updated[m.key] = autoVal;
+          }
+        }
+      });
+      const vals = FY_MONTHS.map((mm) => updated[mm.key]).filter((v) => v !== '' && String(v).toLowerCase() !== 'na').map((v) => Number(String(v).replace(/[^0-9.\-]/g, ''))).filter((n) => Number.isFinite(n));
+      const ytd = vals.length ? String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10) : '';
+      updated.ytdAvg = ytd;
+      return updated;
+    }) };
+    upsertKpiFySheet(updatedSheet, userName);
+    pushToast({ type: 'success', title: 'Auto values refreshed', message: 'Monthly actuals recalculated from PM/Breakdown/Energy where available' });
+  };
+
+  if (rows.length === 0) {
+    return (
+      <div className="max-w-7xl mx-auto space-y-6">
+        <EmptyState title="No KPI data available." description="FY 2026-27 PQSCDM Goal Cascade sheet will appear here. Import the KPI template or wait for auto-generation from PM/Breakdown records." />
+      </div>
+    );
+  }
+
+  const hasEdits = Object.keys(edits).length > 0;
 
   return (
-    <div className="max-w-[1440px] mx-auto space-y-6">
+    <div className="max-w-[1600px] mx-auto space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <h2 className="text-page-title flex items-center gap-3">
-            <Activity size={28} className="text-cyan-400" aria-hidden="true" /> KPI Status
+            <Activity size={28} className="text-emerald-400" aria-hidden="true" /> KPI Status
           </h2>
-          <p className="text-body mt-1.5">Monthly KPI per Section/Machine — auto-calculated from PM & Breakdown records, with manual override. {kpiRecords.length} records</p>
+          <p className="text-body mt-1.5">Plant Engineering KPI — FY 2026-27 PQSCDM Goal Cascade</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={handleExport} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> Export CSV</button>
+          <button onClick={handleExport} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> Export CSV (27-col)</button>
+          <button onClick={() => downloadTemplate('kpi')} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> KPI Template (27-col)</button>
           {isAdmin && (
             <>
-              <button onClick={()=> downloadTemplate('kpi')} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> KPI Template</button>
-              <button onClick={()=> openUpload({ kind:'bulk', module:'kpi' })} className="btn-success inline-flex items-center gap-2 whitespace-nowrap text-xs"><Upload size={13} aria-hidden="true" /> Bulk Import</button>
-              <button onClick={()=>{ setEditing(null); setShowForm(true); }} className="btn-primary inline-flex items-center gap-2 whitespace-nowrap"><Plus size={15} aria-hidden="true" /> Add KPI</button>
+              <button onClick={handleImportReset} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap" title="Recalculate auto monthly values from current PM/Breakdown/Energy data"><Activity size={13} aria-hidden="true" /> Refresh Auto</button>
+              <button onClick={() => setConfirmReset(true)} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap text-amber-400 hover:text-amber-300 border border-amber-500/20"><Trash2 size={13} aria-hidden="true" /> Reset Sheet</button>
             </>
           )}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="glass-card p-4 flex flex-col lg:flex-row gap-3 items-stretch lg:items-center">
-        <div className="flex flex-1 gap-2 flex-wrap">
-          <select className="select-field text-xs min-w-[160px]" value={monthFilter} onChange={(e)=>{setMonthFilter(e.target.value); setPage(1);}}>
-            <option value="">All Months</option>
-            {monthOptions.map((m)=> <option key={m} value={m}>{formatPeriodKey(m,true)}</option>)}
-          </select>
-          <select className="select-field text-xs min-w-[180px]" value={sectionFilter} onChange={(e)=>{setSectionFilter(e.target.value); setPage(1);}}>
-            <option value="">All Plant/Sections</option>
-            {sections.map((s)=> <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className="select-field text-xs min-w-[180px]" value={machineFilter} onChange={(e)=>{setMachineFilter(e.target.value); setPage(1);}}>
-            <option value="">All Machines</option>
-            {machineOptions.map((m)=> <option key={m.id} value={m.id}>{m.name || m.machineCode}</option>)}
-          </select>
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
-            <input type="search" className="input-field pl-9 text-xs" placeholder="Search section, machine, month..." value={search} onChange={(e)=>{setSearch(e.target.value); setPage(1);}} aria-label="Search KPI" />
-          </div>
-        </div>
-        {isAdmin && kpiRecords.length>0 && (
-          <button onClick={()=>setConfirmPurge(true)} className="btn-ghost text-xs whitespace-nowrap text-red-400 hover:text-red-300 border border-red-500/20"><Trash2 size={13} aria-hidden="true" /> Purge</button>
-        )}
-      </div>
-
-      {/* Summary Cards */}
-      {filtered.length>0 ? <KpiSummaryCards summary={summary} /> : null}
-
-      {/* Trend Charts — 2x2 */}
-      {filtered.length>0 && (
-        <section aria-label="KPI Trends" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="glass-card p-5 flex flex-col">
-            <h4 className="text-card-title mb-0.5">PM Compliance Trend</h4>
-            <p className="text-meta mb-3">Monthly PM compliance %</p>
-            <div className="flex-1" style={{minHeight:220}}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trends} margin={{top:8,right:12,left:4,bottom:0}}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
-                  <YAxis tick={AXIS} axisLine={false} tickLine={false} domain={[0,100]} unit="%" />
-                  <ChartTooltip />
-                  <Line type="monotone" dataKey="pmCompliance" name="PM Compliance %" stroke="#10B981" strokeWidth={2.5} dot={{r:3,fill:'#10B981'}} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          <div className="glass-card p-5 flex flex-col">
-            <h4 className="text-card-title mb-0.5">Availability Trend</h4>
-            <p className="text-meta mb-3">Monthly availability %</p>
-            <div className="flex-1" style={{minHeight:220}}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trends} margin={{top:8,right:12,left:4,bottom:0}}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
-                  <YAxis tick={AXIS} axisLine={false} tickLine={false} domain={[0,100]} unit="%" />
-                  <ChartTooltip />
-                  <Line type="monotone" dataKey="availability" name="Availability %" stroke="#06B6D4" strokeWidth={2.5} dot={{r:3,fill:'#06B6D4'}} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          <div className="glass-card p-5 flex flex-col">
-            <h4 className="text-card-title mb-0.5">MTTR Trend</h4>
-            <p className="text-meta mb-3">Mean time to repair (hrs)</p>
-            <div className="flex-1" style={{minHeight:220}}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trends} margin={{top:8,right:12,left:4,bottom:0}}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
-                  <YAxis tick={AXIS} axisLine={false} tickLine={false} />
-                  <ChartTooltip />
-                  <Line type="monotone" dataKey="mttr" name="MTTR" stroke="#8B5CF6" strokeWidth={2.5} dot={{r:3,fill:'#8B5CF6'}} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          <div className="glass-card p-5 flex flex-col">
-            <h4 className="text-card-title mb-0.5">MTBF Trend</h4>
-            <p className="text-meta mb-3">Mean time between failures (hrs)</p>
-            <div className="flex-1" style={{minHeight:220}}>
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={trends} margin={{top:8,right:12,left:4,bottom:0}}>
-                  <CartesianGrid stroke={GRID} vertical={false} />
-                  <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} />
-                  <YAxis tick={AXIS} axisLine={false} tickLine={false} />
-                  <ChartTooltip />
-                  <Line type="monotone" dataKey="mtbf" name="MTBF" stroke="#F59E0B" strokeWidth={2.5} dot={{r:3,fill:'#F59E0B'}} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Section-wise breakdown */}
-      {sectionBreakdown.length>0 && (
-        <div className="glass-card p-5">
-          <h4 className="text-card-title mb-0.5">Section-wise KPI Overview</h4>
-          <p className="text-meta mb-3">Aggregated by Plant/Section {monthFilter? `for ${formatPeriodKey(monthFilter,true)}`:''}</p>
-          <div className="overflow-x-auto">
-            <table className="enterprise-table w-full min-w-[700px] text-xs">
-              <thead><tr><th>Plant/Section</th><th>Records</th><th>PM Compliance</th><th>Availability</th><th>MTTR</th><th>MTBF</th><th>Breakdowns</th></tr></thead>
-              <tbody>
-                {sectionBreakdown.map((r)=>(
-                  <tr key={r.section} className="hover:bg-white/[0.03] cursor-pointer" onClick={()=>setSectionFilter(r.section)}>
-                    <td className="text-white font-medium">{r.section}</td>
-                    <td className="text-slate-300">{r.count}</td>
-                    <td className="text-emerald-400">{r.avgPmCompliance}%</td>
-                    <td className="text-cyan-400">{r.avgAvailability}%</td>
-                    <td className="text-slate-300">{r.avgMttr}h</td>
-                    <td className="text-slate-300">{r.avgMtbf}h</td>
-                    <td className="text-slate-300">{r.breakdownCount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Monthly KPI Table */}
+      {/* FY Header */}
       <div className="glass-card p-5">
-        <div className="flex items-center gap-2.5 mb-4">
-          <div className="w-9 h-9 rounded-control bg-cyan-400/10 border border-cyan-400/25 flex items-center justify-center">
-            <BarChart3 size={17} className="text-cyan-400" aria-hidden="true" />
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-card-title">Monthly KPI Table</h3>
-            <p className="text-meta">Month • Plant/Section • Machine • PM% • Breakdowns • MTTR/MTBF • Availability • Status</p>
+            <h3 className="text-card-title text-base flex items-center gap-2">
+              <span className="text-emerald-400">◆</span> FY 2026-27 ◆ PQSCDM Goal Cascade ◆ Plant Engg Manager
+            </h3>
+            <p className="text-meta mt-1 text-xs">Plant Engineering / Maintenance Manager | Reports to Engg Head | Plant-specific | FY 2026-27</p>
+            <p className="text-slate-500 text-[11px] mt-1">P = 37 &nbsp; Q = 12 &nbsp; S = 20 &nbsp; C = 23 &nbsp; D = 5 &nbsp; M = 4 &nbsp; | &nbsp; Total KPI Wt = 100 (Pillar Wt shown on first row of each pillar)</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasEdits && <span className="text-amber-400 text-xs flex items-center gap-1"><AlertTriangle size={12} /> Unsaved changes</span>}
+            <button onClick={handleSave} disabled={!hasEdits || saving || !isAdmin} className="btn-primary inline-flex items-center gap-2 text-xs disabled:opacity-40"><Save size={13} aria-hidden="true" /> {saving ? 'Saving…' : 'Save FY Sheet'}</button>
           </div>
         </div>
-        {paged.length===0 ? (
-          <EmptyState title="No KPI data available." description="KPIs auto-generate from PM and Breakdown records for the selected month/section/machine. Add a KPI record or import via Bulk/Master Excel. Manual overrides are marked Manual, otherwise Auto Calculated." />
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="enterprise-table w-full min-w-[1100px] text-xs">
-                <thead className="sticky top-0 bg-slate-900/95 backdrop-blur">
-                  <tr>
-                    <th>Month</th><th>Plant/Section</th><th>Machine/Equipment</th><th>PM Compliance %</th><th>Breakdown Count</th><th>Breakdown Hours</th><th>MTTR</th><th>MTBF</th><th>Availability %</th><th>KPI Status</th><th>Remarks</th><th className="w-20 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paged.map((row)=>(
-                    <tr key={row.id} className="hover:bg-white/[0.03]">
-                      <td className="text-slate-300 whitespace-nowrap">{formatPeriodKey(row.period,true)}</td>
-                      <td className="text-white font-medium max-w-[140px] truncate" title={row.section}>{row.section}</td>
-                      <td className="text-slate-300 max-w-[140px] truncate" title={row.machineName||row.machineCode||''}>{row.machineName || row.machineCode || <span className="text-slate-600">— Section-level</span>}</td>
-                      <td className="text-emerald-400 tabular-nums">{row.pmCompliancePct}% <AutoManualBadge isManual={row.isManualPmCompliance} /></td>
-                      <td className="text-slate-300 tabular-nums">{row.breakdownCount} <AutoManualBadge isManual={row.isManualBreakdownCount} /></td>
-                      <td className="text-slate-300 tabular-nums">{row.breakdownHours}h <AutoManualBadge isManual={row.isManualBreakdownHours} /></td>
-                      <td className="text-slate-300 tabular-nums">{row.mttr}h <AutoManualBadge isManual={row.isManualMttr} /></td>
-                      <td className="text-slate-300 tabular-nums">{row.mtbf}h <AutoManualBadge isManual={row.isManualMtbf} /></td>
-                      <td className="text-cyan-400 tabular-nums">{row.availabilityPct}% <AutoManualBadge isManual={row.isManualAvailability} /></td>
-                      <td><StatusBadge status={row.kpiStatus} /> <AutoManualBadge isManual={row.isManualKpiStatus} /></td>
-                      <td className="text-slate-400 max-w-[120px] truncate" title={row.remarks}>{row.remarks||'—'}</td>
-                      <td className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={()=>setViewing(row)} className="btn-ghost !p-1.5 text-slate-500 hover:text-cyan-400" aria-label="View"><Eye size={13} /></button>
-                          {isAdmin && <>
-                            <button onClick={()=>{setEditing(row); setShowForm(true);}} className="btn-ghost !p-1.5 text-slate-500 hover:text-cyan-400" aria-label="Edit"><Pencil size={13} /></button>
-                            <button onClick={()=>setDeleting(row)} className="btn-ghost !p-1.5 text-slate-500 hover:text-red-400" aria-label="Delete"><Trash2 size={13} /></button>
-                          </>}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/[0.06]">
-              <p className="text-slate-500 text-[11px]">Showing {Math.min((page-1)*PAGE_SIZE+1, filtered.length)}–{Math.min(page*PAGE_SIZE, filtered.length)} of {filtered.length} records</p>
-              <div className="flex items-center gap-1">
-                <button onClick={()=>setPage((p)=>Math.max(1,p-1))} disabled={page<=1} className="btn-ghost !p-1.5 disabled:opacity-30" aria-label="Prev"><X size={14} className="rotate-90" /></button>
-                {Array.from({length: Math.min(totalPages,5)}, (_,i)=>{
-                  const start = Math.max(1, Math.min(page-2, totalPages-4));
-                  const p = start+i;
-                  if(p>totalPages) return null;
-                  return <button key={p} onClick={()=>setPage(p)} className={`w-7 h-7 rounded-control text-[11px] font-medium transition-all ${p===page?'bg-cyan-400/15 text-cyan-300 border border-cyan-400/30':'text-slate-400 hover:bg-white/[0.06]'}`}>{p}</button>;
-                })}
-                <button onClick={()=>setPage((p)=>Math.min(totalPages,p+1))} disabled={page>=totalPages} className="btn-ghost !p-1.5 disabled:opacity-30" aria-label="Next"><X size={14} className="-rotate-90" /></button>
-              </div>
-            </div>
-          </>
-        )}
+        <p className="text-slate-500 text-[11px] mt-3 flex items-start gap-1.5">
+          <Info size={11} className="mt-px flex-shrink-0" aria-hidden="true" />
+          Quarterly targets inherit <span className="text-white">Annual Target (Rating 3)</span> unless manually edited. Monthly actuals <span className="text-white">Apr–Mar</span> are editable — blank means no entry (ignored in YTD Avg, not zero). <span className="text-cyan-400">Auto</span> = calculated from existing PM/Breakdown/Energy data; <span className="text-amber-400">Manual</span> = you typed it. YTD Avg = average of available monthly actuals (ignores blank/“NA”).
+        </p>
       </div>
 
-      {/* Modals */}
-      {showForm && <KpiFormModal mode={editing?'edit':'add'} initial={editing} machines={machines} sections={sections} userName={userName} onClose={()=>{setShowForm(false); setEditing(null);}} pushToast={pushToast} />}
-      {viewing && <DetailModal row={viewing} onClose={()=>setViewing(null)} />}
-      {deleting && (
-        <div className="modal-overlay" onClick={(e)=>e.target===e.currentTarget&&setDeleting(null)} role="dialog" aria-modal="true">
-          <div className="modal-content glass-card p-6 w-full max-w-sm">
-            <h3 className="text-card-title mb-2">Delete KPI Record</h3>
-            <p className="text-body mb-5">Delete KPI for <span className="text-white font-medium">{deleting.section}</span> · {formatPeriodKey(deleting.period,true)} {deleting.machineName? `· ${deleting.machineName}`:''}?</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={()=>setDeleting(null)} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={()=>{deleteKpiRecord(deleting.id, userName); setDeleting(null); pushToast({type:'success', title:'KPI deleted', message:`${deleting.section} · ${deleting.period}`});}} className="btn-danger text-xs inline-flex items-center gap-1.5"><Trash2 size={12} aria-hidden="true" /> Delete</button>
-            </div>
+      {/* KPI Table — 27 columns, horizontal scroll */}
+      <div className="glass-card p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="enterprise-table w-full min-w-[1800px] text-xs">
+            <thead className="sticky top-0 bg-slate-900/95 backdrop-blur z-10">
+              <tr>
+                <th className="sticky left-0 bg-slate-900 z-20 min-w-[40px]">Sn</th>
+                <th className="sticky left-[40px] bg-slate-900 z-20 min-w-[140px]">Focus Pillar</th>
+                <th className="min-w-[260px]">KPI / Metric</th>
+                <th>UoM</th>
+                <th>KPI Wt %</th>
+                <th>Pillar Wt %</th>
+                <th className="min-w-[110px]">Annual Target (Rating 3)</th>
+                <th>Rating 4</th>
+                <th>Rating 5</th>
+                <th className="min-w-[140px]">Parent Target</th>
+                <th className="bg-cyan-500/5">Q1 Apr–Jun</th>
+                <th className="bg-cyan-500/5">Q2 Jul–Sep</th>
+                <th className="bg-cyan-500/5">Q3 Oct–Dec</th>
+                <th className="bg-cyan-500/5">Q4 Jan–Mar</th>
+                <th className="bg-emerald-500/5">Apr</th>
+                <th className="bg-emerald-500/5">May</th>
+                <th className="bg-emerald-500/5">Jun</th>
+                <th className="bg-emerald-500/5">Jul</th>
+                <th className="bg-emerald-500/5">Aug</th>
+                <th className="bg-emerald-500/5">Sep</th>
+                <th className="bg-emerald-500/5">Oct</th>
+                <th className="bg-emerald-500/5">Nov</th>
+                <th className="bg-emerald-500/5">Dec</th>
+                <th className="bg-emerald-500/5">Jan</th>
+                <th className="bg-emerald-500/5">Feb</th>
+                <th className="bg-emerald-500/5">Mar</th>
+                <th className="bg-violet-500/10 font-bold">YTD Avg</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                // Determine if this row is auto-sourced
+                const isAutoKpi = [1,2,3,4,11,12].includes(Number(row.sn));
+                return (
+                  <tr key={row.sn} className="hover:bg-white/[0.03]">
+                    <td className="sticky left-0 bg-slate-900/95 text-slate-300 font-semibold">{row.sn}</td>
+                    <td className="sticky left-[40px] bg-slate-900/95 text-slate-300 max-w-[140px] truncate" title={row.focusPillar}>{row.focusPillar}</td>
+                    <td className="text-white font-medium max-w-[260px] truncate" title={row.kpiMetric}>{row.kpiMetric}</td>
+                    <td className="text-slate-400 whitespace-nowrap">{row.uom}</td>
+                    <td className="text-slate-300 tabular-nums">{row.kpiWt}</td>
+                    <td className="text-slate-300 tabular-nums">{row.pillarWt}</td>
+                    <td className="text-emerald-300 tabular-nums font-medium">{row.annualTarget}</td>
+                    <td className="text-slate-300 tabular-nums">{row.rating4}</td>
+                    <td className="text-slate-300 tabular-nums">{row.rating5}</td>
+                    <td className="text-slate-400 max-w-[140px] truncate" title={row.parentTarget}>{row.parentTarget}</td>
+                    {/* Quarterly — editable, default to Annual Target */}
+                    {['q1','q2','q3','q4'].map((q) => {
+                      const k = `${row.sn}-${q}`;
+                      const displayVal = k in edits ? edits[k] : row[q];
+                      const isManual = row[`isManual${q.charAt(0).toUpperCase()+q.slice(1)}`];
+                      return (
+                        <td key={q} className="bg-cyan-500/[0.03] p-1">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={displayVal}
+                              onChange={(e)=>handleQuarterChange(row.sn, q, e.target.value)}
+                              disabled={!isAdmin}
+                              placeholder={row.annualTarget}
+                              className="w-[70px] rounded bg-white/[0.06] border border-white/[0.12] px-1.5 py-1 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60 disabled:opacity-60"
+                            />
+                            {isManual ? <span className="text-[8px] px-1 py-0 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">M</span> : <span className="text-[8px] px-1 py-0 rounded bg-slate-500/10 text-slate-400 border border-white/10">—</span>}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    {/* Monthly Apr-Mar — editable, Auto where applicable */}
+                    {FY_MONTHS.map((m) => {
+                      const k = `${row.sn}-${m.key}`;
+                      const storedVal = row[m.key];
+                      const editedVal = k in edits ? edits[k] : storedVal;
+                      // Auto value if blank and isAutoKpi
+                      const autoVal = isAutoKpi && (storedVal === '' || storedVal == null) && !(k in edits) ? getAutoMonthlyValue(Number(row.sn), m.period, store) : '';
+                      const displayVal = editedVal !== '' ? editedVal : (autoVal !== '' ? autoVal : '');
+                      const isManual = row[`isManual${m.key.charAt(0).toUpperCase()+m.key.slice(1)}`] || (!!editedVal && editedVal !== autoVal);
+                      const isAutoDisplay = autoVal !== '' && editedVal === '' && !(k in edits);
+                      return (
+                        <td key={m.key} className="bg-emerald-500/[0.03] p-1">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={k in edits ? edits[k] : (displayVal)}
+                              onChange={(e)=>handleCellChange(row.sn, m.key, e.target.value)}
+                              disabled={!isAdmin}
+                              placeholder={isAutoDisplay ? `Auto:${autoVal}` : '—'}
+                              className={`w-[60px] rounded border px-1.5 py-1 text-[11px] placeholder-slate-500 focus:outline-none disabled:opacity-60 ${isAutoDisplay ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-300' : 'bg-white/[0.06] border-white/[0.12] text-white focus:border-emerald-400/60'}`}
+                              title={isAutoDisplay ? `Auto calculated from ${row.kpiMetric} for ${m.label} ${m.period}` : ''}
+                            />
+                            {isAutoDisplay ? <span className="text-[8px] px-1 py-0 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30" title="Auto from PM/Breakdown/Energy">A</span> : isManual ? <span className="text-[8px] px-1 py-0 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">M</span> : <span className="text-[8px] px-1 py-0 rounded bg-slate-500/10 text-slate-400 border border-white/10">—</span>}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    <td className="bg-violet-500/10 text-violet-300 font-bold tabular-nums">{row.ytdAvg}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-4 py-3 border-t border-white/[0.06] flex items-center justify-between">
+          <p className="text-slate-500 text-[11px]">Horizontal scroll — 27 columns. Pillar Wt % shown only on first row per pillar (P 37, Q 12, S 20, C 23, D 5, M 4). Blank monthly cell = no actual (ignored in YTD Avg, not zero). “NA” also ignored.</p>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">A Auto</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">M Manual</span>
           </div>
         </div>
-      )}
-      {confirmPurge && (
-        <div className="modal-overlay" onClick={(e)=>e.target===e.currentTarget&&setConfirmPurge(false)} role="dialog" aria-modal="true">
+      </div>
+
+      {/* Import/Export note */}
+      <div className="glass-card p-4">
+        <h4 className="text-card-title text-sm mb-2 flex items-center gap-2"><Upload size={14} className="text-cyan-400" /> KPI Import / Export — 27-column FY 2026-27 Template</h4>
+        <p className="text-meta text-xs leading-relaxed">
+          Use <span className="text-white">KPI Template (27-col)</span> for bulk import — headers must be exactly: <code className="bg-white/[0.06] px-1 py-0.5 rounded text-[10px]">Sn | Focus Pillar | KPI / Metric | UoM | KPI Wt % | Pillar Wt % | Annual Target (Rating 3) | Rating 4 | Rating 5 | Parent Target | Q1 Apr–Jun | Q2 Jul–Sep | Q3 Oct–Dec | Q4 Jan–Mar | Apr | May | Jun | Jul | Aug | Sep | Oct | Nov | Dec | Jan | Feb | Mar | YTD Avg</code>. YTD Avg is auto-calculated on import. Master Import sheet “KPI_Status” uses same structure. Existing PM/Breakdown/Energy/Master templates unchanged.
+        </p>
+        <div className="flex gap-2 mt-3">
+          <button onClick={()=>downloadTemplate('kpi')} className="btn-ghost text-xs inline-flex items-center gap-1.5"><Download size={13} /> Download KPI FY26-27 Template</button>
+          <button onClick={()=>{ const s=store.kpiFySheet && store.kpiFySheet[0]; if(s) { const headers=['Sn','Focus Pillar','KPI / Metric','UoM','KPI Wt %','Pillar Wt %','Annual Target (Rating 3)','Rating 4','Rating 5','Parent Target','Q1 Apr–Jun','Q2 Jul–Sep','Q3 Oct–Dec','Q4 Jan–Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','YTD Avg']; const rows=s.data.map((r)=>({ 'Sn':r.sn, 'Focus Pillar':r.focusPillar, 'KPI / Metric':r.kpiMetric, 'UoM':r.uom, 'KPI Wt %':r.kpiWt, 'Pillar Wt %':r.pillarWt, 'Annual Target (Rating 3)':r.annualTarget, 'Rating 4':r.rating4, 'Rating 5':r.rating5, 'Parent Target':r.parentTarget, 'Q1 Apr–Jun':r.q1, 'Q2 Jul–Sep':r.q2, 'Q3 Oct–Dec':r.q3, 'Q4 Jan–Mar':r.q4, 'Apr':r.apr, 'May':r.may, 'Jun':r.jun, 'Jul':r.jul, 'Aug':r.aug, 'Sep':r.sep, 'Oct':r.oct, 'Nov':r.nov, 'Dec':r.dec, 'Jan':r.jan, 'Feb':r.feb, 'Mar':r.mar, 'YTD Avg':r.ytdAvg })); exportToCSV(rows, headers.map((h)=>({key:h,label:h})), `KPI_FY2026-27_Export_${new Date().toISOString().slice(0,10)}.csv`); } }} className="btn-ghost text-xs inline-flex items-center gap-1.5"><Download size={13} /> Export Current Sheet CSV</button>
+        </div>
+      </div>
+
+      {/* Reset modal */}
+      {confirmReset && (
+        <div className="modal-overlay" onClick={(e)=>e.target===e.currentTarget&&setConfirmReset(false)} role="dialog" aria-modal="true">
           <div className="modal-content glass-card p-6 w-full max-w-sm">
-            <h3 className="text-card-title mb-2">Purge KPI Data</h3>
-            <p className="text-body mb-5">This will delete <span className="text-white font-medium">{kpiRecords.length} KPI records</span>. Existing PM and Breakdown data will remain untouched.</p>
+            <h3 className="text-card-title mb-2">Reset FY 2026-27 Sheet</h3>
+            <p className="text-body mb-5">Reset all quarterly and monthly actuals to blank (Annual Target retained, YTD cleared)? This will keep the 16 KPI definitions but clear Apr–Mar and Q1–Q4 edits.</p>
             <div className="flex gap-2 justify-end">
-              <button onClick={()=>setConfirmPurge(false)} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={async()=>{ await purgeKpiRecords(userName); setConfirmPurge(false); pushToast({type:'success', title:'KPI purged', message:'All KPI records deleted'}); }} className="btn-danger text-xs inline-flex items-center gap-1.5"><Trash2 size={12} aria-hidden="true" /> Purge All</button>
+              <button onClick={()=>setConfirmReset(false)} className="btn-ghost text-xs">Cancel</button>
+              <button onClick={()=>{
+                const resetData = rows.map((r)=>({ ...r, q1: r.annualTarget, q2: r.annualTarget, q3: r.annualTarget, q4: r.annualTarget, apr:'',may:'',jun:'',jul:'',aug:'',sep:'',oct:'',nov:'',dec:'',jan:'',feb:'',mar:'', ytdAvg:'', isManualQ1:false,isManualQ2:false,isManualQ3:false,isManualQ4:false, isManualApr:false,isManualMay:false,isManualJun:false,isManualJul:false,isManualAug:false,isManualSep:false,isManualOct:false,isManualNov:false,isManualDec:false,isManualJan:false,isManualFeb:false,isManualMar:false }));
+                const updated = { ...sheet, data: resetData, updatedAt: new Date().toISOString() };
+                upsertKpiFySheet(updated, userName);
+                setConfirmReset(false);
+                pushToast({ type:'success', title:'Sheet reset', message:'FY 2026-27 monthly actuals cleared' });
+              }} className="btn-danger text-xs inline-flex items-center gap-1.5"><Trash2 size={12} /> Reset</button>
             </div>
           </div>
         </div>
