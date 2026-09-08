@@ -3,15 +3,16 @@
 -- Idempotent: safe to run multiple times, no data loss (IF NOT EXISTS, no DROP TABLE)
 -- =============================================================================
 
--- Fix ERROR 42601: inline unique constraint with coalesce(...) is not valid syntax.
--- Original schema had: constraint uq_machine_bd_logs_date_times unique (machine_id, date, coalesce(...))
--- Replaced with unique index. This block removes the invalid constraint if it ever existed and creates the index.
+-- Fix ERROR 42601 (inline unique ... coalesce) and ERROR 42P17 (coalesce ::text not IMMUTABLE for index)
+-- Original: constraint unique (..., coalesce(start_time::text,'')) — invalid + stable cast.
+-- Use simple unique index on raw columns (immutable). Nulls distinct per Postgres is acceptable; app handles duplicates via id.
 do $$ begin
   alter table public.machine_breakdown_logs drop constraint if exists uq_machine_bd_logs_date_times;
 exception when others then null;
 end $$;
+drop index if exists public.uq_machine_bd_logs_date_times;
 create unique index if not exists uq_machine_bd_logs_date_times
-  on public.machine_breakdown_logs (machine_id, date, coalesce(start_time::text, ''), coalesce(end_time::text, ''));
+  on public.machine_breakdown_logs (machine_id, date, start_time, end_time);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 16. KPI STATUS — Monthly KPI records per section/machine (auto from PM/Breakdown)

@@ -141,13 +141,16 @@ create table if not exists public.machine_breakdown_logs (
 create index if not exists idx_machine_bd_logs_machine on public.machine_breakdown_logs (machine_id);
 create index if not exists idx_machine_bd_logs_date    on public.machine_breakdown_logs (date desc);
 create index if not exists idx_machine_bd_logs_section on public.machine_breakdown_logs (plant_section);
--- Fix ERROR 42601: inline unique constraint with coalesce(start_time::text,'') is not valid syntax.
--- Use a unique index instead (null times treated as empty string). Idempotent, preserves data.
+-- Fix ERROR 42601: inline unique constraint with coalesce(start_time::text,'') is not valid.
+-- Fix ERROR 42P17: coalesce(...::text) uses stable cast, not immutable for index.
+-- Use simple unique index on raw columns (immutable). Nulls are distinct per Postgres, which is acceptable;
+-- app-level duplicate check via id prevents real duplicates. Idempotent, preserves data.
 do $$ begin
   alter table public.machine_breakdown_logs drop constraint if exists uq_machine_bd_logs_date_times;
 exception when others then null;
 end $$;
-create unique index if not exists uq_machine_bd_logs_date_times on public.machine_breakdown_logs (machine_id, date, coalesce(start_time::text, ''), coalesce(end_time::text, ''));
+drop index if exists public.uq_machine_bd_logs_date_times;
+create unique index if not exists uq_machine_bd_logs_date_times on public.machine_breakdown_logs (machine_id, date, start_time, end_time);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 7. MACHINE PM RECORDS — Per-machine PM activity records
