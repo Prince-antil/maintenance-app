@@ -135,18 +135,19 @@ create table if not exists public.machine_breakdown_logs (
   status         text not null default 'closed'
                    check (status in ('open', 'closed', 'pending')),
   remarks        text not null default '',
-  created_at     timestamptz not null default timezone('utc', now()),
-  constraint uq_machine_bd_logs_date_times unique (
-    machine_id,
-    date,
-    coalesce(start_time::text, ''),
-    coalesce(end_time::text, '')
-  )
+  created_at     timestamptz not null default timezone('utc', now())
 );
 
 create index if not exists idx_machine_bd_logs_machine on public.machine_breakdown_logs (machine_id);
 create index if not exists idx_machine_bd_logs_date    on public.machine_breakdown_logs (date desc);
 create index if not exists idx_machine_bd_logs_section on public.machine_breakdown_logs (plant_section);
+-- Fix ERROR 42601: inline unique constraint with coalesce(start_time::text,'') is not valid syntax.
+-- Use a unique index instead (null times treated as empty string). Idempotent, preserves data.
+do $$ begin
+  alter table public.machine_breakdown_logs drop constraint if exists uq_machine_bd_logs_date_times;
+exception when others then null;
+end $$;
+create unique index if not exists uq_machine_bd_logs_date_times on public.machine_breakdown_logs (machine_id, date, coalesce(start_time::text, ''), coalesce(end_time::text, ''));
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 7. MACHINE PM RECORDS — Per-machine PM activity records
