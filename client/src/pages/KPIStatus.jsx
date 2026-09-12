@@ -182,7 +182,6 @@ export default function KPIStatus() {
   // Local edit state for monthly cells: { `${sn}-${monthKey}`: value }
   const [edits, setEdits] = useState({});
   const [saving, setSaving] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
 
   // When store updates (e.g., Realtime or auto), clear local edits that are now synced
   useEffect(() => {
@@ -317,22 +316,19 @@ export default function KPIStatus() {
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6">
-      {/* Header */}
+      {/* Header — per spec: title KPI FY 2026–27, subtitle Plant Engineering / Maintenance Manager — PQSCDM Goal Cascade */}
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <h2 className="text-page-title flex items-center gap-3">
-            <Activity size={28} className="text-emerald-400" aria-hidden="true" /> KPI Status
+            <Activity size={28} className="text-emerald-400" aria-hidden="true" /> KPI FY 2026–27
           </h2>
-          <p className="text-body mt-1.5">Plant Engineering KPI — FY 2026-27 PQSCDM Goal Cascade</p>
+          <p className="text-body mt-1.5">Plant Engineering / Maintenance Manager — PQSCDM Goal Cascade</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={handleExport} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> Export CSV (27-col)</button>
           <button onClick={() => downloadTemplate('kpi')} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap"><Download size={13} aria-hidden="true" /> KPI Template (27-col)</button>
           {isAdmin && (
-            <>
-              <button onClick={handleImportReset} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap" title="Recalculate auto monthly values from current PM/Breakdown/Energy data"><Activity size={13} aria-hidden="true" /> Refresh Auto</button>
-              <button onClick={() => setConfirmReset(true)} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap text-amber-400 hover:text-amber-300 border border-amber-500/20"><Trash2 size={13} aria-hidden="true" /> Reset Sheet</button>
-            </>
+            <button onClick={handleImportReset} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap" title="Recalculate auto monthly values from current PM/Breakdown/Energy data"><Activity size={13} aria-hidden="true" /> Refresh Auto</button>
           )}
         </div>
       </div>
@@ -358,15 +354,15 @@ export default function KPIStatus() {
         </p>
       </div>
 
-      {/* KPI Table — 27 columns, horizontal scroll */}
+      {/* KPI Table — 27 columns, horizontal scroll — exact Excel structure, sticky Sn/Pillar/Metric, no truncation */}
       <div className="glass-card p-0 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="enterprise-table w-full min-w-[1800px] text-xs">
+        <div className="overflow-x-auto scroll-smooth overscroll-x-contain scrollbar-thin">
+          <table className="enterprise-table w-full min-w-[2100px] text-xs">
             <thead className="sticky top-0 bg-slate-900/95 backdrop-blur z-10">
               <tr>
-                <th className="sticky left-0 bg-slate-900 z-20 min-w-[40px]">Sn</th>
-                <th className="sticky left-[40px] bg-slate-900 z-20 min-w-[140px]">Focus Pillar</th>
-                <th className="min-w-[260px]">KPI / Metric</th>
+                <th className="sticky left-0 bg-slate-900 z-20 min-w-[45px] border-r border-white/[0.06]">Sn</th>
+                <th className="sticky left-[45px] bg-slate-900 z-20 min-w-[150px] border-r border-white/[0.06]">Focus Pillar</th>
+                <th className="sticky left-[195px] bg-slate-900 z-20 min-w-[320px] max-w-[400px] whitespace-normal break-words leading-tight">KPI / Metric</th>
                 <th>UoM</th>
                 <th>KPI Wt %</th>
                 <th>Pillar Wt %</th>
@@ -399,9 +395,9 @@ export default function KPIStatus() {
                 const isAutoKpi = [1,2,3,4,11,12].includes(Number(row.sn));
                 return (
                   <tr key={row.sn} className="hover:bg-white/[0.03]">
-                    <td className="sticky left-0 bg-slate-900/95 text-slate-300 font-semibold">{row.sn}</td>
-                    <td className="sticky left-[40px] bg-slate-900/95 text-slate-300 max-w-[140px] truncate" title={row.focusPillar}>{row.focusPillar}</td>
-                    <td className="text-white font-medium max-w-[260px] truncate" title={row.kpiMetric}>{row.kpiMetric}</td>
+                    <td className="sticky left-0 bg-slate-900/95 text-slate-300 font-semibold border-r border-white/[0.06]">{row.sn}</td>
+                    <td className="sticky left-[45px] bg-slate-900/95 text-slate-300 min-w-[150px] max-w-[150px] whitespace-normal break-words leading-tight border-r border-white/[0.06]" title={row.focusPillar}>{row.focusPillar}</td>
+                    <td className="sticky left-[195px] bg-slate-900/95 text-white font-medium min-w-[320px] max-w-[400px] whitespace-normal break-words leading-tight border-r border-white/[0.06]" title={row.kpiMetric}>{row.kpiMetric}</td>
                     <td className="text-slate-400 whitespace-nowrap">{row.uom}</td>
                     <td className="text-slate-300 tabular-nums">{row.kpiWt}</td>
                     <td className="text-slate-300 tabular-nums">{row.pillarWt}</td>
@@ -484,26 +480,6 @@ export default function KPIStatus() {
           <button onClick={()=>{ const s=store.kpiFySheet && store.kpiFySheet[0]; if(s) { const headers=['Sn','Focus Pillar','KPI / Metric','UoM','KPI Wt %','Pillar Wt %','Annual Target (Rating 3)','Rating 4','Rating 5','Parent Target','Q1 Apr–Jun','Q2 Jul–Sep','Q3 Oct–Dec','Q4 Jan–Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','YTD Avg']; const rows=s.data.map((r)=>({ 'Sn':r.sn, 'Focus Pillar':r.focusPillar, 'KPI / Metric':r.kpiMetric, 'UoM':r.uom, 'KPI Wt %':r.kpiWt, 'Pillar Wt %':r.pillarWt, 'Annual Target (Rating 3)':r.annualTarget, 'Rating 4':r.rating4, 'Rating 5':r.rating5, 'Parent Target':r.parentTarget, 'Q1 Apr–Jun':r.q1, 'Q2 Jul–Sep':r.q2, 'Q3 Oct–Dec':r.q3, 'Q4 Jan–Mar':r.q4, 'Apr':r.apr, 'May':r.may, 'Jun':r.jun, 'Jul':r.jul, 'Aug':r.aug, 'Sep':r.sep, 'Oct':r.oct, 'Nov':r.nov, 'Dec':r.dec, 'Jan':r.jan, 'Feb':r.feb, 'Mar':r.mar, 'YTD Avg':r.ytdAvg })); exportToCSV(rows, headers.map((h)=>({key:h,label:h})), `KPI_FY2026-27_Export_${new Date().toISOString().slice(0,10)}.csv`); } }} className="btn-ghost text-xs inline-flex items-center gap-1.5"><Download size={13} /> Export Current Sheet CSV</button>
         </div>
       </div>
-
-      {/* Reset modal */}
-      {confirmReset && (
-        <div className="modal-overlay" onClick={(e)=>e.target===e.currentTarget&&setConfirmReset(false)} role="dialog" aria-modal="true">
-          <div className="modal-content glass-card p-6 w-full max-w-sm">
-            <h3 className="text-card-title mb-2">Reset FY 2026-27 Sheet</h3>
-            <p className="text-body mb-5">Reset all quarterly and monthly actuals to blank (Annual Target retained, YTD cleared)? This will keep the 16 KPI definitions but clear Apr–Mar and Q1–Q4 edits.</p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={()=>setConfirmReset(false)} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={()=>{
-                const resetData = rows.map((r)=>({ ...r, q1: r.annualTarget, q2: r.annualTarget, q3: r.annualTarget, q4: r.annualTarget, apr:'',may:'',jun:'',jul:'',aug:'',sep:'',oct:'',nov:'',dec:'',jan:'',feb:'',mar:'', ytdAvg:'', isManualQ1:false,isManualQ2:false,isManualQ3:false,isManualQ4:false, isManualApr:false,isManualMay:false,isManualJun:false,isManualJul:false,isManualAug:false,isManualSep:false,isManualOct:false,isManualNov:false,isManualDec:false,isManualJan:false,isManualFeb:false,isManualMar:false }));
-                const updated = { ...sheet, data: resetData, updatedAt: new Date().toISOString() };
-                upsertKpiFySheet(updated, userName);
-                setConfirmReset(false);
-                pushToast({ type:'success', title:'Sheet reset', message:'FY 2026-27 monthly actuals cleared' });
-              }} className="btn-danger text-xs inline-flex items-center gap-1.5"><Trash2 size={12} /> Reset</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
