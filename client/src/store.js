@@ -2360,14 +2360,30 @@ async function initializeCloudSync() {
       persistEntity('kpiSettings');
     }
     if (remoteKpiFySheet?.length) {
-      // kpi_fy_sheet is single FY row; replace local if cloud has data
       const cloudSheet = remoteKpiFySheet[0];
       if (cloudSheet && Array.isArray(cloudSheet.data) && cloudSheet.data.length) {
-        state = { ...state, kpiFySheet: [normalizeKpiFySheet(cloudSheet)] };
-        persistEntity('kpiFySheet');
+        const localSheet = state.kpiFySheet && state.kpiFySheet[0] ? state.kpiFySheet[0] : null;
+        const cloudTime = new Date(cloudSheet.updatedAt || cloudSheet.updated_at || 0).getTime();
+        const localTime = localSheet ? new Date(localSheet.updatedAt || 0).getTime() : 0;
+        const isLocalTemplate = !localSheet || !Array.isArray(localSheet.data) || localSheet.data.every((r)=> ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar','q1','q2','q3','q4'].every((k)=> !r[k] || String(r[k]).trim()===''));
+        // Only overwrite local if cloud is newer or local is still template (all blanks). Prevents manual data deleted on refresh when cloud is stale.
+        if (cloudTime > localTime || isLocalTemplate) {
+          // Also check suppress window (recent local save)
+          if (!localImportSuppressUntil.kpiFySheet || Date.now() > localImportSuppressUntil.kpiFySheet) {
+            state = { ...state, kpiFySheet: [normalizeKpiFySheet(cloudSheet)] };
+            persistEntity('kpiFySheet');
+          }
+        } else {
+          // Local is newer (manual edits not yet in cloud) — keep local and ensure cloud gets updated
+          queueCloudMutation('kpiFySheet','upsert', normalizeKpiFySheet(localSheet));
+        }
       }
     } else if (!remoteKpiFySheet?.length && state.kpiFySheet?.length) {
-      // keep local default if cloud empty
+      // Cloud empty but local has data — push local to cloud
+      const localSheet = state.kpiFySheet[0];
+      if (localSheet && Array.isArray(localSheet.data) && localSheet.data.some((r)=> ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'].some((k)=> r[k] && String(r[k]).trim()!=='' ))) {
+        queueCloudMutation('kpiFySheet','upsert', normalizeKpiFySheet(localSheet));
+      }
     }
     notifyStoreUpdate();
 
@@ -3310,6 +3326,9 @@ export function upsertKpiFySheet(sheet, userName) {
   state = { ...state, kpiFySheet: [normalized] };
   commit('kpiFySheet');
   queueCloudMutation('kpiFySheet','upsert', normalized);
+  localImportSuppressUntil.kpiFySheet = Date.now() + 5000;
+  // Immediately write to cloud to avoid race where fetch overwrites local manual data
+  writeToCloudNow('kpiFySheet','upsert', normalized).catch(()=>{});
   logActivity(userName || 'System', 'updated KPI FY 2026-27 sheet', '', 'kpi');
   return normalized;
 }
