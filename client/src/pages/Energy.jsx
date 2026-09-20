@@ -9,8 +9,8 @@ import {
   addMonthlyWater, updateMonthlyWater, deleteMonthlyWater, purgeMonthlyWater,
   addMonthlyAirCompressor, updateMonthlyAirCompressor, deleteMonthlyAirCompressor, purgeMonthlyAirCompressor,
   addDailySolarGeneration, updateDailySolarGeneration, deleteDailySolarGeneration, purgeDailySolarGeneration,
-  upsertEnergySettings,
-} from '../store.js';
+  upsertEnergySettings, getPlantScopedData } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import { computeRenewableSummary, computeDailyDeltas, formatPowerFactor, computeWeightedPf } from '../analytics.js';
 import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
@@ -1376,7 +1376,9 @@ function SettingsTab({ store, userName, isAdmin, onAdd, formOpen, editRow, formV
 export default function Energy() {
   const { user } = useAuth();
   const { openUpload, pushToast } = useUI();
-  const store = useStore();
+  const rawStore = useStore();
+  const { currentPlant, currentPlantId } = usePlant();
+  const store = getPlantScopedData(currentPlantId);
   const {
     dailyUtilityLog, monthlyHerbicide, monthlyInsecticide,
     monthlyWater, monthlyAirCompressor, dailySolarGeneration, energySettings,

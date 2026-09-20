@@ -25,11 +25,30 @@ export function verifyToken(req, res, next) {
   }
 }
 
+const ADMIN_ROLES = new Set(['admin','super_admin','plant_admin']);
+const CORPORATE_ROLES = new Set(['admin','super_admin','corporate_head']);
+
 export function requireAdmin(req, res, next) {
-  if (!req.user || req.user.role !== 'admin') {
+  if (!req.user || !ADMIN_ROLES.has(req.user.role)) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
+}
+
+export function requireCorporate(req, res, next) {
+  if (!req.user || !CORPORATE_ROLES.has(req.user.role)) {
+    return res.status(403).json({ error: 'Corporate access required' });
+  }
+  next();
+}
+
+export function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient role' });
+    }
+    next();
+  };
 }
 
 export { JWT_SECRET };

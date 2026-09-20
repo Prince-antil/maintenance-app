@@ -7,8 +7,8 @@ import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
   addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
   addMachineBreakdownLog, deleteMachineBreakdownLog,
-  addMachinePmRecord, deleteMachinePmRecord, importMachinePmRecordsBulk,
-} from '../store.js';
+  addMachinePmRecord, deleteMachinePmRecord, importMachinePmRecordsBulk, getPlantScopedData } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -106,8 +106,10 @@ export default function MachineProfile() {
   const { machineId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { currentPlant, currentPlantId } = usePlant();
+  const rawStore = useStore();
+  const store = getPlantScopedData(currentPlantId);
   const { openPreview, pushToast } = useUI();
-  const store = useStore();
 
   const machine = store.machines.find((m) => m.id === machineId) || null;
   const [tab, setTab] = useState('sop');

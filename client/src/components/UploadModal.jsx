@@ -3,6 +3,7 @@ import { X, Upload, FileText, AlertCircle, FileSpreadsheet, Download, Table2 } f
 import { api } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
+import { usePlant } from '../context/PlantContext.jsx';
 import { CATEGORIES, MONTHS, YEARS, ALLOWED_EXT, EXT_META } from '../constants.js';
 import SectionSelect from './SectionSelect.jsx';
 import { IMPORT_MODULES, downloadTemplate, inferUploadMeta, parseImportFile } from '../bulkImport.js';
@@ -45,6 +46,7 @@ function ProgressBar({ value, label }) {
 export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
   const { user } = useAuth();
   const { pushToast } = useUI();
+  const { currentPlant } = usePlant();
   const isBulk = (initialState.kind || 'document') === 'bulk';
   const now = new Date();
   const [form, setForm] = useState({
@@ -214,6 +216,17 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
   return (
     <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label={title}>
       <div className="modal-content glass-card w-full max-w-4xl max-h-[92vh] overflow-y-auto p-6">
+        {/* Plant enforcement banner */}
+        <div className="mb-4 rounded-control border border-cyan-500/25 bg-cyan-500/8 px-3 py-2 flex items-center gap-2">
+          <span className="w-6 h-6 rounded-lg bg-cyan-500/15 border border-cyan-500/25 flex items-center justify-center flex-shrink-0">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-cyan-400"><path d="M3 9h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z"/><path d="M3 9V7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2"/><path d="M9 21V9"/><path d="M15 21V9"/></svg>
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-cyan-300 text-xs font-semibold">Destination Plant: {currentPlant?.plant_name} ({currentPlant?.plant_code})</p>
+            <p className="text-slate-400 text-[11px]">All imported rows will be scoped to this plant — plant columns in Excel are ignored. Corporate users can switch plant before importing.</p>
+          </div>
+          <span className="badge bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 text-[10px]">Enforced</span>
+        </div>
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-card-title">{title}</h2>

@@ -25,6 +25,9 @@ const Energy = lazy(() => import('./pages/Energy.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
+const CorporateDashboard = lazy(() => import('./pages/CorporateDashboard.jsx'));
+const PlantManagement = lazy(() => import('./pages/PlantManagement.jsx'));
+const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
 
 const LOGIN_MODAL_KEY = 'ccpl_show_login_modal';
 
@@ -137,6 +140,9 @@ function AppContent() {
             >
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/corporate" element={<CorporateDashboard />} />
+                <Route path="/admin/plants" element={<PlantManagement />} />
+                <Route path="/admin/users" element={<UserManagement />} />
                 <Route path="/category/:categoryName" element={<CategoryView />} />
                 <Route path="/machines" element={<Machines />} />
                 <Route path="/machines/:machineId" element={<MachineProfile />} />
@@ -157,15 +163,15 @@ function AppContent() {
 
       {/* Global modals */}
       {showLogin && <LoginModal onClose={closeLogin} />}
-      {uploadState && user?.role === 'admin' && (
+      {uploadState && ['admin','super_admin','plant_admin','plant_user'].includes(user?.role) && (
         <UploadModal
           initialState={uploadState}
           onClose={closeUpload}
           onSuccess={signalRefresh}
         />
       )}
-      {showAddMachine && user?.role === 'admin' && <MachineModal onClose={closeAddMachine} />}
-      {showMasterImport && user?.role === 'admin' && (
+      {showAddMachine && ['admin','super_admin','plant_admin'].includes(user?.role) && <MachineModal onClose={closeAddMachine} />}
+      {showMasterImport && ['admin','super_admin','plant_admin'].includes(user?.role) && (
         <MasterImportModal
           onClose={closeMasterImport}
           onSuccess={signalRefresh}

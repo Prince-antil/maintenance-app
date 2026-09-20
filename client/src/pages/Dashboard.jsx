@@ -9,7 +9,8 @@ import {
   ChartCard, TrendChart, DualTrendChart, GroupedBarChart, HorizontalBarChart,
   ParetoChart, PieDonutChart,
 } from '../components/AnalyticsCharts.jsx';
-import { useStore } from '../store.js';
+import { useStore, getPlantScopedData } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import {
   computeKPIs, monthlyBreakdownTrend, equipmentWiseBreakdown,
   paretoTop10, breakdownByDepartment, healthDistribution,
@@ -70,7 +71,10 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { refreshKey, openUpload, openMasterImport } = useUI();
   const navigate = useNavigate();
-  const store = useStore();
+  const rawStore = useStore();
+  const { currentPlant, currentPlantId } = usePlant();
+  // Plant-scoped view: automatically filters all operational data to current plant
+  const store = useMemo(() => getPlantScopedData(currentPlantId), [rawStore, currentPlantId]);
   const { machines, breakdowns, pms, machinePmRecords, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
   const [categories, setCategories] = useState([]);
@@ -262,6 +266,11 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-[11px] text-slate-500">
+        <span>Home</span><span>/</span><span className="text-cyan-400 font-semibold">{currentPlant?.plant_name || 'Nathupur Plant'}</span><span>/</span><span className="text-white">Dashboard</span>
+        <span className="ml-auto badge bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px]">CURRENT PLANT: {(currentPlant?.plant_code || 'NATHUPUR').toUpperCase()}</span>
+      </div>
       {/* Welcome banner with live date/time + plant identity */}
       <section className="glass-card p-6 lg:p-7 relative overflow-hidden" aria-label="Welcome banner">
         <div className="absolute -top-24 -right-24 w-72 h-72 bg-cyan-500/8 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
@@ -272,8 +281,9 @@ export default function Dashboard() {
               {greeting()}, {user?.full_name || 'Engineer'} 👋
             </h2>
             <p className="text-body mt-1.5">
-              {user ? 'Maintenance Engineer' : 'Viewer'} — {store.settings.plantName} · Crystal Crop Protection Ltd.
+              {user ? 'Maintenance Engineer' : 'Viewer'} — {currentPlant?.plant_name || store.settings.plantName} · Crystal Crop Protection Ltd.
             </p>
+            <p className="text-cyan-400 text-[10px] font-semibold tracking-wider mt-1">{currentPlant?.plant_code || 'NATHUPUR'} · {currentPlant?.location || 'Nathupur, Haryana'} · {kpi.machineCount} machines</p>
             <div className="flex flex-wrap items-center gap-2.5 mt-4">
               <StatusBadge
                 status={kpi.breakdown > 0 ? 'breakdown' : 'running'}

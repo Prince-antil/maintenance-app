@@ -75,6 +75,20 @@ const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
 const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings'];
 
+const NATHUPUR_PLANT_ID = '00000000-0000-0000-0000-000000000001';
+const PLANT_LS_KEY = 'ccpl_current_plant_id';
+function getCurrentPlantId() {
+  try {
+    const v = localStorage.getItem(PLANT_LS_KEY);
+    if (v) return JSON.parse(v);
+    return NATHUPUR_PLANT_ID;
+  } catch { return NATHUPUR_PLANT_ID; }
+}
+function ensurePlantId(record) {
+  const pid = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  return { ...record, plant_id: pid, plantId: pid };
+}
+
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const now = () => new Date().toISOString();
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
@@ -205,6 +219,7 @@ function normalizeDailyUtilityLog(fields) {
 
 function normalizeDailyUtilityLogCloudRow(row) {
   return normalizeDailyUtilityLog({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     date: row.date,
     u1ImportKwhReading: row.u1_import_kwh_reading,
@@ -239,8 +254,10 @@ function normalizeDailyUtilityLogCloudRow(row) {
 }
 
 function dailyUtilityLogToCloudRow(record) {
+  const pidDU2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidDU2,
     date: record.date,
     u1_import_kwh_reading: record.u1ImportKwhReading,
     u1_import_kvah_reading: record.u1ImportKvahReading,
@@ -289,6 +306,7 @@ function normalizeMonthlyHerbicide(fields) {
 
 function normalizeMonthlyHerbicideCloudRow(row) {
   return normalizeMonthlyHerbicide({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     month: row.month,
     glyphosateM1MeterReading: row.glyphosate_m1_meter_reading,
@@ -302,8 +320,10 @@ function normalizeMonthlyHerbicideCloudRow(row) {
 }
 
 function monthlyHerbicideToCloudRow(record) {
+  const pidH2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidH2,
     month: record.month,
     glyphosate_m1_meter_reading: record.glyphosateM1MeterReading,
     maintenance_topper_m2_meter_reading: record.maintenanceTopperM2MeterReading,
@@ -338,6 +358,7 @@ function normalizeMonthlyInsecticide(fields) {
 
 function normalizeMonthlyInsecticideCloudRow(row) {
   return normalizeMonthlyInsecticide({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     month: row.month,
     feeder2ScElectricRoomMeterReading: row.feeder2_sc_electric_room_meter_reading,
@@ -358,8 +379,10 @@ function normalizeMonthlyInsecticideCloudRow(row) {
 }
 
 function monthlyInsecticideToCloudRow(record) {
+  const pidI2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidI2,
     month: record.month,
     feeder2_sc_electric_room_meter_reading: record.feeder2ScElectricRoomMeterReading,
     feeder3_waterbath_meter_reading: record.feeder3WaterbathMeterReading,
@@ -393,6 +416,7 @@ function normalizeMonthlyWater(fields) {
 
 function normalizeMonthlyWaterCloudRow(row) {
   return normalizeMonthlyWater({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     month: row.month,
     stpOutletMeterReading: row.stp_outlet_meter_reading,
@@ -405,8 +429,10 @@ function normalizeMonthlyWaterCloudRow(row) {
 }
 
 function monthlyWaterToCloudRow(record) {
+  const pidW2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidW2,
     month: record.month,
     stp_outlet_meter_reading: record.stpOutletMeterReading,
     ro_inlet_meter_reading: record.roInletMeterReading,
@@ -434,6 +460,7 @@ function normalizeMonthlyAirCompressor(fields) {
 
 function normalizeMonthlyAirCompressorCloudRow(row) {
   return normalizeMonthlyAirCompressor({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     month: row.month,
     compressor1RunHrsReading: row.compressor1_run_hrs_reading,
@@ -448,8 +475,10 @@ function normalizeMonthlyAirCompressorCloudRow(row) {
 }
 
 function monthlyAirCompressorToCloudRow(record) {
+  const pidA2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidA2,
     month: record.month,
     compressor1_run_hrs_reading: record.compressor1RunHrsReading,
     compressor1_load_hrs_reading: record.compressor1LoadHrsReading,
@@ -481,6 +510,7 @@ function normalizeDailySolarGeneration(fields) {
 
 function normalizeDailySolarGenerationCloudRow(row) {
   return normalizeDailySolarGeneration({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     date: row.date,
     u1Inv1Kwh: row.u1_inv1_kwh,
@@ -497,8 +527,10 @@ function normalizeDailySolarGenerationCloudRow(row) {
 }
 
 function dailySolarGenerationToCloudRow(record) {
+  const pidS2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidS2,
     date: record.date,
     u1_inv1_kwh: record.u1Inv1Kwh,
     u1_inv2_kwh: record.u1Inv2Kwh,
@@ -531,6 +563,7 @@ function normalizeEnergySettings(fields) {
 
 function normalizeEnergySettingsCloudRow(row) {
   return normalizeEnergySettings({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     u1ImportExportCt: row.u1_import_export_ct,
     u1SolarCt: row.u1_solar_ct,
@@ -546,8 +579,10 @@ function normalizeEnergySettingsCloudRow(row) {
 }
 
 function energySettingsToCloudRow(record) {
+  const pidES2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidES2,
     u1_import_export_ct: record.u1ImportExportCt,
     u1_solar_ct: record.u1SolarCt,
     u2_import_export_ct: record.u2ImportExportCt,
@@ -742,6 +777,7 @@ function normalizeMachineCloudRow(row) {
   const payload = asPlainObject(row.payload);
   return normalizeMachineRecord({
     ...payload,
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     name: row.name || payload.name || '',
     section: row.section || payload.section || '',
@@ -756,6 +792,7 @@ function normalizeMachineCloudRow(row) {
 }
 
 function machineToCloudRow(machine) {
+  const pid = machine.plant_id || machine.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   const attachments = (machine.docs || []).map((doc) => ({
     id: doc.id,
     tab: doc.tab,
@@ -771,6 +808,7 @@ function machineToCloudRow(machine) {
 
   return {
     id: machine.id,
+    plant_id: pid,
     name: machine.name,
     section: machine.section || MASTER_SECTION,
     attachments,
@@ -797,6 +835,7 @@ function machineToCloudRow(machine) {
 
 function normalizeBreakdownCloudRow(row) {
   return normalizeBreakdownSummary({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     period: row.period,
     month: row.month,
@@ -812,9 +851,11 @@ function normalizeBreakdownCloudRow(row) {
 }
 
 function breakdownToCloudRow(record) {
+  const pidBD = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   const { year, month } = resolvePeriod(record);
   return {
     id: record.id,
+    plant_id: pidBD,
     month,
     year,
     period: record.period,
@@ -830,6 +871,7 @@ function breakdownToCloudRow(record) {
 
 function normalizePMCloudRow(row) {
   return normalizePMSummary({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     period: row.period,
     month: row.month,
@@ -845,9 +887,11 @@ function normalizePMCloudRow(row) {
 }
 
 function pmToCloudRow(record) {
+  const pidPMx = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   const { year, month } = resolvePeriod(record);
   return {
     id: record.id,
+    plant_id: pidPMx,
     month,
     year,
     period: record.period,
@@ -863,6 +907,7 @@ function pmToCloudRow(record) {
 
 function normalizeEnergyCloudRow(row) {
   return normalizeEnergyRecord({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     date: row.date,
     source: row.source || '',
@@ -885,8 +930,10 @@ function normalizeEnergyCloudRow(row) {
 }
 
 function energyToCloudRow(record) {
+  const pidE = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidE,
     date: record.date,
     source: record.source || '',
     remarks: record.remarks || '',
@@ -926,6 +973,7 @@ function normalizeAmcRecord(fields) {
 
 function normalizeAmcCloudRow(row) {
   return normalizeAmcRecord({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     machineId: row.machine_id || '',
     vendorName: row.vendor_name || '',
@@ -941,8 +989,10 @@ function normalizeAmcCloudRow(row) {
 }
 
 function amcToCloudRow(record) {
+  const pidAMC2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidAMC2,
     machine_id: record.machineId,
     vendor_name: record.vendorName,
     contract_start_date: record.contractStartDate,
@@ -1006,6 +1056,7 @@ function normalizeMachineBreakdownLog(fields) {
 
 function normalizeMachineBreakdownLogCloudRow(row) {
   return normalizeMachineBreakdownLog({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     machineId: row.machine_id || '',
     machineCode: row.machine_code || '',
@@ -1024,8 +1075,10 @@ function normalizeMachineBreakdownLogCloudRow(row) {
 }
 
 function machineBreakdownLogToCloudRow(record) {
+  const pidMB2 = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidMB2,
     machine_id: record.machineId,
     machine_code: record.machineCode,
     machine_name: record.machineName,
@@ -1065,6 +1118,7 @@ function normalizeMachinePmRecord(fields) {
 
 function normalizeMachinePmCloudRow(row) {
   return normalizeMachinePmRecord({
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     machineId: row.machine_id || '',
     machineCode: row.machine_code || '',
@@ -1084,8 +1138,10 @@ function normalizeMachinePmCloudRow(row) {
 }
 
 function machinePmRecordToCloudRow(record) {
+  const pidPMR = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidPMR,
     machine_id: record.machineId,
     machine_code: record.machineCode,
     machine_name: record.machineName,
@@ -1103,6 +1159,7 @@ function machinePmRecordToCloudRow(record) {
 
 function normalizePlantSectionCloudRow(row) {
   return {
+    plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     name: row.name || '',
     createdBy: row.created_by || '',
@@ -1111,8 +1168,10 @@ function normalizePlantSectionCloudRow(row) {
 }
 
 function plantSectionToCloudRow(record) {
+  const pidPS = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID
   return {
     id: record.id,
+    plant_id: pidPS,
     name: record.name,
     created_by: record.createdBy || '',
   };
@@ -1303,6 +1362,43 @@ let state = {
   },
 };
 
+// ── Backfill: ensure every existing record has plant_id (Nathupur migration) ─
+(function backfillPlantIds() {
+  let mutated = false;
+  const ensure = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    return arr.map((r) => {
+      if (!r) return r;
+      if (r.plant_id || r.plantId) return r;
+      mutated = true;
+      return { ...r, plant_id: NATHUPUR_PLANT_ID, plantId: NATHUPUR_PLANT_ID };
+    });
+  };
+  try {
+    state.machines = ensure(state.machines);
+    state.breakdowns = ensure(state.breakdowns);
+    state.pms = ensure(state.pms);
+    state.energy = ensure(state.energy);
+    state.amc = ensure(state.amc);
+    state.machineBreakdownLogs = ensure(state.machineBreakdownLogs);
+    state.machinePmRecords = ensure(state.machinePmRecords);
+    state.plantSections = ensure(state.plantSections);
+    state.dailyUtilityLog = ensure(state.dailyUtilityLog);
+    state.monthlyHerbicide = ensure(state.monthlyHerbicide);
+    state.monthlyInsecticide = ensure(state.monthlyInsecticide);
+    state.monthlyWater = ensure(state.monthlyWater);
+    state.monthlyAirCompressor = ensure(state.monthlyAirCompressor);
+    state.dailySolarGeneration = ensure(state.dailySolarGeneration);
+    if (state.energySettings && !state.energySettings.plant_id && !state.energySettings.plantId) {
+      state.energySettings = { ...state.energySettings, plant_id: NATHUPUR_PLANT_ID, plantId: NATHUPUR_PLANT_ID };
+      mutated = true;
+    }
+    if (mutated) {
+      Object.keys(KEYS).forEach((entity) => { try { saveLS(KEYS[entity], state[entity]); } catch {} });
+    }
+  } catch {}
+})();
+
 function persistEntity(entity) {
   saveLS(KEYS[entity], state[entity]);
 }
@@ -1339,9 +1435,24 @@ function commit(entity) {
  * which every subscribed client receives within ~100-300 ms.
  */
 function commitAndQueue(entity, action, payload) {
+  // Plant enforcement: ALWAYS override plant_id from current context — never trust payload
+  let safePayload = payload;
+  if (payload && typeof payload === 'object' && payload !== null && SYNCED_ENTITIES.includes(entity)) {
+    const pid = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+    if (payload.plant_id !== pid || payload.plantId !== pid) {
+      safePayload = { ...payload, plant_id: pid, plantId: pid };
+      if (Array.isArray(state[entity])) {
+        const idx = state[entity].findIndex((r) => r.id === payload.id);
+        if (idx >= 0) {
+          state[entity][idx] = { ...state[entity][idx], plant_id: pid, plantId: pid };
+          persistEntity(entity);
+        }
+      }
+    }
+  }
   commit(entity);
   // Fire-and-forget direct write — queues to localStorage only if offline/error
-  writeToCloudNow(entity, action, payload).catch(() => {
+  writeToCloudNow(entity, action, safePayload).catch(() => {
     // Error already handled inside writeToCloudNow; retry is queued
   });
 }
@@ -1469,6 +1580,24 @@ async function fetchCloudEntity(entity) {
     .from(config.table)
     .select('*');
 
+  // Plant-scoped fetch for performance: only fetch current plant unless corporate
+  try {
+    const pid = getCurrentPlantId();
+    let isCorporateFetch = false;
+    try {
+      const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
+      const u = raw ? JSON.parse(raw) : null;
+      const role = (u && u.role) ? String(u.role).toLowerCase() : '';
+      isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
+    } catch {}
+    // Only apply plant filter for operational entities that have plant_id and user is not corporate
+    // Do not filter plants table itself or audit_log
+    const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
+    if (!isCorporateFetch && pid && plantScopedEntities.has(entity)) {
+      query = query.eq('plant_id', pid);
+    }
+  } catch {}
+
   (config.orderBy || []).forEach(({ column, ascending }) => {
     query = query.order(column, { ascending });
   });
@@ -1569,6 +1698,33 @@ function applyRealtimePayload(entity, payload) {
   const { eventType, new: newRow, old: oldRow } = payload;
   const config = CLOUD_ENTITY_CONFIG[entity];
   if (!config) return;
+
+  // ── Plant-scoped Realtime: discard events for other plants (unless corporate) ─
+  try {
+    const pid = (newRow && (newRow.plant_id || newRow.plantId)) || (oldRow && (oldRow.plant_id || oldRow.plantId)) || null;
+    if (pid) {
+      const currentPid = getCurrentPlantId();
+      // Check if current user is corporate / super_admin — they receive all
+      let isCorporate = false;
+      try {
+        const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
+        const u = raw ? JSON.parse(raw) : null;
+        const role = (u && u.role) ? String(u.role).toLowerCase() : '';
+        isCorporate = ['super_admin','corporate_head','admin'].includes(role);
+        // Also check JWT role from api cache if available
+        if (!isCorporate) {
+          // Fallback: check if user has multiple plantIds cached
+          const plantCache = localStorage.getItem('ccpl_plants_cache');
+          // If no offline session, assume plant-scoped for safety
+        }
+      } catch {}
+      const plantFilter = !isCorporate && pid !== currentPid;
+      if (plantFilter) {
+        rtLog('debug', `Ignored Realtime ${eventType} on ${config.table} for other plant ${pid.slice(0,8)}`);
+        return;
+      }
+    }
+  } catch {}
 
   // Skip Realtime overwrite within 3s of a local bulk import
   if (localImportSuppressUntil[entity] && Date.now() < localImportSuppressUntil[entity]) {
@@ -1851,7 +2007,8 @@ async function initializeCloudSync() {
 }
 
 function upsertSummary(entity, record, matchKey, userName, activityLabel, activityType) {
-  const existing = state[entity].find((item) => item[matchKey] === record[matchKey] && item.section === record.section);
+  const pid = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const existing = state[entity].find((item) => item[matchKey] === record[matchKey] && item.section === record.section && (item.plant_id || item.plantId || NATHUPUR_PLANT_ID) === pid);
   if (existing) {
     const mergedRecord = { ...existing, ...record, id: existing.id };
     state = {
@@ -1871,6 +2028,45 @@ function upsertSummary(entity, record, matchKey, userName, activityLabel, activi
 
 persistWholeState();
 initializeCloudSync();
+
+// ── Plant-scoped helpers (UX filtering — NOT security) ───────────────────────
+export function getPlantScopedData(plantId) {
+  if (!plantId) return state;
+  const pid = plantId;
+  const filter = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    return arr.filter((r) => {
+      const p = r.plant_id || r.plantId;
+      if (!p) return pid === NATHUPUR_PLANT_ID;
+      return p === pid;
+    });
+  };
+  return {
+    ...state,
+    machines: filter(state.machines),
+    breakdowns: filter(state.breakdowns),
+    pms: filter(state.pms),
+    energy: filter(state.energy),
+    amc: filter(state.amc),
+    machineBreakdownLogs: filter(state.machineBreakdownLogs),
+    machinePmRecords: filter(state.machinePmRecords),
+    plantSections: filter(state.plantSections),
+    dailyUtilityLog: filter(state.dailyUtilityLog),
+    monthlyHerbicide: filter(state.monthlyHerbicide),
+    monthlyInsecticide: filter(state.monthlyInsecticide),
+    monthlyWater: filter(state.monthlyWater),
+    monthlyAirCompressor: filter(state.monthlyAirCompressor),
+    dailySolarGeneration: filter(state.dailySolarGeneration),
+  };
+}
+
+export function usePlantScopedStore(plantId) {
+  const v = useSyncExternalStore(subscribe, getVersion);
+  void v;
+  return getPlantScopedData(plantId);
+}
+
+export { NATHUPUR_PLANT_ID, getCurrentPlantId };
 
 export function subscribe(fn) {
   listeners.add(fn);

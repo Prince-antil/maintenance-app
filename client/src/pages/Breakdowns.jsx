@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import {
   useStore, addBreakdown, deleteBreakdown, updateBreakdown,
-  addMachineBreakdownLog, deleteMachineBreakdownLog,
-} from '../store.js';
+  addMachineBreakdownLog, deleteMachineBreakdownLog, getPlantScopedData } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import {
   aggregateBreakdownRecords, computeAvailability, formatPeriodKey,
   monthlyBreakdownTrend, machineWiseBreakdown, paretoTop10Machines,
@@ -255,7 +255,9 @@ function KPICard({ icon: Icon, label, value, changePct, cls, invert }) {
 export default function Breakdowns() {
   const { user } = useAuth();
   const { openUpload } = useUI();
-  const store = useStore();
+  const rawStore = useStore();
+  const { currentPlant, currentPlantId } = usePlant();
+  const store = getPlantScopedData(currentPlantId);
   const navigate = useNavigate();
   const { breakdowns, machines, machineBreakdownLogs } = store;
   const userName = user?.full_name || 'Admin';

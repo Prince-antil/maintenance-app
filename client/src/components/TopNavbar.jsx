@@ -8,6 +8,8 @@ import { buildNotifications } from '../analytics.js';
 import { timeAgo, formatDateLong, loadLS, saveLS } from '../utils.js';
 import { listReportMetadata } from '../reportVault.js';
 import { UNIT_BADGE } from '../constants.js';
+import { usePlant } from '../context/PlantContext.jsx';
+import PlantSwitcher from './PlantSwitcher.jsx';
 import {
   Menu, Shield, Search, Bell, ChevronDown, LogIn, LogOut,
   Plus, Upload, User, Clock, FileText, CalendarDays, Cog,
@@ -34,6 +36,7 @@ export default function TopNavbar() {
   const { toggleSidebar, openUpload, openLogin, openAddMachine, openMasterImport, refreshKey } = useUI();
   const navigate = useNavigate();
   const store = useStore();
+  const { currentPlant } = usePlant();
 
   // Instant search
   const [query, setQuery] = useState('');
@@ -187,10 +190,17 @@ export default function TopNavbar() {
             </h1>
             <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-px rounded-full bg-emerald-500/10 border border-emerald-500/30 emerald-badge-glow">
               <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
-              <span className="text-emerald-400 text-[9px] font-semibold tracking-wider">{UNIT_BADGE}</span>
+              <span className="text-emerald-400 text-[9px] font-semibold tracking-wider">
+                {(currentPlant?.plant_name || 'NATHUPUR').toUpperCase()} — MAINTENANCE & RELIABILITY HUB
+              </span>
             </span>
           </div>
         </button>
+
+        {/* Plant Switcher */}
+        <div className="hidden md:flex items-center">
+          <PlantSwitcher />
+        </div>
 
         {/* Instant global search */}
         <div className="flex-1 max-w-xl mx-auto relative" ref={searchRef}>

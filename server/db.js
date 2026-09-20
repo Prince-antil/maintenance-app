@@ -29,11 +29,14 @@ export async function getDB() {
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin','viewer')),
+      role TEXT NOT NULL CHECK(role IN ('admin','viewer','super_admin','corporate_head','plant_admin','plant_user')),
       full_name TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+  // Migrate existing DB if role check is old
+  try { db.run("ALTER TABLE users ADD COLUMN plant_access TEXT DEFAULT '[]'"); } catch {}
+  try { db.run("UPDATE users SET role='super_admin' WHERE role='admin'"); } catch {}
 
   db.run(`
     CREATE TABLE IF NOT EXISTS report_files (
@@ -55,19 +58,22 @@ export async function getDB() {
   db.run('CREATE INDEX IF NOT EXISTS idx_reports_month_year ON report_files(reporting_month, reporting_year)');
   db.run('CREATE INDEX IF NOT EXISTS idx_reports_plant ON report_files(plant_section)');
 
-  // Seed admin
-  const adminResult = db.exec("SELECT id FROM users WHERE role = 'admin'");
+  // Seed super admin (Prince)
+  const adminResult = db.exec("SELECT id FROM users WHERE username='Prince'");
   if (!adminResult.length || !adminResult[0].values.length) {
     const hash = bcrypt.hashSync('Prince123', 10);
     db.run(
       'INSERT INTO users (id, username, password, role, full_name) VALUES (?, ?, ?, ?, ?)',
-      [uuidv4(), 'Prince', hash, 'admin', 'Prince']
+      [uuidv4(), 'Prince', hash, 'super_admin', 'Prince']
     );
-    console.log('Seeded admin user');
+    console.log('Seeded super_admin Prince');
+  } else {
+    // Ensure Prince is super_admin
+    try { db.run("UPDATE users SET role='super_admin' WHERE username='Prince'"); } catch {}
   }
 
   // Seed viewer
-  const viewerResult = db.exec("SELECT id FROM users WHERE role = 'viewer'");
+  const viewerResult = db.exec("SELECT id FROM users WHERE username='viewer'");
   if (!viewerResult.length || !viewerResult[0].values.length) {
     const hash = bcrypt.hashSync('viewer123', 10);
     db.run(
@@ -75,6 +81,28 @@ export async function getDB() {
       [uuidv4(), 'viewer', hash, 'viewer', 'Read-Only Viewer']
     );
     console.log('Seeded viewer user (username: viewer, password: viewer123)');
+  }
+
+  // Seed corporate head
+  const corpResult = db.exec("SELECT id FROM users WHERE username='corporate'");
+  if (!corpResult.length || !corpResult[0].values.length) {
+    const hash = bcrypt.hashSync('Corporate123', 10);
+    db.run(
+      'INSERT INTO users (id, username, password, role, full_name) VALUES (?, ?, ?, ?, ?)',
+      [uuidv4(), 'corporate', hash, 'corporate_head', 'Corporate Head']
+    );
+    console.log('Seeded corporate_head corporate / Corporate123');
+  }
+
+  // Seed Plant 2 admin
+  const p2Result = db.exec("SELECT id FROM users WHERE username='plant2admin'");
+  if (!p2Result.length || !p2Result[0].values.length) {
+    const hash = bcrypt.hashSync('Plant2@123', 10);
+    db.run(
+      'INSERT INTO users (id, username, password, role, full_name) VALUES (?, ?, ?, ?, ?)',
+      [uuidv4(), 'plant2admin', hash, 'plant_admin', 'Plant 2 Admin']
+    );
+    console.log('Seeded plant2admin / Plant2@123');
   }
 
   saveDB();

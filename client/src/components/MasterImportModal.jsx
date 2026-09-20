@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
+import { usePlant } from '../context/PlantContext.jsx';
 import { parseMasterImportFile, downloadMasterTemplate } from '../bulkImport.js';
 import { importMasterExcelBulk, syncFromMasterSheet, useStore, updateSettings } from '../store.js';
 
@@ -192,6 +193,7 @@ function LiveSyncPanel({ onClose }) {
 export default function MasterImportModal({ onClose, onSuccess }) {
   const { user } = useAuth();
   const { pushToast } = useUI();
+  const { currentPlant } = usePlant();
   const userName = user?.full_name || 'Admin';
 
   const [tab, setTab] = useState('upload'); // 'upload' | 'live'
@@ -312,6 +314,10 @@ export default function MasterImportModal({ onClose, onSuccess }) {
               <span className="text-white">Energy_Data</span> sheets — all three sync
               to Supabase Realtime and update every connected PC instantly.
             </p>
+            <div className="mt-2 rounded-control border border-cyan-500/20 bg-cyan-500/8 px-2.5 py-1.5 inline-flex items-center gap-2">
+              <span className="badge bg-cyan-500/15 text-cyan-400 text-[10px]">Destination: {currentPlant?.plant_name} ({currentPlant?.plant_code})</span>
+              <span className="text-slate-400 text-[10px]">Excel plant columns are ignored — enforced server-side</span>
+            </div>
           </div>
           <button onClick={onClose} className="btn-ghost p-1.5 flex-shrink-0 ml-4" aria-label="Close">
             <X size={16} />

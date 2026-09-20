@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM, updatePM, purgePmRecords } from '../store.js';
+import { useStore, addPM, deletePM, updatePM, purgePmRecords , getPlantScopedData } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import {
   formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,
@@ -256,7 +257,9 @@ function EditPMModal({ row, userName, onClose }) {
 export default function PreventiveMaintenance() {
   const { user } = useAuth();
   const { openUpload } = useUI();
-  const store = useStore();
+  const rawStore = useStore();
+  const { currentPlant, currentPlantId } = usePlant();
+  const store = getPlantScopedData(currentPlantId);
   const { pms, machines, machinePmRecords } = store;
   const [showNew, setShowNew] = useState(false);
   const [viewing, setViewing] = useState(null);

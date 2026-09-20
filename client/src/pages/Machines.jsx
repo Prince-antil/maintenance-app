@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, deleteMachine } from '../store.js';
+import { useStore, getPlantScopedData, deleteMachine } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
 import { machineHealth, aggregateBreakdownRecords, summaryMonthKey, formatPeriodKey, lastNMonths, equipmentWiseBreakdown } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import EmptyState from '../components/EmptyState.jsx';
@@ -32,7 +33,10 @@ export default function Machines() {
   const { user } = useAuth();
   const { openAddMachine, openUpload } = useUI();
   const navigate = useNavigate();
-  const { machines, breakdowns, pms, machinePmRecords } = useStore();
+  const raw = useStore();
+  const { currentPlant, currentPlantId } = usePlant();
+  const scoped = getPlantScopedData(currentPlantId);
+  const { machines, breakdowns, pms, machinePmRecords } = scoped;
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [section, setSection] = useState('');
@@ -120,7 +124,7 @@ export default function Machines() {
         { key: 'health', label: 'Health %' },
         { label: 'Documents', value: (m) => (m.docs || []).length },
       ],
-      'machine-register.csv'
+      'machine-register-'+(currentPlant?.plant_code||'NATHUPUR')+'.csv'
     );
 
   const handleDelete = () => {
@@ -131,6 +135,7 @@ export default function Machines() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center gap-2 text-[11px] text-slate-500"><span>Home</span><span>/</span><span className="text-cyan-400 font-semibold">{currentPlant?.plant_name}</span><span>/</span><span className="text-white">Machines</span><span className="ml-auto badge bg-cyan-500/10 text-cyan-400 text-[10px]">CURRENT PLANT: {currentPlant?.plant_code}</span></div>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
@@ -139,7 +144,7 @@ export default function Machines() {
             Machine Asset Register
           </h2>
           <p className="text-body mt-1.5">
-            {machines.length} assets across {sections.length} operating sections · specs, health scores, QR codes, SOPs, spares & maintenance history
+            {machines.length} assets in {currentPlant?.plant_name} across {sections.length} operating sections · specs, health scores, QR codes, SOPs, spares & maintenance history
           </p>
         </div>
         <div className="flex items-center gap-2">
