@@ -23,6 +23,10 @@ const KEYS = {
   monthlyAirCompressor: 'CCPL_MONTHLY_AIR_COMPRESSOR_V1',
   dailySolarGeneration: 'CCPL_DAILY_SOLAR_GENERATION_V1',
   energySettings: 'CCPL_ENERGY_SETTINGS_V1',
+  testingCertificates: 'CCPL_TESTING_CERTIFICATES_V1',
+  kpiRecords: 'CCPL_KPI_RECORDS_V1',
+  kpiSettings: 'CCPL_KPI_SETTINGS_V1',
+  kpiFySheet: 'CCPL_KPI_FY_SHEET_V1',
 };
 
 const LEGACY_KEYS = {
@@ -43,6 +47,10 @@ const LEGACY_KEYS = {
   monthlyAirCompressor: [],
   dailySolarGeneration: [],
   energySettings: [],
+  testingCertificates: [],
+  kpiRecords: [],
+  kpiSettings: [],
+  kpiFySheet: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -73,7 +81,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings', 'kpiFySheet'];
 
 const NATHUPUR_PLANT_ID = '00000000-0000-0000-0000-000000000001';
 const PLANT_LS_KEY = 'ccpl_current_plant_id';
@@ -492,17 +500,35 @@ function monthlyAirCompressorToCloudRow(record) {
 
 // ── Daily Solar Generation normalizer ────────────────────────────────────
 function normalizeDailySolarGeneration(fields) {
+  // Handle multiple naming conventions: snake_case, camelCase, _kwh suffix, inverter variants
+  const u1Inv1Kwh = toNumber(fields.u1Inv1Kwh ?? fields.u1_inv1_kwh ?? fields.u1_inv1 ?? fields.u1Inv1 ?? fields.u1_inverter1 ?? fields.u1_inverter_1 ?? fields.u1Inverter1 ?? 0);
+  const u1Inv2Kwh = toNumber(fields.u1Inv2Kwh ?? fields.u1_inv2_kwh ?? fields.u1_inv2 ?? fields.u1Inv2 ?? fields.u1_inverter2 ?? fields.u1_inverter_2 ?? fields.u1Inverter2 ?? 0);
+  const u1Inv3Kwh = toNumber(fields.u1Inv3Kwh ?? fields.u1_inv3_kwh ?? fields.u1_inv3 ?? fields.u1Inv3 ?? fields.u1_inverter3 ?? fields.u1_inverter_3 ?? fields.u1Inverter3 ?? 0);
+  const u1Inv4Kwh = toNumber(fields.u1Inv4Kwh ?? fields.u1_inv4_kwh ?? fields.u1_inv4 ?? fields.u1Inv4 ?? fields.u1_inverter4 ?? fields.u1_inverter_4 ?? fields.u1Inverter4 ?? 0);
+  const u2Inv1Kwh = toNumber(fields.u2Inv1Kwh ?? fields.u2_inv1_kwh ?? fields.u2_inv1 ?? fields.u2Inv1 ?? fields.u2_inverter1 ?? fields.u2_inverter_1 ?? fields.u2Inverter1 ?? 0);
+  const u2Inv2Kwh = toNumber(fields.u2Inv2Kwh ?? fields.u2_inv2_kwh ?? fields.u2_inv2 ?? fields.u2Inv2 ?? fields.u2_inverter2 ?? fields.u2_inverter_2 ?? fields.u2Inverter2 ?? 0);
+  const u2Inv3Kwh = toNumber(fields.u2Inv3Kwh ?? fields.u2_inv3_kwh ?? fields.u2_inv3 ?? fields.u2Inv3 ?? fields.u2_inverter3 ?? fields.u2_inverter_3 ?? fields.u2Inverter3 ?? 0);
+  const invTotal = round1(u1Inv1Kwh + u1Inv2Kwh + u1Inv3Kwh + u1Inv4Kwh + u2Inv1Kwh + u2Inv2Kwh + u2Inv3Kwh);
+  // Prefer inverter sum; fall back to explicit daily total (handles single-column uploads) and stored totals
+  const rawDirect = fields.dailyTotalKwh ?? fields.daily_total_kwh ?? fields.grandTotal ?? fields.grand_total ?? fields.grand_total_kwh ?? fields.daily_total ?? fields.total_solar_kwh ?? fields.u1_total ?? fields.u1Total ?? fields.u2_total ?? fields.u2Total ?? 0;
+  const directTotal = toNumber(rawDirect);
+  // Also handle case where directTotal is sum of stored u1_total/u2_total separate columns
+  const storedU1 = toNumber(fields.u1_total ?? fields.u1Total ?? fields.u1_total_kwh ?? fields.u1TotalKwh ?? 0);
+  const storedU2 = toNumber(fields.u2_total ?? fields.u2Total ?? fields.u2_total_kwh ?? fields.u2TotalKwh ?? 0);
+  const storedGrand = toNumber(fields.grand_total ?? fields.grandTotal ?? fields.grand_total_kwh ?? fields.grandTotalKwh ?? fields.dailyTotalKwh ?? fields.daily_total_kwh ?? 0);
+  const effectiveDirect = storedGrand > 0 ? storedGrand : (directTotal > 0 ? directTotal : (storedU1 + storedU2 > 0 ? storedU1 + storedU2 : 0));
+  const dailyTotalKwh = invTotal > 0 ? invTotal : effectiveDirect;
   return {
     id: fields.id || uid('dsg'),
     date: fields.date || new Date().toISOString().slice(0, 10),
-    u1Inv1Kwh: toNumber(fields.u1Inv1Kwh),
-    u1Inv2Kwh: toNumber(fields.u1Inv2Kwh),
-    u1Inv3Kwh: toNumber(fields.u1Inv3Kwh),
-    u1Inv4Kwh: toNumber(fields.u1Inv4Kwh),
-    u2Inv1Kwh: toNumber(fields.u2Inv1Kwh),
-    u2Inv2Kwh: toNumber(fields.u2Inv2Kwh),
-    u2Inv3Kwh: toNumber(fields.u2Inv3Kwh),
-    dailyTotalKwh: toNumber(fields.dailyTotalKwh),
+    u1Inv1Kwh,
+    u1Inv2Kwh,
+    u1Inv3Kwh,
+    u1Inv4Kwh,
+    u2Inv1Kwh,
+    u2Inv2Kwh,
+    u2Inv3Kwh,
+    dailyTotalKwh,
     createdAt: fields.createdAt || now(),
     updatedAt: fields.updatedAt || now(),
   };
@@ -513,14 +539,21 @@ function normalizeDailySolarGenerationCloudRow(row) {
     plant_id: row.plant_id, plantId: row.plant_id,
     id: row.id,
     date: row.date,
-    u1Inv1Kwh: row.u1_inv1_kwh,
-    u1Inv2Kwh: row.u1_inv2_kwh,
-    u1Inv3Kwh: row.u1_inv3_kwh,
-    u1Inv4Kwh: row.u1_inv4_kwh,
-    u2Inv1Kwh: row.u2_inv1_kwh,
-    u2Inv2Kwh: row.u2_inv2_kwh,
-    u2Inv3Kwh: row.u2_inv3_kwh,
-    dailyTotalKwh: row.daily_total_kwh,
+    u1Inv1Kwh: row.u1_inv1_kwh ?? row.u1_inv1 ?? row.u1_inverter1 ?? row.u1_inverter_1,
+    u1Inv2Kwh: row.u1_inv2_kwh ?? row.u1_inv2 ?? row.u1_inverter2 ?? row.u1_inverter_2,
+    u1Inv3Kwh: row.u1_inv3_kwh ?? row.u1_inv3 ?? row.u1_inverter3 ?? row.u1_inverter_3,
+    u1Inv4Kwh: row.u1_inv4_kwh ?? row.u1_inv4 ?? row.u1_inverter4 ?? row.u1_inverter_4,
+    u2Inv1Kwh: row.u2_inv1_kwh ?? row.u2_inv1 ?? row.u2_inverter1 ?? row.u2_inverter_1,
+    u2Inv2Kwh: row.u2_inv2_kwh ?? row.u2_inv2 ?? row.u2_inverter2 ?? row.u2_inverter_2,
+    u2Inv3Kwh: row.u2_inv3_kwh ?? row.u2_inv3 ?? row.u2_inverter3 ?? row.u2_inverter_3,
+    dailyTotalKwh: row.daily_total_kwh ?? row.daily_total ?? row.grand_total ?? row.grand_total_kwh ?? row.grandTotal ?? row.total_solar_kwh,
+    // also pass through stored totals if present for fallback
+    u1_total: row.u1_total ?? row.u1_total_kwh,
+    u2_total: row.u2_total ?? row.u2_total_kwh,
+    grand_total: row.grand_total ?? row.grand_total_kwh,
+    u1Total: row.u1Total ?? row.u1_total,
+    u2Total: row.u2Total ?? row.u2_total,
+    grandTotal: row.grandTotal ?? row.grand_total,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -546,6 +579,9 @@ function dailySolarGenerationToCloudRow(record) {
 
 // ── Energy Settings normalizer ───────────────────────────────────────────
 function normalizeEnergySettings(fields) {
+  const capRaw = fields.installedSolarCapacityKwp;
+  const cap = capRaw != null && capRaw !== '' ? toNumber(capRaw) : 540;
+  const capFinal = cap > 0 ? cap : 540;
   return {
     id: fields.id || 'default',
     u1ImportExportCt: toNumber(fields.u1ImportExportCt),
@@ -553,7 +589,7 @@ function normalizeEnergySettings(fields) {
     u2ImportExportCt: toNumber(fields.u2ImportExportCt),
     u2SolarCt: toNumber(fields.u2SolarCt),
     pfWarningThreshold: toNumber(fields.pfWarningThreshold),
-    installedSolarCapacityKwp: toNumber(fields.installedSolarCapacityKwp),
+    installedSolarCapacityKwp: capFinal,
     gridCo2EmissionFactor: toNumber(fields.gridCo2EmissionFactor),
     avgPeakSunHoursPerDay: toNumber(fields.avgPeakSunHoursPerDay),
     createdAt: fields.createdAt || now(),
@@ -1095,8 +1131,52 @@ function machineBreakdownLogToCloudRow(record) {
 }
 
 // ── Per-machine PM records ──────────────────────────────────────────────────
+function toISODateLocal(value) {
+  if (!value) return '';
+  // Handle Date object (from XLSX) — use local date, not UTC, to avoid July/Aug shift
+  if (value instanceof Date && !isNaN(value)) {
+    const y = value.getFullYear();
+    const m = String(value.getMonth() + 1).padStart(2, '0');
+    const d = String(value.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // Handle Excel serial number (e.g., 45261)
+  if (typeof value === 'number' && Number.isFinite(value) && value > 30000 && value < 60000) {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + value * 86400000);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  const s = String(value).trim();
+  // Try to parse YYYY-MM-DD or DD/MM/YYYY or MM/DD/YYYY
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+    const [a, b, c] = s.split('/').map(Number);
+    // Assume DD/MM/YYYY if first part >12, else MM/DD/YYYY — prefer DD/MM as per Indian format
+    const day = a > 12 ? a : a;
+    const month = a > 12 ? b : a;
+    // Actually try DD/MM/YYYY first
+    const parts = s.split('/');
+    const dd = String(parts[0]).padStart(2, '0');
+    const mm = String(parts[1]).padStart(2, '0');
+    const yyyy = parts[2];
+    if (Number(mm) >= 1 && Number(mm) <= 12) return `${yyyy}-${mm}-${dd}`;
+  }
+  // Fallback: try Date parsing but use local
+  const parsed = new Date(s);
+  if (!isNaN(parsed)) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return s.slice(0, 10);
+}
 function normalizeMachinePmRecord(fields) {
-  const pmDate = fields.pmDate || fields.pm_date || new Date().toISOString().slice(0, 10);
+  const rawPmDate = fields.pmDate || fields.pm_date || fields.date || '';
+  const pmDate = toISODateLocal(rawPmDate) || new Date().toISOString().slice(0, 10);
   return {
     id: fields.id || uid('mpm'),
     machineId: fields.machineId || '',
@@ -1106,8 +1186,13 @@ function normalizeMachinePmRecord(fields) {
     pmDate,
     pmType: String(fields.pmType || fields.pm_type || 'Preventive').trim(),
     task: String(fields.task || '').trim(),
-    status: String(fields.status || 'completed').toLowerCase(),
-    completed: fields.completed !== false && fields.completed !== 'false',
+    status: String(fields.status || 'pending').toLowerCase(),
+    completed: (() => {
+      if (fields.completed === true || String(fields.completed).toLowerCase() === 'true') return true;
+      if (fields.completed === false || String(fields.completed).toLowerCase() === 'false') return false;
+      const s = String(fields.status || 'pending').toLowerCase().trim();
+      return s === 'completed';
+    })(),
     action: String(fields.action || '').trim(),
     technician: String(fields.technician || '').trim(),
     remarks: String(fields.remarks || '').trim(),
@@ -1174,6 +1259,404 @@ function plantSectionToCloudRow(record) {
     plant_id: pidPS,
     name: record.name,
     created_by: record.createdBy || '',
+  };
+}
+
+// ── Testing Certificates (Safety & Statutory) ───────────────────────────────
+function frequencyToMonths(freq) {
+  if (typeof freq === 'number' && Number.isFinite(freq)) return freq;
+  const s = String(freq || '').toLowerCase();
+  if (s.includes('6 month')) return 6;
+  if (s.includes('1 year') || s === '12' || s.includes('12 month')) return 12;
+  if (s.includes('2 year')) return 24;
+  if (s.includes('3 year')) return 36;
+  if (s.includes('5 year')) return 60;
+  if (s.includes('custom')) return 12;
+  const n = Number(s);
+  if (Number.isFinite(n) && n > 0) return n;
+  return 12;
+}
+function normalizeTestingCertificate(fields) {
+  return {
+    id: fields.id || uid('tcert'),
+    machineId: fields.machineId || fields.machine_id || '',
+    machineCode: fields.machineCode || fields.machine_code || '',
+    machineName: fields.machineName || fields.machine_name || '',
+    plantSection: fields.plantSection || fields.plant_section || '',
+    certificateType: String(fields.certificateType || fields.certificate_type || fields.cert_type || '').trim(),
+    certificateNumber: String(fields.certificateNumber || fields.certificate_number || fields.cert_number || fields.licenseNumber || '').trim(),
+    agencyName: String(fields.agencyName || fields.agency_name || fields.inspectorName || '').trim(),
+    issueDate: fields.issueDate || fields.issue_date || '',
+    expiryDate: fields.expiryDate || fields.expiry_date || '',
+    frequency: String(fields.frequency || '').trim(),
+    frequencyMonths: fields.frequencyMonths || fields.frequency_months || frequencyToMonths(fields.frequency),
+    document: fields.document && typeof fields.document === 'object' ? fields.document : (fields.documentUrl || fields.document_url ? { filename: fields.documentName || 'certificate.pdf', publicUrl: fields.documentUrl || fields.document_url, storagePath: fields.documentPath || fields.document_path || '' } : null),
+    documentName: fields.documentName || fields.document_name || fields.document?.filename || '',
+    documentUrl: fields.documentUrl || fields.document_url || fields.document?.publicUrl || '',
+    documentPath: fields.documentPath || fields.document_path || fields.document?.storagePath || '',
+    remarks: String(fields.remarks || fields.notes || '').trim(),
+    notes: String(fields.notes || fields.remarks || '').trim(),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeTestingCertificateCloudRow(row) {
+  return normalizeTestingCertificate({
+    id: row.id,
+    machineId: row.machine_id,
+    machineCode: row.machine_code,
+    machineName: row.machine_name,
+    plantSection: row.plant_section,
+    certificateType: row.certificate_type || row.cert_type,
+    certificateNumber: row.certificate_number || row.cert_number,
+    agencyName: row.agency_name,
+    issueDate: row.issue_date,
+    expiryDate: row.expiry_date,
+    frequency: row.frequency,
+    frequencyMonths: row.frequency_months,
+    document: row.document || (row.document_url ? { filename: row.document_name, publicUrl: row.document_url, storagePath: row.document_path } : null),
+    documentName: row.document_name,
+    documentUrl: row.document_url,
+    documentPath: row.document_path,
+    remarks: row.remarks || row.notes,
+    notes: row.notes || row.remarks,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function testingCertificateToCloudRow(record) {
+  return {
+    id: record.id,
+    machine_id: record.machineId,
+    machine_code: record.machineCode,
+    machine_name: record.machineName,
+    plant_section: record.plantSection,
+    // Spec columns
+    cert_type: record.certificateType,
+    cert_number: record.certificateNumber,
+    agency_name: record.agencyName,
+    issue_date: record.issueDate || null,
+    expiry_date: record.expiryDate || null,
+    frequency_months: frequencyToMonths(record.frequency),
+    document_url: record.documentUrl || record.document?.publicUrl || null,
+    notes: record.remarks || record.notes || '',
+    // Extended columns for backward compat
+    certificate_type: record.certificateType,
+    certificate_number: record.certificateNumber,
+    frequency: record.frequency,
+    document: record.document || null,
+    document_name: record.documentName || record.document?.filename || null,
+    document_path: record.documentPath || record.document?.storagePath || null,
+    remarks: record.remarks,
+    created_at: record.createdAt,
+    updated_at: now(),
+  };
+}
+
+function getTestingCertificateStatus(expiryDate) {
+  if (!expiryDate) return { status: 'UNKNOWN', daysLeft: null, tone: 'info' };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const expiry = new Date(expiryDate); expiry.setHours(0,0,0,0);
+  const diff = Math.ceil((expiry - today) / (1000*60*60*24));
+  if (diff <= 0) return { status: 'EXPIRED', daysLeft: diff, tone: 'danger' };
+  if (diff >= 1 && diff <= 30) return { status: 'EXPIRING SOON', daysLeft: diff, tone: 'warning' };
+  return { status: 'VALID', daysLeft: diff, tone: 'success' };
+}
+
+// ── KPI Records (KPI Status) normalizers ──────────────────────────────────
+function normalizeKpiRecord(fields) {
+  const resolved = resolvePeriod({ period: fields.period, month: fields.month, year: fields.year });
+  const period = /^\d{4}-\d{02}$/.test(String(fields.period || '')) ? String(fields.period) : (fields.period && /^\d{4}-\d{2}$/.test(fields.period) ? fields.period : resolved.period);
+  // period fallback via resolvePeriod if not provided
+  const finalPeriod = period || resolved.period || new Date().toISOString().slice(0,7);
+  const [y, m] = finalPeriod.split('-').map(Number);
+  const section = String(fields.section || fields.plantSection || fields.plant_section || fields.plant || MASTER_SECTION).trim() || MASTER_SECTION;
+  const machineId = String(fields.machineId || fields.machine_id || '').trim();
+  const machineCode = String(fields.machineCode || fields.machine_code || fields.machineCode || fields.machine || '').trim();
+  const machineName = String(fields.machineName || fields.machine_name || fields.machine || '').trim();
+  // If machineName provided but machineCode empty, keep as is; UI will display machineName or code
+  const pmCompliancePct = Math.max(0, Math.min(100, round1(fields.pmCompliancePct ?? fields.pm_compliance_pct ?? fields.pmCompliance ?? 0)));
+  const breakdownCount = Math.max(0, Math.round(toNumber(fields.breakdownCount ?? fields.breakdown_count ?? fields.totalBreakdowns ?? 0)));
+  const breakdownHours = Math.max(0, round1(fields.breakdownHours ?? fields.breakdown_hours ?? fields.downtimeHours ?? 0));
+  const mttrRaw = fields.mttr ?? fields.MTTR ?? fields.mttr_hours;
+  const mttr = isPresent(mttrRaw) ? round1(mttrRaw) : (breakdownCount > 0 ? round1(breakdownHours / breakdownCount) : 0);
+  const mtbfRaw = fields.mtbf ?? fields.MTBF ?? fields.mtbf_hours;
+  // MTBF will be finalized via analytics helper if not manually provided; keep fallback as breakdown logic will recompute if needed
+  const mtbf = isPresent(mtbfRaw) ? round1(mtbfRaw) : 0;
+  const availabilityPct = Math.max(0, Math.min(100, round1(fields.availabilityPct ?? fields.availability_pct ?? fields.availability ?? fields.availabilityPercent ?? 0)));
+  const kpiStatusRaw = String(fields.kpiStatus || fields.kpi_status || fields.status || 'Good').trim();
+  const kpiStatus = ['Good','Warning','Critical'].includes(kpiStatusRaw) ? kpiStatusRaw : 'Good';
+  const remarks = String(fields.remarks || fields.notes || '').trim();
+  const isManual = (v) => v === true || String(v).toLowerCase() === 'true' || v === 1;
+  return {
+    id: fields.id || uid('kpi'),
+    period: finalPeriod,
+    month: m,
+    year: y,
+    section,
+    machineId,
+    machineCode,
+    machineName: machineName || machineCode || machineId || '',
+    pmCompliancePct,
+    breakdownCount,
+    breakdownHours,
+    mttr,
+    mtbf,
+    availabilityPct,
+    kpiStatus,
+    remarks,
+    isManualPmCompliance: isManual(fields.isManualPmCompliance ?? fields.is_manual_pm_compliance ?? false),
+    isManualBreakdownCount: isManual(fields.isManualBreakdownCount ?? fields.is_manual_breakdown_count ?? false),
+    isManualBreakdownHours: isManual(fields.isManualBreakdownHours ?? fields.is_manual_breakdown_hours ?? false),
+    isManualMttr: isManual(fields.isManualMttr ?? fields.is_manual_mttr ?? false),
+    isManualMtbf: isManual(fields.isManualMtbf ?? fields.is_manual_mtbf ?? false),
+    isManualAvailability: isManual(fields.isManualAvailability ?? fields.is_manual_availability ?? false),
+    isManualKpiStatus: isManual(fields.isManualKpiStatus ?? fields.is_manual_kpi_status ?? false),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiRecordCloudRow(row) {
+  return normalizeKpiRecord({
+    id: row.id,
+    period: row.period,
+    month: row.month,
+    year: row.year,
+    section: row.section,
+    machineId: row.machine_id,
+    machineCode: row.machine_code,
+    machineName: row.machine_name,
+    pmCompliancePct: row.pm_compliance_pct,
+    breakdownCount: row.breakdown_count,
+    breakdownHours: row.breakdown_hours,
+    mttr: row.mttr,
+    mtbf: row.mtbf,
+    availabilityPct: row.availability_pct,
+    kpiStatus: row.kpi_status,
+    remarks: row.remarks,
+    isManualPmCompliance: row.is_manual_pm_compliance,
+    isManualBreakdownCount: row.is_manual_breakdown_count,
+    isManualBreakdownHours: row.is_manual_breakdown_hours,
+    isManualMttr: row.is_manual_mttr,
+    isManualMtbf: row.is_manual_mtbf,
+    isManualAvailability: row.is_manual_availability,
+    isManualKpiStatus: row.is_manual_kpi_status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiRecordToCloudRow(record) {
+  return {
+    id: record.id,
+    period: record.period,
+    month: record.month,
+    year: record.year,
+    section: record.section,
+    machine_id: record.machineId || '',
+    machine_code: record.machineCode || '',
+    machine_name: record.machineName || '',
+    pm_compliance_pct: record.pmCompliancePct || 0,
+    breakdown_count: record.breakdownCount || 0,
+    breakdown_hours: record.breakdownHours || 0,
+    mttr: record.mttr || 0,
+    mtbf: record.mtbf || 0,
+    availability_pct: record.availabilityPct || 0,
+    kpi_status: record.kpiStatus || 'Good',
+    remarks: record.remarks || '',
+    is_manual_pm_compliance: !!record.isManualPmCompliance,
+    is_manual_breakdown_count: !!record.isManualBreakdownCount,
+    is_manual_breakdown_hours: !!record.isManualBreakdownHours,
+    is_manual_mttr: !!record.isManualMttr,
+    is_manual_mtbf: !!record.isManualMtbf,
+    is_manual_availability: !!record.isManualAvailability,
+    is_manual_kpi_status: !!record.isManualKpiStatus,
+    updated_at: record.updatedAt || now(),
+  };
+}
+
+// ── KPI Settings normalizer ───────────────────────────────────────────────
+function normalizeKpiSettings(fields) {
+  return {
+    id: fields.id || 'default',
+    pmComplianceGood: Math.max(0, Math.min(100, round1(fields.pmComplianceGood ?? fields.pm_compliance_good ?? 90))),
+    pmComplianceWarning: Math.max(0, Math.min(100, round1(fields.pmComplianceWarning ?? fields.pm_compliance_warning ?? 75))),
+    availabilityGood: Math.max(0, Math.min(100, round1(fields.availabilityGood ?? fields.availability_good ?? 95))),
+    availabilityWarning: Math.max(0, Math.min(100, round1(fields.availabilityWarning ?? fields.availability_warning ?? 85))),
+    mttrGood: Math.max(0, round1(fields.mttrGood ?? fields.mttr_good ?? 2)),
+    mttrWarning: Math.max(0, round1(fields.mttrWarning ?? fields.mttr_warning ?? 5)),
+    mtbfGood: Math.max(0, round1(fields.mtbfGood ?? fields.mtbf_good ?? 200)),
+    mtbfWarning: Math.max(0, round1(fields.mtbfWarning ?? fields.mtbf_warning ?? 100)),
+    breakdownCountGood: Math.max(0, Math.round(toNumber(fields.breakdownCountGood ?? fields.breakdown_count_good ?? 2))),
+    breakdownCountWarning: Math.max(0, Math.round(toNumber(fields.breakdownCountWarning ?? fields.breakdown_count_warning ?? 5))),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiSettingsCloudRow(row) {
+  return normalizeKpiSettings({
+    id: row.id,
+    pmComplianceGood: row.pm_compliance_good,
+    pmComplianceWarning: row.pm_compliance_warning,
+    availabilityGood: row.availability_good,
+    availabilityWarning: row.availability_warning,
+    mttrGood: row.mttr_good,
+    mttrWarning: row.mttr_warning,
+    mtbfGood: row.mtbf_good,
+    mtbfWarning: row.mtbf_warning,
+    breakdownCountGood: row.breakdown_count_good,
+    breakdownCountWarning: row.breakdown_count_warning,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiSettingsToCloudRow(record) {
+  return {
+    id: record.id || 'default',
+    pm_compliance_good: record.pmComplianceGood,
+    pm_compliance_warning: record.pmComplianceWarning,
+    availability_good: record.availabilityGood,
+    availability_warning: record.availabilityWarning,
+    mttr_good: record.mttrGood,
+    mttr_warning: record.mttrWarning,
+    mtbf_good: record.mtbfGood,
+    mtbf_warning: record.mtbfWarning,
+    breakdown_count_good: record.breakdownCountGood,
+    breakdown_count_warning: record.breakdownCountWarning,
+    updated_at: record.updatedAt || now(),
+  };
+}
+
+// ── KPI FY Sheet (Plant-level PQSCDM Goal Cascade FY 2026-27) ─────────────────
+const KPI_FY_TEMPLATE_ROWS = [
+  { sn: 1, focusPillar: 'P – Productivity', kpiMetric: 'Asset / Equipment Availability – Plant', uom: '%', kpiWt: 12, pillarWt: 37, annualTarget: '>=95', rating4: '>=97', rating5: '>=99', parentTarget: '>=95% (Engg Head)' },
+  { sn: 2, focusPillar: 'P – Productivity', kpiMetric: 'PM Schedule Adherence – Plant', uom: '%', kpiWt: 10, pillarWt: '', annualTarget: '>=90', rating4: '>=95', rating5: '>=98', parentTarget: '>=90% (Engg Head)' },
+  { sn: 3, focusPillar: 'P – Productivity', kpiMetric: 'Breakdown Frequency Reduction (MTBF improvement)', uom: '% improve', kpiWt: 7, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
+  { sn: 4, focusPillar: 'P – Productivity', kpiMetric: 'MTTR – Mean Time to Repair Reduction', uom: '% improve', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
+  { sn: 5, focusPillar: 'Q – Quality', kpiMetric: 'Equipment Calibration Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: 12, annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98% (Engg Head)' },
+  { sn: 6, focusPillar: 'Q – Quality', kpiMetric: 'Audit/ Regulatory NC – Engineering – Plant', uom: 'No. NCs', kpiWt: 5, pillarWt: '', annualTarget: '<=1', rating4: '0', rating5: '0', parentTarget: '<=2 consolidated' },
+  { sn: 7, focusPillar: 'S – Safety & Environment', kpiMetric: 'Zero LTI – Engineering / Maintenance – Plant', uom: 'No. LTI', kpiWt: 8, pillarWt: 20, annualTarget: '0', rating4: '0', rating5: '0', parentTarget: '0 (Engg Head)' },
+  { sn: 8, focusPillar: 'S – Safety & Environment', kpiMetric: 'Near Miss Reporting – Production Team', uom: 'No./Person/Mo', kpiWt: 3, pillarWt: '', annualTarget: '>=2', rating4: '>=2.5', rating5: '>=3', parentTarget: '>=2 (HSE Head)' },
+  { sn: 9, focusPillar: 'S – Safety & Environment', kpiMetric: 'LOTO / PTW Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: '', annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98%' },
+  { sn: 10, focusPillar: 'S – Safety & Environment', kpiMetric: 'ETP / STP Efficiency – Plant', uom: '%', kpiWt: 5, pillarWt: '', annualTarget: '>=80', rating4: '>=85', rating5: '>=90', parentTarget: '>=80% (Engg Head)' },
+  { sn: 11, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Energy Cost Reduction – Plant', uom: '% vs LY', kpiWt: 10, pillarWt: 23, annualTarget: '>=5', rating4: '>=8', rating5: '>=10', parentTarget: '>=5% (Engg Head)' },
+  { sn: 12, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Maintenance Cost vs Budget – Plant', uom: '%', kpiWt: 8, pillarWt: '', annualTarget: '<=100', rating4: '<=98', rating5: '<=95', parentTarget: '<=100%' },
+  { sn: 13, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Spare Parts Inventory Optimisation – Plant', uom: '% reduction', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10%' },
+  { sn: 14, focusPillar: 'D – Delivery / OTIF', kpiMetric: 'Engineering Clearance for Production – On Time', uom: '% requests', kpiWt: 5, pillarWt: 5, annualTarget: '>=95', rating4: '>=97', rating5: '100', parentTarget: '>=95%' },
+  { sn: 15, focusPillar: 'M – Morale & People', kpiMetric: 'Engg Team Training Mandays – Plant', uom: 'Mandays/Yr', kpiWt: 2, pillarWt: 4, annualTarget: '>=2', rating4: '>=3', rating5: '>=4', parentTarget: '>=2%' },
+  { sn: 16, focusPillar: 'M – Morale & People', kpiMetric: '5S – Engineering Areas – Plant', uom: '%', kpiWt: 2, pillarWt: '', annualTarget: '>=75', rating4: '>=85', rating5: '>=95', parentTarget: '>=75%' },
+];
+
+function getKpiFyTemplateRows() {
+  return KPI_FY_TEMPLATE_ROWS.map((r) => ({ ...r }));
+}
+
+function normalizeKpiFySheet(fields) {
+  const fy = String(fields.fy || fields.FY || '2026-27').trim() || '2026-27';
+  const id = String(fields.id || fy).trim() || fy;
+  let data = fields.data;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch { data = []; }
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    // Initialize with template rows and empty monthly actuals
+    data = getKpiFyTemplateRows().map((row) => ({
+      ...row,
+      q1: row.annualTarget, q2: row.annualTarget, q3: row.annualTarget, q4: row.annualTarget,
+      apr: '', may: '', jun: '', jul: '', aug: '', sep: '', oct: '', nov: '', dec: '', jan: '', feb: '', mar: '',
+      ytdAvg: '',
+      remarks: '',
+      isManualQ1: false, isManualQ2: false, isManualQ3: false, isManualQ4: false,
+      isManualApr: false, isManualMay: false, isManualJun: false, isManualJul: false, isManualAug: false, isManualSep: false, isManualOct: false, isManualNov: false, isManualDec: false, isManualJan: false, isManualFeb: false, isManualMar: false,
+    }));
+  } else {
+    // Ensure all template fields present and ytdAvg computed if missing
+    const templateMap = new Map(getKpiFyTemplateRows().map((r) => [r.sn, r]));
+    data = data.map((row) => {
+      const tpl = templateMap.get(Number(row.sn)) || {};
+      return {
+        sn: Number(row.sn || tpl.sn),
+        focusPillar: String(row.focusPillar || tpl.focusPillar || ''),
+        kpiMetric: String(row.kpiMetric || tpl.kpiMetric || ''),
+        uom: String(row.uom || tpl.uom || ''),
+        kpiWt: row.kpiWt ?? tpl.kpiWt ?? '',
+        pillarWt: row.pillarWt ?? tpl.pillarWt ?? '',
+        annualTarget: String(row.annualTarget ?? tpl.annualTarget ?? ''),
+        rating4: String(row.rating4 ?? tpl.rating4 ?? ''),
+        rating5: String(row.rating5 ?? tpl.rating5 ?? ''),
+        parentTarget: String(row.parentTarget ?? tpl.parentTarget ?? ''),
+        q1: row.q1 ?? tpl.annualTarget ?? '',
+        q2: row.q2 ?? tpl.annualTarget ?? '',
+        q3: row.q3 ?? tpl.annualTarget ?? '',
+        q4: row.q4 ?? tpl.annualTarget ?? '',
+        apr: row.apr ?? '', may: row.may ?? '', jun: row.jun ?? '', jul: row.jul ?? '', aug: row.aug ?? '', sep: row.sep ?? '',
+        oct: row.oct ?? '', nov: row.nov ?? '', dec: row.dec ?? '', jan: row.jan ?? '', feb: row.feb ?? '', mar: row.mar ?? '',
+        ytdAvg: row.ytdAvg ?? '',
+        remarks: row.remarks ?? '',
+        isManualQ1: !!row.isManualQ1, isManualQ2: !!row.isManualQ2, isManualQ3: !!row.isManualQ3, isManualQ4: !!row.isManualQ4,
+        isManualApr: !!row.isManualApr, isManualMay: !!row.isManualMay, isManualJun: !!row.isManualJun, isManualJul: !!row.isManualJul, isManualAug: !!row.isManualAug, isManualSep: !!row.isManualSep, isManualOct: !!row.isManualOct, isManualNov: !!row.isManualNov, isManualDec: !!row.isManualDec, isManualJan: !!row.isManualJan, isManualFeb: !!row.isManualFeb, isManualMar: !!row.isManualMar,
+        ...row,
+      };
+    });
+    // Add missing SNs if data was partial
+    const existingSns = new Set(data.map((r) => Number(r.sn)));
+    getKpiFyTemplateRows().forEach((tpl) => {
+      if (!existingSns.has(tpl.sn)) {
+        data.push({
+          ...tpl,
+          q1: tpl.annualTarget, q2: tpl.annualTarget, q3: tpl.annualTarget, q4: tpl.annualTarget,
+          apr: '', may: '', jun: '', jul: '', aug: '', sep: '', oct: '', nov: '', dec: '', jan: '', feb: '', mar: '', ytdAvg: '', remarks: '',
+          isManualQ1: false, isManualQ2: false, isManualQ3: false, isManualQ4: false,
+          isManualApr: false, isManualMay: false, isManualJun: false, isManualJul: false, isManualAug: false, isManualSep: false, isManualOct: false, isManualNov: false, isManualDec: false, isManualJan: false, isManualFeb: false, isManualMar: false,
+        });
+      }
+    });
+    data.sort((a,b)=>a.sn-b.sn);
+  }
+  // Compute YTD Avg for each row if not manually set and monthly data exists
+  data = data.map((row) => {
+    const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+    const vals = months.map((m) => row[m]).filter((v)=> v!=='' && v!=null && String(v).toLowerCase()!=='na' && String(v).trim()!=='' ).map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const ytd = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : '';
+    const ytdAvg = vals.length ? (Math.round(ytd*10)/10) : '';
+    return { ...row, ytdAvg: row.ytdAvg!=='' && row.ytdAvg!=null ? row.ytdAvg : ytdAvg };
+  });
+  return {
+    id,
+    fy,
+    title: String(fields.title || 'FY 2026-27 ◆ PQSCDM Goal Cascade ◆ Plant Engg Manager'),
+    subtitle: String(fields.subtitle || 'Plant Engineering / Maintenance Manager | Reports to Engg Head | Plant-specific | FY 2026-27'),
+    data,
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeKpiFySheetCloudRow(row) {
+  return normalizeKpiFySheet({
+    id: row.id,
+    fy: row.fy,
+    title: row.title,
+    subtitle: row.subtitle,
+    data: row.data,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
+}
+
+function kpiFySheetToCloudRow(record) {
+  return {
+    id: record.id || record.fy || '2026-27',
+    fy: record.fy || '2026-27',
+    title: record.title,
+    subtitle: record.subtitle,
+    data: record.data,
+    updated_at: record.updatedAt || now(),
   };
 }
 
@@ -1268,6 +1751,30 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: energySettingsToCloudRow,
     orderBy: [{ column: 'id', ascending: true }],
   },
+  testingCertificates: {
+    table: 'testing_certificates',
+    fromRow: normalizeTestingCertificateCloudRow,
+    toRow: testingCertificateToCloudRow,
+    orderBy: [{ column: 'expiry_date', ascending: true }],
+  },
+  kpiRecords: {
+    table: 'kpi_records',
+    fromRow: normalizeKpiRecordCloudRow,
+    toRow: kpiRecordToCloudRow,
+    orderBy: [{ column: 'year', ascending: false }, { column: 'month', ascending: false }, { column: 'section', ascending: true }],
+  },
+  kpiSettings: {
+    table: 'kpi_settings',
+    fromRow: normalizeKpiSettingsCloudRow,
+    toRow: kpiSettingsToCloudRow,
+    orderBy: [{ column: 'id', ascending: true }],
+  },
+  kpiFySheet: {
+    table: 'kpi_fy_sheet',
+    fromRow: normalizeKpiFySheetCloudRow,
+    toRow: kpiFySheetToCloudRow,
+    orderBy: [{ column: 'fy', ascending: true }],
+  },
 };
 
 let version = 0;
@@ -1348,6 +1855,10 @@ let state = {
   amc: loadPersistedValue('amc', []).map(normalizeAmcRecord),
   machineBreakdownLogs: loadPersistedValue('machineBreakdownLogs', []).map(normalizeMachineBreakdownLog),
   machinePmRecords: loadPersistedValue('machinePmRecords', []).map(normalizeMachinePmRecord),
+  testingCertificates: loadPersistedValue('testingCertificates', []).map(normalizeTestingCertificate),
+  kpiRecords: loadPersistedValue('kpiRecords', []).map(normalizeKpiRecord),
+  kpiSettings: loadPersistedValue('kpiSettings', normalizeKpiSettings({})),
+  kpiFySheet: loadPersistedValue('kpiFySheet', [normalizeKpiFySheet({ fy: '2026-27' })]),
   plantSections: loadPersistedValue('plantSections', []).map((s) =>
     typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
   ),
@@ -1576,6 +2087,10 @@ async function writeToCloudNow(entity, action, payload) {
 
 async function fetchCloudEntity(entity) {
   const config = CLOUD_ENTITY_CONFIG[entity];
+  if (!config) {
+    rtLog('warn', `FETCH: no config for entity ${entity}`);
+    return [];
+  }
   let query = supabase
     .from(config.table)
     .select('*');
@@ -1604,6 +2119,11 @@ async function fetchCloudEntity(entity) {
 
   const { data, error } = await query;
   if (error) {
+    // For optional tables (testingCertificates, kpiRecords, kpiSettings, kpiFySheet) return empty rather than crashing sync (table may not exist yet before migration)
+    if (entity === 'testingCertificates' || entity === 'kpiRecords' || entity === 'kpiSettings' || entity === 'kpiFySheet') {
+      rtLog('warn', `FETCH failed on ${config.table} (optional, returning empty):`, error.message);
+      return [];
+    }
     rtLog('error', `FETCH failed on ${config.table}:`, error.message, error.details || '', error.hint || '');
     throw error;
   }
@@ -1904,7 +2424,7 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings] = await Promise.all([
+    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet] = await Promise.all([
       fetchCloudEntity('machines'),
       fetchCloudEntity('breakdowns'),
       fetchCloudEntity('pms'),
@@ -1920,6 +2440,10 @@ async function initializeCloudSync() {
       fetchCloudEntity('monthlyAirCompressor'),
       fetchCloudEntity('dailySolarGeneration'),
       fetchCloudEntity('energySettings'),
+      fetchCloudEntity('testingCertificates'),
+      fetchCloudEntity('kpiRecords'),
+      fetchCloudEntity('kpiSettings'),
+      fetchCloudEntity('kpiFySheet'),
     ]);
 
     const remoteSnapshots = {
@@ -1938,6 +2462,10 @@ async function initializeCloudSync() {
       monthlyAirCompressor: remoteMonthlyAirCompressor,
       dailySolarGeneration: remoteDailySolarGeneration,
       energySettings: remoteEnergySettings,
+      testingCertificates: remoteTestingCertificates,
+      kpiRecords: remoteKpiRecords,
+      kpiSettings: remoteKpiSettings,
+      kpiFySheet: remoteKpiFySheet,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -1981,6 +2509,38 @@ async function initializeCloudSync() {
       state = { ...state, energySettings: normalizeEnergySettings(remoteEnergySettings[0] || {}) };
       persistEntity('energySettings');
     }
+    if (remoteTestingCertificates?.length) replaceEntityState('testingCertificates', remoteTestingCertificates, false);
+    if (remoteKpiRecords?.length) replaceEntityState('kpiRecords', remoteKpiRecords, false);
+    if (remoteKpiSettings?.length) {
+      state = { ...state, kpiSettings: normalizeKpiSettings(remoteKpiSettings[0] || {}) };
+      persistEntity('kpiSettings');
+    }
+    if (remoteKpiFySheet?.length) {
+      const cloudSheet = remoteKpiFySheet[0];
+      if (cloudSheet && Array.isArray(cloudSheet.data) && cloudSheet.data.length) {
+        const localSheet = state.kpiFySheet && state.kpiFySheet[0] ? state.kpiFySheet[0] : null;
+        const cloudTime = new Date(cloudSheet.updatedAt || cloudSheet.updated_at || 0).getTime();
+        const localTime = localSheet ? new Date(localSheet.updatedAt || 0).getTime() : 0;
+        const isLocalTemplate = !localSheet || !Array.isArray(localSheet.data) || localSheet.data.every((r)=> ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar','q1','q2','q3','q4'].every((k)=> !r[k] || String(r[k]).trim()===''));
+        // Only overwrite local if cloud is newer or local is still template (all blanks). Prevents manual data deleted on refresh when cloud is stale.
+        if (cloudTime > localTime || isLocalTemplate) {
+          // Also check suppress window (recent local save)
+          if (!localImportSuppressUntil.kpiFySheet || Date.now() > localImportSuppressUntil.kpiFySheet) {
+            state = { ...state, kpiFySheet: [normalizeKpiFySheet(cloudSheet)] };
+            persistEntity('kpiFySheet');
+          }
+        } else {
+          // Local is newer (manual edits not yet in cloud) — keep local and ensure cloud gets updated
+          queueCloudMutation('kpiFySheet','upsert', normalizeKpiFySheet(localSheet));
+        }
+      }
+    } else if (!remoteKpiFySheet?.length && state.kpiFySheet?.length) {
+      // Cloud empty but local has data — push local to cloud
+      const localSheet = state.kpiFySheet[0];
+      if (localSheet && Array.isArray(localSheet.data) && localSheet.data.some((r)=> ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'].some((k)=> r[k] && String(r[k]).trim()!=='' ))) {
+        queueCloudMutation('kpiFySheet','upsert', normalizeKpiFySheet(localSheet));
+      }
+    }
     notifyStoreUpdate();
 
     // Push any local-only records that aren't in Supabase yet
@@ -2007,8 +2567,8 @@ async function initializeCloudSync() {
 }
 
 function upsertSummary(entity, record, matchKey, userName, activityLabel, activityType) {
-  const pid = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
-  const existing = state[entity].find((item) => item[matchKey] === record[matchKey] && item.section === record.section && (item.plant_id || item.plantId || NATHUPUR_PLANT_ID) === pid);
+  const existing = state[entity].find((item) => item[matchKey] === record[matchKey] && item.section === record.section);
+  let result;
   if (existing) {
     const mergedRecord = { ...existing, ...record, id: existing.id };
     state = {
@@ -2017,13 +2577,16 @@ function upsertSummary(entity, record, matchKey, userName, activityLabel, activi
     };
     commitAndQueue(entity, 'upsert', mergedRecord);
     logActivity(userName, `updated ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
-    return { ...mergedRecord, mode: 'updated' };
+    result = { ...mergedRecord, mode: 'updated' };
+  } else {
+    state = { ...state, [entity]: [record, ...state[entity]] };
+    commitAndQueue(entity, 'upsert', record);
+    logActivity(userName, `logged ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
+    result = { ...record, mode: 'created' };
   }
-
-  state = { ...state, [entity]: [record, ...state[entity]] };
-  commitAndQueue(entity, 'upsert', record);
-  logActivity(userName, `logged ${activityLabel}`, `${record.section} · ${periodLabel(record.period)}`, activityType);
-  return { ...record, mode: 'created' };
+  // Auto-refresh KPI records that depend on PM/Breakdown summaries (if not manually overridden)
+  try { if (entity==='breakdowns' || entity==='pms') refreshKpiAutoValues(result.period, result.section); } catch {}
+  return result;
 }
 
 persistWholeState();
@@ -2289,6 +2852,7 @@ export function deleteBreakdown(id, userName) {
   state = { ...state, breakdowns: state.breakdowns.filter((item) => item.id !== id) };
   commitAndQueue('breakdowns', 'delete', id);
   logActivity(userName, 'deleted breakdown summary', record ? `${record.section} · ${periodLabel(record.period)}` : '', 'breakdown');
+  try { if (record) refreshKpiAutoValues(record.period, record.section); } catch {}
 }
 
 export function addPM(fields, userName) {
@@ -2317,6 +2881,7 @@ export function deletePM(id, userName) {
   state = { ...state, pms: state.pms.filter((item) => item.id !== id) };
   commitAndQueue('pms', 'delete', id);
   logActivity(userName, 'deleted PM summary', record ? `${record.section} · ${periodLabel(record.period)}` : '', 'pm');
+  try { if (record) refreshKpiAutoValues(record.period, record.section); } catch {}
 }
 
 export function addEnergyLog(fields, userName) {
@@ -2563,13 +3128,449 @@ export function addMachinePmRecord(fields, userName) {
   state = { ...state, machinePmRecords: [record, ...state.machinePmRecords] };
   commitAndQueue('machinePmRecords', 'upsert', record);
   logActivity(userName, 'logged machine PM', `${record.machineName} · ${record.pmDate} · ${record.task || record.pmType}`, 'pm');
+  try { refreshKpiAutoValues((record.pmDate||'').slice(0,7), record.plantSection, record.machineId); refreshKpiAutoValues((record.pmDate||'').slice(0,7), record.plantSection); } catch {}
   return record;
 }
 
 export function deleteMachinePmRecord(id, userName) {
+  const rec = state.machinePmRecords.find((r)=>r.id===id);
   state = { ...state, machinePmRecords: state.machinePmRecords.filter((r) => r.id !== id) };
   commitAndQueue('machinePmRecords', 'delete', id);
   logActivity(userName, 'deleted machine PM record', '', 'pm');
+  try { if(rec) { refreshKpiAutoValues((rec.pmDate||'').slice(0,7), rec.plantSection, rec.machineId); refreshKpiAutoValues((rec.pmDate||'').slice(0,7), rec.plantSection); } } catch {}
+}
+
+// ── Testing Certificates (Safety & Statutory) ─────────────────────────────────
+export const getTestingCertificates = () => state.testingCertificates || [];
+export const getTestingCertificatesForMachine = (machineId) =>
+  (state.testingCertificates || []).filter((r) => r.machineId === machineId);
+
+export function addTestingCertificate(fields, userName) {
+  const record = normalizeTestingCertificate({ ...fields, createdAt: now(), updatedAt: now() });
+  state = { ...state, testingCertificates: [record, ...(state.testingCertificates || [])] };
+  commitAndQueue('testingCertificates', 'upsert', record);
+  logActivity(userName, 'added testing certificate', `${record.machineName || record.machineId} · ${record.certificateType} · ${record.certificateNumber}`, 'machine');
+  return record;
+}
+
+export function updateTestingCertificate(id, patch, userName) {
+  const existing = (state.testingCertificates || []).find((r) => r.id === id);
+  if (!existing) return null;
+  const updated = normalizeTestingCertificate({ ...existing, ...patch, id, updatedAt: now() });
+  state = { ...state, testingCertificates: (state.testingCertificates || []).map((r) => (r.id === id ? updated : r)) };
+  commitAndQueue('testingCertificates', 'upsert', updated);
+  logActivity(userName, 'updated testing certificate', `${updated.certificateType} · ${updated.certificateNumber}`, 'machine');
+  return updated;
+}
+
+export function deleteTestingCertificate(id, userName) {
+  const rec = (state.testingCertificates || []).find((r) => r.id === id);
+  state = { ...state, testingCertificates: (state.testingCertificates || []).filter((r) => r.id !== id) };
+  commitAndQueue('testingCertificates', 'delete', id);
+  logActivity(userName, 'deleted testing certificate', rec ? `${rec.certificateType} · ${rec.certificateNumber}` : '', 'machine');
+}
+
+export async function purgeTestingCertificates(machineId, userName) {
+  let before;
+  if (!machineId) {
+    before = [...(state.testingCertificates || [])];
+    state = { ...state, testingCertificates: [] };
+  } else {
+    before = (state.testingCertificates || []).filter((r) => r.machineId === machineId);
+    state = { ...state, testingCertificates: (state.testingCertificates || []).filter((r) => r.machineId !== machineId) };
+  }
+  commit('testingCertificates');
+  if (supabase && isSupabaseConfigured) {
+    try {
+      let q = supabase.from('testing_certificates').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (machineId) q = q.eq('machine_id', machineId);
+      await q;
+    } catch {}
+  }
+  logActivity(userName, 'purged testing certificates', `${before.length} removed`, 'machine');
+  return before.length;
+}
+
+export async function purgeTestingCertificatesByMachine(machineId, userName) {
+  return purgeTestingCertificates(machineId, userName);
+}
+
+export function getTestingCertificateAlertCount(certificates, machineId) {
+  const list = machineId ? (certificates || []).filter((r) => r.machineId === machineId) : (certificates || []);
+  return list.filter((r) => {
+    const { status } = getTestingCertificateStatus(r.expiryDate);
+    return status === 'EXPIRED' || status === 'EXPIRING SOON';
+  }).length;
+}
+
+export { getTestingCertificateStatus };
+
+// ── KPI Records (KPI Status) ───────────────────────────────────────────────
+export const getKpiRecords = () => state.kpiRecords || [];
+export const getKpiSettings = () => state.kpiSettings || normalizeKpiSettings({});
+
+function computeKpiAutoValues({ period, section, machineId }) {
+  // Reuse existing app calculations - do not create conflicting formulas
+  const targetPeriod = period || '';
+  const targetSection = section || MASTER_SECTION;
+  const targetMachineId = machineId || '';
+
+  // --- PM Compliance % ---
+  let pmCompliancePct = 0;
+  let pmSource = 'auto';
+  if (targetMachineId) {
+    const recs = (state.machinePmRecords || []).filter((r) => (r.machineId || '') === targetMachineId && (r.pmDate || '').slice(0,7) === targetPeriod);
+    if (recs.length > 0) {
+      const done = recs.filter((r) => String(r.status||'').toLowerCase()==='completed' || r.completed===true).length;
+      pmCompliancePct = recs.length > 0 ? Math.round((done / recs.length)*1000)/10 : 0;
+    } else {
+      // fallback to section PM logs if no per-machine records
+      const pmRows = (state.pms || []).filter((row) => row.period === targetPeriod && row.section === targetSection);
+      if (pmRows.length) {
+        const planned = pmRows.reduce((s,r)=>s+(r.plannedCount||0),0);
+        const done = pmRows.reduce((s,r)=>s+(r.doneCount||0),0);
+        pmCompliancePct = planned>0 ? Math.round((done/planned)*1000)/10 : 0;
+      }
+    }
+  } else {
+    // section-level: prefer machinePmRecords aggregated by section, fallback to pm_logs
+    const sectionMachineRecs = (state.machinePmRecords || []).filter((r) => (r.plantSection||'')===targetSection && (r.pmDate||'').slice(0,7)===targetPeriod);
+    if (sectionMachineRecs.length>0) {
+      const done = sectionMachineRecs.filter((r)=>String(r.status||'').toLowerCase()==='completed' || r.completed===true).length;
+      pmCompliancePct = Math.round((done/sectionMachineRecs.length)*1000)/10;
+    } else {
+      const pmRows = (state.pms || []).filter((row) => row.period === targetPeriod && (row.section === targetSection || targetSection===MASTER_SECTION));
+      if (pmRows.length) {
+        const planned = pmRows.reduce((s,r)=>s+(r.plannedCount||0),0);
+        const done = pmRows.reduce((s,r)=>s+(r.doneCount||0),0);
+        pmCompliancePct = planned>0 ? Math.round((done/planned)*1000)/10 : 0;
+      }
+    }
+  }
+
+  // --- Breakdown metrics ---
+  let breakdownCount = 0;
+  let breakdownHours = 0;
+  let operatingHours = 0;
+  let mttr = 0;
+  let mtbf = 0;
+  let availabilityPct = 0;
+
+  const machinesInSection = targetMachineId ? 1 : (targetSection===MASTER_SECTION ? (state.machines.length||1) : (state.machines.filter((m)=>m.section===targetSection).length||1));
+  const hoursPerMonth = 720;
+
+  if (targetMachineId) {
+    const logs = (state.machineBreakdownLogs || []).filter((r)=> (r.machineId||'')===targetMachineId && (r.date||'').slice(0,7)===targetPeriod);
+    breakdownCount = logs.length;
+    breakdownHours = Math.round(logs.reduce((s,r)=>s+Number(r.downtimeHours||0),0)*10)/10;
+    // Also consider breakdown_logs section summary for this machine's section? No, per-machine uses only machine logs
+    operatingHours = hoursPerMonth; // per-machine operating hours = 720
+    mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+    const availOpHours = operatingHours;
+    mtbf = breakdownCount>0 ? Math.round(Math.max(0, availOpHours - breakdownHours)/breakdownCount*10)/10 : 0;
+    availabilityPct = availOpHours>0 ? Math.max(0, Math.round(((availOpHours - breakdownHours)/availOpHours)*1000)/10) : 100;
+    // Check for override: if breakdown_logs has availability_override for this period/section, reuse exact value (per requirement 7)
+    const overrideRow = (state.breakdowns||[]).find((r)=>r.period===targetPeriod && r.section===targetSection && r.availability_override!=null);
+    if (overrideRow && overrideRow.availability_override!=null) {
+      availabilityPct = Number(overrideRow.availability_override);
+    }
+  } else {
+    // section-level: use breakdown_logs summary if exists, else derive from machine logs aggregated by section
+    const bdRows = (state.breakdowns||[]).filter((r)=>r.period===targetPeriod && (targetSection===MASTER_SECTION ? true : r.section===targetSection));
+    if (bdRows.length>0) {
+      breakdownCount = bdRows.reduce((s,r)=>s+(r.breakdownCount||0),0);
+      breakdownHours = Math.round(bdRows.reduce((s,r)=>s+(r.downtimeHours||0),0)*10)/10;
+      operatingHours = bdRows.reduce((s,r)=>s+(r.operatingHours||0),0);
+      if (!operatingHours) operatingHours = machinesInSection * hoursPerMonth;
+      // Reuse exact MTTR/MTBF if already calculated in breakdown row
+      const hasMttr = bdRows.some((r)=>r.mttr!=null && r.mttr!==0);
+      const hasMtbf = bdRows.some((r)=>r.mtbf!=null && r.mtbf!==0);
+      if (hasMttr && bdRows.length===1 && bdRows[0].mttr) mttr = Number(bdRows[0].mttr);
+      else mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+      if (hasMtbf && bdRows.length===1 && bdRows[0].mtbf) mtbf = Number(bdRows[0].mtbf);
+      else mtbf = breakdownCount>0 ? Math.round(Math.max(0, operatingHours - breakdownHours)/breakdownCount*10)/10 : 0;
+      const overrideRows = bdRows.filter((r)=>r.availability_override!=null);
+      if (overrideRows.length>0 && overrideRows.length===bdRows.length) {
+        const avg = overrideRows.reduce((s,r)=>s+Number(r.availability_override),0)/overrideRows.length;
+        availabilityPct = Math.round(avg*10)/10;
+      } else {
+        availabilityPct = operatingHours>0 ? Math.max(0, Math.round(((operatingHours - breakdownHours)/operatingHours)*1000)/10) : 100;
+      }
+    } else {
+      const logs = (state.machineBreakdownLogs||[]).filter((r)=> (r.plantSection||r.section||'')===targetSection && (r.date||'').slice(0,7)===targetPeriod);
+      // If MASTER_SECTION, use all logs for that period
+      const effectiveLogs = targetSection===MASTER_SECTION ? (state.machineBreakdownLogs||[]).filter((r)=>(r.date||'').slice(0,7)===targetPeriod) : logs;
+      breakdownCount = effectiveLogs.length;
+      breakdownHours = Math.round(effectiveLogs.reduce((s,r)=>s+Number(r.downtimeHours||0),0)*10)/10;
+      operatingHours = machinesInSection * hoursPerMonth;
+      mttr = breakdownCount>0 ? Math.round((breakdownHours/breakdownCount)*10)/10 : 0;
+      mtbf = breakdownCount>0 ? Math.round(Math.max(0, operatingHours - breakdownHours)/breakdownCount*10)/10 : 0;
+      availabilityPct = operatingHours>0 ? Math.max(0, Math.round(((operatingHours - breakdownHours)/operatingHours)*1000)/10) : 100;
+    }
+  }
+
+  return { pmCompliancePct, breakdownCount, breakdownHours, mttr, mtbf, availabilityPct };
+}
+
+function deriveKpiStatus(record, thresholds) {
+  const t = thresholds || state.kpiSettings || normalizeKpiSettings({});
+  // Good if all metrics meet good thresholds, Warning if any meet warning, else Critical
+  // Use availability and PM compliance as primary, MTTR/MTBF and breakdown count as secondary
+  const avail = Number(record.availabilityPct || 0);
+  const pm = Number(record.pmCompliancePct || 0);
+  const mttr = Number(record.mttr || 0);
+  const mtbf = Number(record.mtbf || 0);
+  const bc = Number(record.breakdownCount || 0);
+  let status = 'Good';
+  // Availability: Good >= availabilityGood, Warning >= availabilityWarning
+  if (avail < t.availabilityWarning) status = 'Critical';
+  else if (avail < t.availabilityGood) status = status==='Critical'?'Critical':'Warning';
+  // PM Compliance
+  if (pm < t.pmComplianceWarning) status = 'Critical';
+  else if (pm < t.pmComplianceGood && status!=='Critical') status = 'Warning';
+  // MTTR: Good <= mttrGood, Warning <= mttrWarning
+  if (mttr > t.mttrWarning) status = 'Critical';
+  else if (mttr > t.mttrGood && status!=='Critical') status = 'Warning';
+  // MTBF: Good >= mtbfGood, Warning >= mtbfWarning
+  if (mtbf !==0 && mtbf < t.mtbfWarning) status = 'Critical';
+  else if (mtbf !==0 && mtbf < t.mtbfGood && status!=='Critical') status = 'Warning';
+  // Breakdown count
+  if (bc > t.breakdownCountWarning) status = 'Critical';
+  else if (bc > t.breakdownCountGood && status!=='Critical') status = 'Warning';
+  return status;
+}
+
+export function addKpiRecord(fields, userName) {
+  // Auto-calculate missing values from existing PM/Breakdown data
+  const auto = computeKpiAutoValues({ period: fields.period || fields.month, section: fields.section || fields.plantSection, machineId: fields.machineId || fields.machine_id });
+  const mergedFields = { ...fields };
+  // For each KPI field, if not manually provided (isManual false and no value), use auto
+  const isManual = (k) => fields[k]===true || fields['isManual'+k.charAt(0).toUpperCase()+k.slice(1)]===true;
+  // Actually check isManual flags from input
+  if (!isManual('pmCompliancePct') && !fields.isManualPmCompliance && (fields.pmCompliancePct==null || fields.pmCompliancePct==='')) mergedFields.pmCompliancePct = auto.pmCompliancePct;
+  if (!isManual('breakdownCount') && !fields.isManualBreakdownCount && (fields.breakdownCount==null || fields.breakdownCount==='')) mergedFields.breakdownCount = auto.breakdownCount;
+  if (!isManual('breakdownHours') && !fields.isManualBreakdownHours && (fields.breakdownHours==null || fields.breakdownHours==='')) mergedFields.breakdownHours = auto.breakdownHours;
+  if (!isManual('mttr') && !fields.isManualMttr && (fields.mttr==null || fields.mttr==='')) mergedFields.mttr = auto.mttr;
+  else if (fields.mttr==null && mergedFields.breakdownCount>0) mergedFields.mttr = auto.mttr;
+  if (!isManual('mtbf') && !fields.isManualMttr && (fields.mtbf==null || fields.mtbf==='')) mergedFields.mtbf = auto.mtbf;
+  if (!isManual('availabilityPct') && !fields.isManualAvailability && (fields.availabilityPct==null || fields.availabilityPct==='')) mergedFields.availabilityPct = auto.availabilityPct;
+  // KPI Status auto if not manual
+  if (!fields.isManualKpiStatus && !fields.is_manual_kpi_status && (fields.kpiStatus==null || fields.kpiStatus==='')) {
+    mergedFields.kpiStatus = deriveKpiStatus(mergedFields, state.kpiSettings);
+  }
+  const record = normalizeKpiRecord({ ...mergedFields, createdAt: now(), updatedAt: now() });
+  // Upsert logic: unique by period+section+machineId
+  const existing = state.kpiRecords.find((r)=>r.period===record.period && r.section===record.section && (r.machineId||'')===(record.machineId||''));
+  if (existing) {
+    const updated = { ...existing, ...record, id: existing.id, createdAt: existing.createdAt, updatedAt: now() };
+    state = { ...state, kpiRecords: state.kpiRecords.map((r)=>r.id===existing.id ? updated : r) };
+    commitAndQueue('kpiRecords','upsert',updated);
+    logActivity(userName,'updated KPI status',`${record.section} · ${record.period}${record.machineName? ' · '+record.machineName:''}`,'kpi');
+    return { ...updated, mode: 'updated' };
+  }
+  state = { ...state, kpiRecords: [record, ...state.kpiRecords] };
+  commitAndQueue('kpiRecords','upsert',record);
+  logActivity(userName,'added KPI status',`${record.section} · ${record.period}${record.machineName? ' · '+record.machineName:''}`,'kpi');
+  return { ...record, mode: 'created' };
+}
+
+export function updateKpiRecord(id, patch, userName) {
+  const existing = state.kpiRecords.find((r)=>r.id===id);
+  if (!existing) return null;
+  // If patch changes period/section/machine, need to handle uniqueness
+  const updatedFields = { ...existing, ...patch, id, updatedAt: now() };
+  // Re-derive auto values for fields not marked manual and not provided in patch
+  // Keep manual flags as in patch or existing
+  const record = normalizeKpiRecord(updatedFields);
+  state = { ...state, kpiRecords: state.kpiRecords.map((r)=>r.id===id ? record : r) };
+  commitAndQueue('kpiRecords','upsert',record);
+  logActivity(userName,'updated KPI status',`${record.section} · ${record.period}`,'kpi');
+  return record;
+}
+
+export function deleteKpiRecord(id, userName) {
+  const rec = state.kpiRecords.find((r)=>r.id===id);
+  state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>r.id!==id) };
+  commitAndQueue('kpiRecords','delete',id);
+  logActivity(userName,'deleted KPI status',rec? `${rec.section} · ${rec.period}`:'','kpi');
+}
+
+export async function purgeKpiRecords(userName, periodFrom, periodTo) {
+  // If period range provided, delete only those; else purge all
+  let toDelete = [...state.kpiRecords];
+  if (periodFrom && periodTo) {
+    toDelete = toDelete.filter((r)=>r.period>=periodFrom && r.period<=periodTo);
+    state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>!(r.period>=periodFrom && r.period<=periodTo)) };
+  } else if (periodFrom || periodTo) {
+    const from = periodFrom || '0000-00';
+    const to = periodTo || '9999-99';
+    toDelete = toDelete.filter((r)=>r.period>=from && r.period<=to);
+    state = { ...state, kpiRecords: state.kpiRecords.filter((r)=>!(r.period>=from && r.period<=to)) };
+  } else {
+    state = { ...state, kpiRecords: [] };
+  }
+  commit('kpiRecords');
+  if (supabase && isSupabaseConfigured) {
+    try {
+      let q = supabase.from('kpi_records').delete().neq('id','00000000-0000-0000-0000-000000000000');
+      if (periodFrom && periodTo) { q = q.gte('period', periodFrom).lte('period', periodTo); }
+      else if (periodFrom || periodTo) { const f=periodFrom||'0000-00'; const t=periodTo||'9999-99'; q=q.gte('period',f).lte('period',t); }
+      await q;
+    } catch {}
+  }
+  logActivity(userName,'purged KPI records',`${toDelete.length} removed`,'kpi');
+  return { purged: toDelete.length };
+}
+
+export function upsertKpiSettings(fields, userName) {
+  const existing = state.kpiSettings || normalizeKpiSettings({});
+  const updated = normalizeKpiSettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
+  state = { ...state, kpiSettings: updated };
+  commit('kpiSettings');
+  queueCloudMutation('kpiSettings','upsert',updated);
+  // Recompute auto KPI Status for records where status is not manual
+  try {
+    let changed = [];
+    (state.kpiRecords||[]).forEach((rec)=>{
+      if (!rec.isManualKpiStatus) {
+        const newStatus = deriveKpiStatus(rec, updated);
+        if (newStatus !== rec.kpiStatus) changed.push({ ...rec, kpiStatus: newStatus, updatedAt: now() });
+      }
+    });
+    if (changed.length) {
+      const map = new Map(changed.map((c)=>[c.id,c]));
+      state = { ...state, kpiRecords: state.kpiRecords.map((r)=> map.has(r.id) ? map.get(r.id) : r) };
+      changed.forEach((upd)=> queueCloudMutation('kpiRecords','upsert',upd));
+      commit('kpiRecords');
+    }
+  } catch {}
+  logActivity(userName,'updated KPI thresholds','','kpi');
+  return updated;
+}
+
+// Bulk import helper for KPI
+export function importKpiRecordsBulk(parsedRows, userName) {
+  // Detect FY Goal Cascade format (has sn) vs legacy machine-wise format (has period/section)
+  const isFySheet = parsedRows.length && parsedRows[0] && parsedRows[0].sn != null;
+  if (isFySheet) {
+    // FY 2026-27 sheet: update kpi_fy_sheet data array
+    let sheet = (state.kpiFySheet && state.kpiFySheet[0]) ? normalizeKpiFySheet(state.kpiFySheet[0]) : normalizeKpiFySheet({ fy: '2026-27' });
+    let data = [...sheet.data];
+    let updatedCount = 0;
+    parsedRows.forEach((row)=>{
+      const sn = Number(row.sn);
+      const idx = data.findIndex((r)=> Number(r.sn)===sn);
+      if (idx >=0) {
+        const existing = data[idx];
+        // Merge: keep static fields from template, update monthly actuals and quarterly targets where provided (non-empty)
+        const merged = { ...existing };
+        // Update all 27-col fields where imported row has non-empty value
+        const fields = ['focusPillar','kpiMetric','uom','kpiWt','pillarWt','annualTarget','rating4','rating5','parentTarget','q1','q2','q3','q4','apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+        fields.forEach((k)=>{
+          const val = row[k];
+          if (val !== undefined && String(val).trim() !== '') {
+            merged[k] = val;
+            // Mark manual for monthly/quarterly cells
+            const manualKey = 'isManual' + k.charAt(0).toUpperCase() + k.slice(1);
+            if (manualKey in merged) merged[manualKey] = true;
+          }
+        });
+        // Recompute YTD Avg
+        const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+        const vals = months.map((m)=> merged[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+        const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
+        merged.ytdAvg = ytd;
+        data[idx] = merged;
+        updatedCount++;
+      } else {
+        // New SN not in template — add as custom row
+        data.push(row);
+        updatedCount++;
+      }
+    });
+    data.sort((a,b)=>a.sn-b.sn);
+    const updatedSheet = normalizeKpiFySheet({ ...sheet, data, updatedAt: now() });
+    state = { ...state, kpiFySheet: [updatedSheet] };
+    commit('kpiFySheet');
+    queueCloudMutation('kpiFySheet','upsert',updatedSheet);
+    localImportSuppressUntil.kpiFySheet = Date.now() + 3000;
+    logActivity(userName, 'bulk imported KPI FY 2026-27 sheet', `${parsedRows.length} KPI rows`, 'kpi');
+    return { total: parsedRows.length, created: 0, updated: updatedCount };
+  }
+  // Legacy fallback: old machine-wise kpiRecords (for backwards compat)
+  let created = 0; let updated = 0;
+  parsedRows.forEach((raw)=>{
+    let machineId = raw.machineId || '';
+    const rawMachine = String(raw.machineCode || raw.machineName || '').trim();
+    if (!machineId && rawMachine) {
+      const hit = state.machines.find((m)=> normalizeText(m.machineCode)===normalizeText(rawMachine) || normalizeText(m.name)===normalizeText(rawMachine));
+      if (hit) { machineId = hit.id; raw.machineCode = hit.machineCode; raw.machineName = hit.name; }
+    }
+    const rec = { ...raw, machineId };
+    const result = addKpiRecord(rec, userName);
+    if (result && result.mode==='created') created++; else updated++;
+  });
+  localImportSuppressUntil.kpiRecords = Date.now() + 3000;
+  return { total: parsedRows.length, created, updated };
+}
+
+export const getKpiFySheet = () => (state.kpiFySheet && state.kpiFySheet[0]) ? state.kpiFySheet[0] : normalizeKpiFySheet({ fy: '2026-27' });
+
+export function upsertKpiFySheet(sheet, userName) {
+  const normalized = normalizeKpiFySheet({ ...sheet, updatedAt: now() });
+  state = { ...state, kpiFySheet: [normalized] };
+  commit('kpiFySheet');
+  queueCloudMutation('kpiFySheet','upsert', normalized);
+  localImportSuppressUntil.kpiFySheet = Date.now() + 5000;
+  // Immediately write to cloud to avoid race where fetch overwrites local manual data
+  writeToCloudNow('kpiFySheet','upsert', normalized).catch(()=>{});
+  logActivity(userName || 'System', 'updated KPI FY 2026-27 sheet', '', 'kpi');
+  return normalized;
+}
+
+export function updateKpiFyCell(fy, sn, monthKey, value, userName) {
+  let sheet = getKpiFySheet();
+  const data = sheet.data.map((row)=>{
+    if (Number(row.sn) !== Number(sn)) return row;
+    const updated = { ...row, [monthKey]: value };
+    const manualKey = 'isManual' + monthKey.charAt(0).toUpperCase() + monthKey.slice(1);
+    updated[manualKey] = value !== '';
+    // Recompute YTD
+    const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
+    const vals = months.map((m)=> updated[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
+    updated.ytdAvg = ytd;
+    updated.updatedAt = now();
+    return updated;
+  });
+  return upsertKpiFySheet({ ...sheet, data }, userName);
+}
+
+// Auto-refresh KPI records where values are not manual, after PM/Breakdown changes
+export function refreshKpiAutoValues(period, section, machineId) {
+  // period can be specific YYYY-MM or undefined for all
+  let affected = state.kpiRecords.filter((r)=>{
+    if (period && r.period!==period) return false;
+    if (section && r.section!==section) return false;
+    if (machineId && (r.machineId||'')!==machineId) return false;
+    // only auto fields where not manual
+    return !r.isManualPmCompliance || !r.isManualBreakdownCount || !r.isManualBreakdownHours || !r.isManualMttr || !r.isManualMtbf || !r.isManualAvailability;
+  });
+  affected.forEach((rec)=>{
+    const auto = computeKpiAutoValues({ period: rec.period, section: rec.section, machineId: rec.machineId });
+    const patch = {};
+    if (!rec.isManualPmCompliance) patch.pmCompliancePct = auto.pmCompliancePct;
+    if (!rec.isManualBreakdownCount) patch.breakdownCount = auto.breakdownCount;
+    if (!rec.isManualBreakdownHours) patch.breakdownHours = auto.breakdownHours;
+    if (!rec.isManualMttr) patch.mttr = auto.mttr;
+    if (!rec.isManualMtbf) patch.mtbf = auto.mtbf;
+    if (!rec.isManualAvailability) patch.availabilityPct = auto.availabilityPct;
+    if (!rec.isManualKpiStatus) {
+      const draft = { ...rec, ...patch };
+      patch.kpiStatus = deriveKpiStatus(draft);
+    }
+    if (Object.keys(patch).length) updateKpiRecord(rec.id, patch, 'System Auto-Refresh');
+  });
 }
 
 export async function purgePmRecords(userName) {
@@ -2791,8 +3792,15 @@ export function importMachinePmRecordsBulk(rows, userName) {
       pmDate: row.pmDate || row.pm_date || row.date || new Date().toISOString().slice(0, 10),
       pmType: row.pmType || row.pm_type || 'Preventive',
       task: row.task || row.description || '',
-      status: row.status || 'completed',
-      completed: row.completed !== false && row.completed !== 'false' && row.status !== 'pending',
+      status: (row.status && String(row.status).trim()) ? String(row.status).toLowerCase() : 'pending',
+      completed: (() => {
+        if (row.completed === true || row.completed === 'true' || String(row.completed).toLowerCase() === 'true') return true;
+        if (row.completed === false || row.completed === 'false') return false;
+        const s = String(row.status || '').toLowerCase().trim();
+        if (s === 'pending' || s === 'overdue' || s === 'skipped') return false;
+        if (s === 'completed') return true;
+        return false;
+      })(),
       action: row.action || row.actionTaken || '',
       technician: row.technician || '',
       remarks: row.remarks || '',
@@ -2943,7 +3951,7 @@ export function dryRunImportMachinePmRecords(rows) {
       autoCreateNames.push(label);
     }
 
-    const st = String(row.status || 'completed').toLowerCase();
+    const st = String(row.status || 'pending').toLowerCase();
     if (st === 'completed' || row.completed === true || row.completed === 'true') {
       totalCompleted += 1;
     } else {
@@ -3044,6 +4052,7 @@ export function addMachineBreakdownLog(fields, userName) {
     }, userName || 'System');
   }
 
+  try { refreshKpiAutoValues(log.date.slice(0,7), log.plantSection, log.machineId); refreshKpiAutoValues(log.date.slice(0,7), log.plantSection); } catch {}
   return log;
 }
 
@@ -3054,6 +4063,7 @@ export function updateMachineBreakdownLog(id, patch, userName) {
   state = { ...state, machineBreakdownLogs: state.machineBreakdownLogs.map((r) => (r.id === id ? updated : r)) };
   commitAndQueue('machineBreakdownLogs', 'upsert', updated);
   logActivity(userName, 'updated machine breakdown log', `${updated.machineName}`, 'breakdown');
+  try { refreshKpiAutoValues(updated.date.slice(0,7), updated.plantSection, updated.machineId); refreshKpiAutoValues(updated.date.slice(0,7), updated.plantSection); } catch {}
   return updated;
 }
 
@@ -3081,6 +4091,7 @@ export function deleteMachineBreakdownLog(id, userName) {
       }, userName || 'System');
     }
   }
+  try { if (log) { refreshKpiAutoValues(log.date.slice(0,7), log.plantSection, log.machineId); refreshKpiAutoValues(log.date.slice(0,7), log.plantSection); } } catch {}
 }
 
 /**
@@ -3210,6 +4221,7 @@ export function exportBackup() {
       dailySolarGeneration: state.dailySolarGeneration,
       energySettings: state.energySettings,
       machinePmRecords: state.machinePmRecords,
+      testingCertificates: state.testingCertificates,
       activity: state.activity,
       settings: state.settings,
     },
@@ -3311,6 +4323,7 @@ export function resetPersistentData() {
     energySettings: state.energySettings,
     machineBreakdownLogs: state.machineBreakdownLogs,
     machinePmRecords: state.machinePmRecords,
+    testingCertificates: state.testingCertificates,
     amc: state.amc,
     plantSections: state.plantSections,
   };
@@ -3330,6 +4343,7 @@ export function resetPersistentData() {
     amc: [],
     machineBreakdownLogs: [],
     machinePmRecords: [],
+    testingCertificates: [],
     plantSections: [],
     activity: [],
     settings: { plantName: 'Nathupur Formulation Plant', notifSeenAt: 0 },
@@ -3355,6 +4369,7 @@ export function resetPersistentData() {
   queueEntityReplacement('dailySolarGeneration', state.dailySolarGeneration, previous.dailySolarGeneration);
   queueEntityReplacement('machineBreakdownLogs', state.machineBreakdownLogs, previous.machineBreakdownLogs);
   queueEntityReplacement('machinePmRecords', state.machinePmRecords, previous.machinePmRecords);
+  queueEntityReplacement('testingCertificates', state.testingCertificates, previous.testingCertificates);
   queueEntityReplacement('amc', state.amc, previous.amc);
   queueEntityReplacement('plantSections', state.plantSections, previous.plantSections);
 }
@@ -3596,40 +4611,62 @@ export async function syncMachineRecordNow(machineId) {
 }
 
 // ---------------------------------------------------------------------------
-// Master Excel bulk import — runs PM, Breakdown, and Energy imports in one
-// call from the result of parseMasterImportFile(). Every upsert goes through
-// the standard commitAndQueue path so changes reach Supabase Realtime and
-// every connected client PC immediately.
+// Master Excel bulk import — runs ALL 12 modules in one call from
+// parseMasterImportFile(). Every upsert goes through commitAndQueue so changes
+// reach Supabase Realtime and every connected PC immediately.
 // ---------------------------------------------------------------------------
+const MASTER_IMPORTERS = {
+  pm: importPMBulk,
+  breakdowns: importBreakdownsBulk,
+  machineBreakdownLogs: importMachineBreakdownLogsBulk,
+  machines: importMachinesBulk,
+  machinePmRecords: importMachinePmRecordsBulk,
+  energy: importEnergyBulk,
+  energyDailyUtility: importDailyUtilityLogBulk,
+  energyMonthlyHerbicide: importMonthlyHerbicideBulk,
+  energyMonthlyInsecticide: importMonthlyInsecticideBulk,
+  energyMonthlyWater: importMonthlyWaterBulk,
+  energyMonthlyAirCompressor: importMonthlyAirCompressorBulk,
+  energyDailySolar: importDailySolarGenerationBulk,
+  kpi: importKpiRecordsBulk,
+};
 
 /**
  * @param {import('./bulkImport.js').MasterImportResult} masterResult
  * @param {string} userName
- * @returns {{ pm: object, breakdowns: object, energy: object, total: number }}
+ * @returns {{ total: number, [moduleId: string]: object }}
  */
 export function importMasterExcelBulk(masterResult, userName) {
-  const pmResult = masterResult?.pm?.parsedRows?.length
-    ? importPMBulk(masterResult.pm.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const bdResult = masterResult?.breakdowns?.parsedRows?.length
-    ? importBreakdownsBulk(masterResult.breakdowns.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const energyResult = masterResult?.energy?.parsedRows?.length
-    ? importEnergyBulk(masterResult.energy.parsedRows, userName)
-    : { created: 0, updated: 0, total: 0 };
-
-  const total = pmResult.total + bdResult.total + energyResult.total;
-
+  const results = {};
+  let total = 0;
+  const labels = [];
+  for (const [moduleId, importer] of Object.entries(MASTER_IMPORTERS)) {
+    const parsed = masterResult?.[moduleId]?.parsedRows || [];
+    if (parsed.length && typeof importer === 'function') {
+      try {
+        const r = importer(parsed, userName);
+        results[moduleId] = r;
+        total += r.total || 0;
+        labels.push(`${moduleId} ${r.total}`);
+      } catch (e) {
+        results[moduleId] = { created: 0, total: 0, error: e.message };
+      }
+    } else {
+      results[moduleId] = { created: 0, updated: 0, total: 0 };
+    }
+  }
+  // Provide legacy aliases for callers still expecting pm/breakdowns/energy
+  results.pm = results.pm || { total: 0 };
+  results.breakdowns = results.breakdowns || { total: 0 };
+  results.energy = results.energy || { total: 0 };
+  results.total = total;
   logActivity(
     userName,
     'master Excel import',
-    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows — syncing to all connected PCs`,
+    `${labels.join(' · ') || '0 rows'} — ${total} rows — syncing to all connected PCs`,
     'upload'
   );
-
-  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total };
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -3649,42 +4686,44 @@ let masterSheetPollingTimer = null;
 
 /**
  * Pull data from the configured remote sheet endpoint and apply it to the
- * store, syncing all three entities to Supabase.
+ * store, syncing ALL 12 entities to Supabase.
+ * Endpoint shape: { pm:[], breakdowns:[], machineBreakdownLogs:[], machines:[], machinePmRecords:[], energy:[], energyDailyUtility:[], energyMonthlyHerbicide:[], energyMonthlyInsecticide:[], energyMonthlyWater:[], energyMonthlyAirCompressor:[], energyDailySolar:[] }
+ * Legacy keys pm/breakdowns/energy are still supported.
  *
- * @returns {Promise<{ pm: object, breakdowns: object, energy: object, total: number, endpoint: string }>}
+ * @returns {Promise<{ total: number, endpoint: string, [k:string]: object }>}
  */
 export async function syncFromMasterSheet() {
   const endpoint = state.settings?.masterSheetEndpoint;
   if (!endpoint) {
     throw new Error('No masterSheetEndpoint configured. Add it via Settings → Master Sheet Sync.');
   }
-
   const response = await fetch(endpoint, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`Master sheet fetch failed: ${response.status} ${response.statusText}`);
   }
-
   const json = await response.json();
   const userName = 'Master Sheet Sync';
-
-  const pmRows = Array.isArray(json.pm) ? json.pm : [];
-  const bdRows = Array.isArray(json.breakdowns) ? json.breakdowns : [];
-  const energyRows = Array.isArray(json.energy) ? json.energy : [];
-
-  const pmResult = pmRows.length ? importPMBulk(pmRows, userName) : { created: 0, updated: 0, total: 0 };
-  const bdResult = bdRows.length ? importBreakdownsBulk(bdRows, userName) : { created: 0, updated: 0, total: 0 };
-  const energyResult = energyRows.length ? importEnergyBulk(energyRows, userName) : { created: 0, updated: 0, total: 0 };
-
-  const total = pmResult.total + bdResult.total + energyResult.total;
-
-  logActivity(
-    userName,
-    'live sheet sync',
-    `PM ${pmResult.total} · Breakdowns ${bdResult.total} · Energy ${energyResult.total} rows pulled from remote endpoint`,
-    'upload'
-  );
-
-  return { pm: pmResult, breakdowns: bdResult, energy: energyResult, total, endpoint };
+  const results = {};
+  let total = 0;
+  for (const [moduleId, importer] of Object.entries(MASTER_IMPORTERS)) {
+    const rows = Array.isArray(json[moduleId]) ? json[moduleId] : [];
+    if (rows.length && typeof importer === 'function') {
+      const r = importer(rows, userName);
+      results[moduleId] = r;
+      total += r.total || 0;
+    } else {
+      results[moduleId] = { created: 0, updated: 0, total: 0 };
+    }
+  }
+  // Provide legacy aliases
+  results.pm = results.pm || { total: 0 };
+  results.breakdowns = results.breakdowns || { total: 0 };
+  results.energy = results.energy || { total: 0 };
+  results.total = total;
+  results.endpoint = endpoint;
+  const active = Object.entries(results).filter(([k,v])=> MASTER_IMPORTERS[k] && v.total>0).map(([k,v])=>`${k} ${v.total}`).join(' · ');
+  logActivity(userName, 'live sheet sync', `${active || '0 rows'} pulled from remote endpoint`, 'upload');
+  return results;
 }
 
 /**

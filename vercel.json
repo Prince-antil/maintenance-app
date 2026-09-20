@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd client && npm run build",
+  "buildCommand": "cd client && node scripts/generate-master-template.mjs && npm run build",
   "outputDirectory": "client/dist",
   "installCommand": "npm install && cd client && npm install --include=dev",
   "functions": {
@@ -7,9 +7,17 @@
       "includeFiles": "node_modules/sql.js/dist/sql-wasm.wasm"
     }
   },
+  "headers": [
+    {
+      "source": "/(.*).xlsx",
+      "headers": [{ "key": "Content-Type", "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]
+    }
+  ],
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/assets/(.*)", "destination": "/assets/$1" },
+    { "source": "/CCPL_Master_Import_Template.xlsx", "destination": "/CCPL_Master_Import_Template.xlsx" },
+    { "source": "/Master_Import_Template.xlsx", "destination": "/Master_Import_Template.xlsx" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

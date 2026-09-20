@@ -11,36 +11,69 @@ const energyTotal = (entry) => (entry.source ? (entry.kwh || 0) : (entry.solarGe
 const round1 = (value) => Math.round((Number(value) || 0) * 10) / 10;
 
 // ── Power Factor Utilities ────────────────────────────────────────────────────
-// Strict PF formatting: never round to 1.00; cap at 0.99 for display.
+// Fully dynamic PF formatting — returns true value toFixed(2), capped at 1.00
 export function formatPowerFactor(pfVal) {
   const num = Number(pfVal);
   if (!Number.isFinite(num) || num <= 0) return null;
-  if (num >= 1.0) return '0.99';
+  if (num > 1) return '1.00';
   return num.toFixed(2);
 }
 
 /**
- * Compute weighted average Power Factor across an array of delta rows.
- * Weighted PF = Σ(import_kWh × PF) / Σ(import_kWh)
- * Uses u1ImportKwhReading and u2ImportKwhReading as weights.
+ * Dynamic Power Factor calculation for a single row — fully dynamic, no hardcoded fallback
+ * U1 PF = U1_kWh / U1_kVAh
+ * U2 PF = U2_kWh / U2_kVAh
+ * Combined PF = (U1_kWh + U2_kWh) / (U1_kVAh + U2_kVAh)
+ * Returns 0 when kVAh is 0 (no static fallback)
+ */
+export function computeDynamicPowerFactors(u1_kwh, u1_kvah, u2_kwh, u2_kvah) {
+  const u1 = Number(u1_kwh || 0);
+  const u1_kva = Number(u1_kvah || 0);
+  const u2 = Number(u2_kwh || 0);
+  const u2_kva = Number(u2_kvah || 0);
+  const u1_pf = u1_kva > 0 ? Number((u1 / u1_kva).toFixed(4)) : 0;
+  const u2_pf = u2_kva > 0 ? Number((u2 / u2_kva).toFixed(4)) : 0;
+  const combined_pf = (u1_kva + u2_kva) > 0 ? Number(((u1 + u2) / (u1_kva + u2_kva)).toFixed(4)) : 0;
+  return { u1_pf, u2_pf, combined_pf };
+}
+
+/**
+ * Compute weighted Power Factor across an array of delta rows — fully dynamic
+ * PF = ΣkWh / ΣkVAh (true weighted). If kVAh missing but PF present, derive kVAh = kWh / PF.
+ * No hardcoded fallbacks (e.g. 0.98); returns 0 when no data.
  */
 export function computeWeightedPf(deltas) {
-  let weightedSum = 0;
-  let totalImport = 0;
+  if (!Array.isArray(deltas) || deltas.length === 0) return 0;
+  let u1KwhSum = 0, u1KvahSum = 0;
+  let u2KwhSum = 0, u2KvahSum = 0;
   (deltas || []).forEach((d) => {
-    const u1Import = Number(d._delta?.u1ImportKwhReading) || 0;
-    const u2Import = Number(d._delta?.u2ImportKwhReading) || 0;
-    const u1Pf = Number(d._delta?.u1Pf) || Number(d.u1Pf) || 0;
-    const u2Pf = Number(d._delta?.u2Pf) || Number(d.u2Pf) || 0;
-    if (u1Import > 0 && u1Pf > 0) { weightedSum += u1Import * u1Pf; totalImport += u1Import; }
-    if (u2Import > 0 && u2Pf > 0) { weightedSum += u2Import * u2Pf; totalImport += u2Import; }
+    const u1Kwh = Number(d._delta?.u1ImportKwhReading) || 0;
+    let u1Kvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    if (u1Kvah === 0 && u1Kwh > 0) {
+      const pf = Number(d._delta?.u1Pf ?? d.u1Pf ?? 0);
+      if (pf > 0) u1Kvah = u1Kwh / pf;
+    }
+    u1KwhSum += u1Kwh;
+    u1KvahSum += u1Kvah;
+    const u2Kwh = Number(d._delta?.u2ImportKwhReading) || 0;
+    let u2Kvah = Number(d._delta?.u2ImportKvahReading) || 0;
+    if (u2Kvah === 0 && u2Kwh > 0) {
+      const pf2 = Number(d._delta?.u2Pf ?? d.u2Pf ?? 0);
+      if (pf2 > 0) u2Kvah = u2Kwh / pf2;
+    }
+    u2KwhSum += u2Kwh;
+    u2KvahSum += u2Kvah;
   });
-  return totalImport > 0 ? weightedSum / totalImport : 0;
+  const totalKwh = u1KwhSum + u2KwhSum;
+  const totalKvah = u1KvahSum + u2KvahSum;
+  if (totalKvah === 0) return 0;
+  return totalKwh / totalKvah;
 }
 
 /**
  * Compute energy snapshot from daily utility deltas.
  * Returns { gridKwh, solarKwh, dgKwh, totalKwh, avgPowerFactor, fuelLtr, chartData }
+ * Updated to use dynamic PF and fix zero values in summary cards.
  */
 export function computeEnergySnapshot(deltas, solarLogs) {
   let totalGrid = 0;
@@ -63,9 +96,10 @@ export function computeEnergySnapshot(deltas, solarLogs) {
   });
 
   // Solar: use inverter data from dailySolarGeneration (Solar section), fall back to meter-side utility
-  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || 0), 0);
+  const dedicatedSolarTotal = (solarLogs || []).reduce((acc, curr) => acc + (Number(curr.dailyTotalKwh) || Number(curr.grand_total) || 0), 0);
   const solarKwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : totalSolarFromUtil;
 
+  // Use dynamic PF calculation for more accurate results
   const avgPf = computeWeightedPf(deltas);
 
   const chartData = (deltas || []).map((d) => ({
@@ -84,6 +118,109 @@ export function computeEnergySnapshot(deltas, solarLogs) {
     avgPowerFactor: formatPowerFactor(avgPf),
     fuelLtr: Math.round(totalFuel),
     chartData,
+  };
+}
+
+/**
+ * Compute energy summary directly from utility rows (not deltas)
+ * Use this for summary cards across all date range filters
+ * Fixes zero values in Daily Utility summary cards
+ */
+export function computeEnergySummaryFromRows(utilityRows, solarRows = []) {
+  if (!utilityRows || utilityRows.length === 0) {
+    return {
+      total_grid_kwh: 0,
+      total_solar_kwh: 0,
+      total_dg_kwh: 0,
+      total_hsd_litres: 0,
+      avg_u1_pf: 0,
+      avg_u2_pf: 0,
+      avg_combined_pf: 0,
+      dg380_kwh: 0,
+      dg500_kwh: 0,
+      dg380_hours: 0,
+      dg500_hours: 0,
+      daily_avg_generation: 0
+    };
+  }
+
+  // Process rows through dynamic PF calculation
+  const processed = utilityRows.map(row => {
+    const u1_import_kwh = Number(row.u1_import_kwh_reading || row.u1_import_kwh || 0);
+    const u1_import_kvah = Number(row.u1_import_kvah_reading || row.u1_import_kvah || 0);
+    const u2_import_kwh = Number(row.u2_import_kwh_reading || row.u2_import_kwh || 0);
+    const u2_import_kvah = Number(row.u2_import_kvah_reading || row.u2_import_kvah || 0);
+    const u1_solar_kwh = Number(row.u1_solar_kwh_reading || row.u1_solar_kwh || 0);
+    const u2_solar_kwh = Number(row.u2_solar_kwh_reading || row.u2_solar_kwh || 0);
+    const dg380_kwh = Number(row.dg380_kwh_reading || row.dg380_kwh || 0);
+    const dg500_kwh = Number(row.dg500_kwh_reading || row.dg500_kwh || 0);
+    const dg380_hours = Number(row.dg380_hourmeter_reading || row.dg380_hours || 0);
+    const dg500_hours = Number(row.dg500_hourmeter_reading || row.dg500_hours || 0);
+    const dg380_hsd = Number(row.dg380_hsd_added_ltr || row.dg380_hsd || 0);
+    const dg500_hsd = Number(row.dg500_hsd_added_ltr || row.dg500_hsd || 0);
+
+    const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
+      u1_import_kwh, u1_import_kvah, u2_import_kwh, u2_import_kvah
+    );
+
+    return {
+      u1_import_kwh,
+      u2_import_kwh,
+      u1_solar_kwh,
+      u2_solar_kwh,
+      dg380_kwh,
+      dg500_kwh,
+      dg380_hours,
+      dg500_hours,
+      dg380_hsd,
+      dg500_hsd,
+      u1_pf,
+      u2_pf,
+      combined_pf
+    };
+  });
+
+  // Aggregate totals
+  const total_grid_kwh = processed.reduce((sum, r) => sum + r.u1_import_kwh + r.u2_import_kwh, 0);
+  const total_solar_kwh = processed.reduce((sum, r) => sum + r.u1_solar_kwh + r.u2_solar_kwh, 0);
+  const total_dg_kwh = processed.reduce((sum, r) => sum + r.dg380_kwh + r.dg500_kwh, 0);
+  const total_hsd_litres = processed.reduce((sum, r) => sum + r.dg380_hsd + r.dg500_hsd, 0);
+  const dg380_kwh = processed.reduce((sum, r) => sum + r.dg380_kwh, 0);
+  const dg500_kwh = processed.reduce((sum, r) => sum + r.dg500_kwh, 0);
+  const dg380_hours = processed.reduce((sum, r) => sum + r.dg380_hours, 0);
+  const dg500_hours = processed.reduce((sum, r) => sum + r.dg500_hours, 0);
+
+  // Solar from inverter logs (Solar section)
+  const dedicatedSolarTotal = (solarRows || []).reduce((acc, curr) => 
+    acc + (Number(curr.dailyTotalKwh) || Number(curr.grand_total) || 0), 0);
+  const final_solar_kwh = dedicatedSolarTotal > 0 ? dedicatedSolarTotal : total_solar_kwh;
+
+  // Weighted average PF using import kWh as weights
+  const u1_pf_weighted = processed.reduce((sum, r) => sum + (r.u1_pf * r.u1_import_kwh), 0);
+  const u1_import_total = processed.reduce((sum, r) => sum + r.u1_import_kwh, 0);
+  const u2_pf_weighted = processed.reduce((sum, r) => sum + (r.u2_pf * r.u2_import_kwh), 0);
+  const u2_import_total = processed.reduce((sum, r) => sum + r.u2_import_kwh, 0);
+  const combined_pf_weighted = processed.reduce((sum, r) => sum + (r.combined_pf * (r.u1_import_kwh + r.u2_import_kwh)), 0);
+  const total_import_total = u1_import_total + u2_import_total;
+
+  // Daily average generation
+  const daily_avg_generation = processed.length > 0 
+    ? Number((final_solar_kwh / processed.length).toFixed(2)) 
+    : 0;
+
+  return {
+    total_grid_kwh: Number(total_grid_kwh.toFixed(2)),
+    total_solar_kwh: Number(final_solar_kwh.toFixed(2)),
+    total_dg_kwh: Number(total_dg_kwh.toFixed(2)),
+    total_hsd_litres: Number(total_hsd_litres.toFixed(2)),
+    dg380_kwh: Number(dg380_kwh.toFixed(2)),
+    dg500_kwh: Number(dg500_kwh.toFixed(2)),
+    dg380_hours: Number(dg380_hours.toFixed(2)),
+    dg500_hours: Number(dg500_hours.toFixed(2)),
+    avg_u1_pf: u1_import_total > 0 ? Number((u1_pf_weighted / u1_import_total).toFixed(4)) : 0,
+    avg_u2_pf: u2_import_total > 0 ? Number((u2_pf_weighted / u2_import_total).toFixed(4)) : 0,
+    avg_combined_pf: total_import_total > 0 ? Number((combined_pf_weighted / total_import_total).toFixed(4)) : 0,
+    daily_avg_generation
   };
 }
 
@@ -839,6 +976,93 @@ export function buildAMCNotifications(amcRecords, machines) {
   return notifications.sort((a, b) => new Date(b.ts) - new Date(a.ts));
 }
 
+export function buildTestingCertificateNotifications(certificates, machines) {
+  const notifications = [];
+  const today = new Date(); today.setHours(0,0,0,0);
+  (certificates || []).forEach((c) => {
+    if (!c.expiryDate) return;
+    const machine = (machines || []).find((m) => m.id === c.machineId);
+    const machineName = machine?.name || c.machineName || c.machineId || 'Unknown Machine';
+    const expiry = new Date(c.expiryDate); expiry.setHours(0,0,0,0);
+    const daysLeft = Math.ceil((expiry - today) / (1000*60*60*24));
+    const base = {
+      machineName,
+      certificateType: c.certificateType,
+      certificateNumber: c.certificateNumber,
+      expiryDate: c.expiryDate,
+      ts: c.updatedAt || c.createdAt,
+    };
+    if (daysLeft < 0) {
+      notifications.push({
+        id: `cert-expired-${c.id}`,
+        type: 'danger',
+        title: 'Safety Certificate Expired',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expired ${Math.abs(daysLeft)} days ago (${new Date(c.expiryDate).toLocaleDateString('en-GB')})`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft === 0) {
+      notifications.push({
+        id: `cert-expires-today-${c.id}`,
+        type: 'danger',
+        title: 'Safety Certificate Expires Today',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires today`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft === 1) {
+      notifications.push({
+        id: `cert-1d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 1 Day',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires tomorrow`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 7) {
+      notifications.push({
+        id: `cert-7d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 7 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 15) {
+      notifications.push({
+        id: `cert-15d-${c.id}`,
+        type: 'warning',
+        title: 'Safety Certificate Due in 15 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    } else if (daysLeft <= 30) {
+      notifications.push({
+        id: `cert-30d-${c.id}`,
+        type: 'info',
+        title: 'Safety Certificate Due in 30 Days',
+        detail: `${c.certificateType} (${c.certificateNumber}) for ${machineName} expires in ${daysLeft} days`,
+        ts: base.ts,
+        daysLeft,
+        certId: c.id,
+        machineId: c.machineId,
+      });
+    }
+  });
+  return notifications.sort((a,b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999));
+}
+
 // ── PM Machine-Level Analytics ──────────────────────────────────────────────
 
 export function machineWisePM(machinePmRecords) {
@@ -1222,9 +1446,26 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
   const solarLogs = (dailySolarLogs || []).filter((l) => !monthKey_ || (l.date || '').slice(0, 7) === monthKey_);
   const s = energySettings || {};
 
-  // Solar from inverter logs
+  // Process solar logs through energy engine to fix grand total = 0 bug
+  const processedSolarLogs = solarLogs.map(l => {
+    const u1_inv1 = Number(l.u1_inv1_kwh || l.u1_inv1 || 0);
+    const u1_inv2 = Number(l.u1_inv2_kwh || l.u1_inv2 || 0);
+    const u1_inv3 = Number(l.u1_inv3_kwh || l.u1_inv3 || 0);
+    const u1_inv4 = Number(l.u1_inv4_kwh || l.u1_inv4 || 0);
+    const u2_inv1 = Number(l.u2_inv1_kwh || l.u2_inv1 || 0);
+    const u2_inv2 = Number(l.u2_inv2_kwh || l.u2_inv2 || 0);
+    const u2_inv3 = Number(l.u2_inv3_kwh || l.u2_inv3 || 0);
+    
+    const u1_total = Number((u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4).toFixed(2));
+    const u2_total = Number((u2_inv1 + u2_inv2 + u2_inv3).toFixed(2));
+    const grand_total = Number((u1_total + u2_total).toFixed(2));
+    
+    return { ...l, u1_total, u2_total, grand_total, daily_total_kwh: grand_total };
+  });
+
+  // Solar from inverter logs - use grand_total (fixed)
   const solarFromInverters = round1(
-    solarLogs.reduce((sum, l) => sum + (Number(l.dailyTotalKwh) || 0), 0)
+    processedSolarLogs.reduce((sum, l) => sum + (Number(l.grand_total) || 0), 0)
   );
 
   // Meter-side solar from daily utility (using deltas) - import and export
@@ -1291,16 +1532,27 @@ export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
 
   return last.map((d) => {
     const u1ImportKwh = Number(d._delta?.u1ImportKwhReading) || 0;
-    const u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    let u1ImportKvah = Number(d._delta?.u1ImportKvahReading) || 0;
+    if (u1ImportKvah === 0 && u1ImportKwh > 0) {
+      const pf = Number(d._delta?.u1Pf ?? 0);
+      if (pf > 0) u1ImportKvah = u1ImportKwh / pf;
+    }
     const u2ImportKwh = Number(d._delta?.u2ImportKwhReading) || 0;
-    const u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
-    const u1PfRaw = d.u1Pf > 0 ? d.u1Pf : (u1ImportKvah > 0 ? round1(u1ImportKwh / u1ImportKvah) : 0);
-    const u2PfRaw = d.u2Pf > 0 ? d.u2Pf : (u2ImportKvah > 0 ? round1(u2ImportKwh / u2ImportKvah) : 0);
+    let u2ImportKvah = Number(d._delta?.u2ImportKvahReading) || 0;
+    if (u2ImportKvah === 0 && u2ImportKwh > 0) {
+      const pf2 = Number(d._delta?.u2Pf ?? 0);
+      if (pf2 > 0) u2ImportKvah = u2ImportKwh / pf2;
+    }
+    // Use fully dynamic PF calculation (kWh/kVAh)
+    const { u1_pf, u2_pf, combined_pf } = computeDynamicPowerFactors(
+      u1ImportKwh, u1ImportKvah, u2ImportKwh, u2ImportKvah
+    );
+    
     return {
       date: d.date || '',
-      u1Pf: u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : null,
-      u2Pf: u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null,
-      avgPf: (u1PfRaw > 0 && u2PfRaw > 0) ? Number(formatPowerFactor(round1((u1PfRaw + u2PfRaw) / 2))) : (u1PfRaw > 0 ? Number(formatPowerFactor(u1PfRaw)) : (u2PfRaw > 0 ? Number(formatPowerFactor(u2PfRaw)) : null)),
+      u1Pf: u1_pf > 0 ? Number(formatPowerFactor(u1_pf)) : null,
+      u2Pf: u2_pf > 0 ? Number(formatPowerFactor(u2_pf)) : null,
+      avgPf: combined_pf > 0 ? Number(formatPowerFactor(combined_pf)) : null,
       label: (d.date || '').slice(5),
     };
   });
@@ -1334,4 +1586,113 @@ export function computeDgFuelEfficiency(dailyUtilityLogs, n = 6, periodFilter = 
       dg500KwhPerLitre: dg500Fuel > 0 ? round1(dg500Generation / dg500Fuel) : 0,
     };
   });
+}
+
+// ── KPI Status Analytics — Reuses existing PM/Breakdown calculations ─────────
+
+// Default thresholds (overridden by kpi_settings via Settings UI)
+export const DEFAULT_KPI_THRESHOLDS = {
+  pmComplianceGood: 90,
+  pmComplianceWarning: 75,
+  availabilityGood: 95,
+  availabilityWarning: 85,
+  mttrGood: 2,
+  mttrWarning: 5,
+  mtbfGood: 200,
+  mtbfWarning: 100,
+  breakdownCountGood: 2,
+  breakdownCountWarning: 5,
+};
+
+export function computeKpiStatus(record, thresholds = DEFAULT_KPI_THRESHOLDS) {
+  const t = { ...DEFAULT_KPI_THRESHOLDS, ...(thresholds || {}) };
+  const avail = Number(record.availabilityPct ?? record.availability_pct ?? 0);
+  const pm = Number(record.pmCompliancePct ?? record.pm_compliance_pct ?? 0);
+  const mttr = Number(record.mttr ?? 0);
+  const mtbf = Number(record.mtbf ?? 0);
+  const bc = Number(record.breakdownCount ?? record.breakdown_count ?? 0);
+  let status = 'Good';
+  if (avail < t.availabilityWarning) status = 'Critical';
+  else if (avail < t.availabilityGood) status = status==='Critical'?'Critical':'Warning';
+  if (pm < t.pmComplianceWarning) status = 'Critical';
+  else if (pm < t.pmComplianceGood && status!=='Critical') status = 'Warning';
+  if (mttr > t.mttrWarning) status = 'Critical';
+  else if (mttr > t.mttrGood && status!=='Critical') status = 'Warning';
+  if (mtbf !==0 && mtbf < t.mtbfWarning) status = 'Critical';
+  else if (mtbf !==0 && mtbf < t.mtbfGood && status!=='Critical') status = 'Warning';
+  if (bc > t.breakdownCountWarning) status = 'Critical';
+  else if (bc > t.breakdownCountGood && status!=='Critical') status = 'Warning';
+  return status;
+}
+
+export function kpiStatusMeta(status) {
+  const s = String(status||'Good').toLowerCase();
+  if (s==='critical') return { label: 'Critical', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30', dot: 'bg-red-400' };
+  if (s==='warning') return { label: 'Warning', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30', dot: 'bg-amber-400' };
+  return { label: 'Good', color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', dot: 'bg-emerald-400' };
+}
+
+// Aggregate KPI records for summary cards
+export function aggregateKpiRecords(kpiRecords, period = null, section = null, machineId = null) {
+  const filtered = (kpiRecords||[]).filter((r)=>{
+    if (period && r.period!==period) return false;
+    if (section && r.section!==section) return false;
+    if (machineId && (r.machineId||'')!==machineId) return false;
+    return true;
+  });
+  const count = filtered.length;
+  const avgPmCompliance = count ? round1(filtered.reduce((s,r)=>s+Number(r.pmCompliancePct||0),0)/count) : 0;
+  const totalBreakdowns = filtered.reduce((s,r)=>s+Number(r.breakdownCount||0),0);
+  const totalHours = round1(filtered.reduce((s,r)=>s+Number(r.breakdownHours||0),0));
+  const avgMttr = count ? round1(filtered.reduce((s,r)=>s+Number(r.mttr||0),0)/count) : 0;
+  const avgMtbf = count ? round1(filtered.reduce((s,r)=>s+Number(r.mtbf||0),0)/count) : 0;
+  const avgAvailability = count ? round1(filtered.reduce((s,r)=>s+Number(r.availabilityPct||0),0)/count) : 0;
+  const byStatus = { Good:0, Warning:0, Critical:0 };
+  filtered.forEach((r)=>{ const s=r.kpiStatus||'Good'; if(byStatus[s]!=null) byStatus[s]++; else byStatus.Good++; });
+  return { count, avgPmCompliance, totalBreakdowns, totalHours, avgMttr, avgMtbf, avgAvailability, byStatus, rows: filtered };
+}
+
+// Trends for 6/12 months — reuses existing lastNMonths
+export function kpiTrends(kpiRecords, n=6, section=null, machineId=null) {
+  const months = lastNMonths(n);
+  return months.map((m)=>{
+    const rows = (kpiRecords||[]).filter((r)=>r.period===m.key && (!section || r.section===section) && (!machineId || (r.machineId||'')===machineId));
+    const count = rows.length;
+    const avg = (key) => count ? round1(rows.reduce((s,r)=>s+Number(r[key]||0),0)/count) : 0;
+    return {
+      key: m.key,
+      label: m.label,
+      pmCompliance: avg('pmCompliancePct'),
+      breakdownCount: rows.reduce((s,r)=>s+Number(r.breakdownCount||0),0),
+      breakdownHours: round1(rows.reduce((s,r)=>s+Number(r.breakdownHours||0),0)),
+      mttr: avg('mttr'),
+      mtbf: avg('mtbf'),
+      availability: avg('availabilityPct'),
+      count,
+    };
+  });
+}
+
+export function kpiSectionBreakdown(kpiRecords, period=null) {
+  const filtered = period ? (kpiRecords||[]).filter((r)=>r.period===period) : (kpiRecords||[]);
+  const bySection = {};
+  filtered.forEach((r)=>{
+    const sec = r.section || 'Unknown';
+    if(!bySection[sec]) bySection[sec] = { section: sec, count:0, pmSum:0, availSum:0, mttrSum:0, mtbfSum:0, bdCount:0 };
+    bySection[sec].count++;
+    bySection[sec].pmSum += Number(r.pmCompliancePct||0);
+    bySection[sec].availSum += Number(r.availabilityPct||0);
+    bySection[sec].mttrSum += Number(r.mttr||0);
+    bySection[sec].mtbfSum += Number(r.mtbf||0);
+    bySection[sec].bdCount += Number(r.breakdownCount||0);
+  });
+  return Object.values(bySection).map((s)=>({
+    section: s.section,
+    count: s.count,
+    avgPmCompliance: s.count? round1(s.pmSum/s.count):0,
+    avgAvailability: s.count? round1(s.availSum/s.count):0,
+    avgMttr: s.count? round1(s.mttrSum/s.count):0,
+    avgMtbf: s.count? round1(s.mtbfSum/s.count):0,
+    breakdownCount: s.bdCount,
+  })).sort((a,b)=>b.count-a.count);
 }

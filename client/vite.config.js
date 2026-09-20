@@ -4,16 +4,30 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    // Split heavy vendors into cacheable chunks for faster first paint
+    minify: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          charts: ['recharts'],
-          icons: ['lucide-react'],
-        },
-      },
-    },
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            // Keep React & Core DOM isolated — exact package name matching only
+            if (id.match(/node_modules[\\/](react|react-dom|react-router|react-router-dom|react-is|scheduler)[\\/]/) ||
+                id.includes('node_modules/@remix-run/router/')) {
+              return 'vendor-react';
+            }
+            // Keep Supabase isolated
+            if (id.includes('@supabase') || id.includes('supabase')) {
+              return 'vendor-supabase';
+            }
+            // Keep icons separate
+            if (id.includes('lucide-react')) {
+              return 'vendor-icons';
+            }
+            // All other third-party UI packages
+            return 'vendor-utils';
+          }
+        }
+      }
+    }
   },
   server: {
     port: 5173,

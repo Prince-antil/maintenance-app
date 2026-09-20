@@ -15,30 +15,61 @@ import {
   computeKPIs, monthlyBreakdownTrend, equipmentWiseBreakdown,
   paretoTop10, breakdownByDepartment, healthDistribution,
   availabilityTrend, mttrTrend, mtbfTrend, buildInsights, machineStatusDistribution,
-  machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications,
+  machineWiseBreakdown, failureCausePareto, machineBreakdownRegister, currentlyUnderBreakdown, buildAMCNotifications, buildTestingCertificateNotifications,
   lastNMonths, monthKey, monthlyPMCompletion, monthlyPMCompletionFromRecords,
-  computePfTrend, computeDgFuelEfficiency, computeRenewableSummary, computeDailyDeltas,
-  computeEnergySnapshot, formatPowerFactor, computeWeightedPf,
+  computePfTrend, computeDgFuelEfficiency, computeDailyDeltas,
+  formatPowerFactor, computeWeightedPf,
 } from '../analytics.js';
+import { computeEnergySnapshot } from '../lib/energyEngine.js';
+import { computeSpecificYield, getDaysInRange, getSolarCapacity, getSolarDerived } from '../lib/energyCalculations.js';
+import { upsertEnergySettings } from '../store.js';
 import { CATEGORY_META, EXT_META } from '../constants.js';
-import { timeAgo, greeting, formatDateLong } from '../utils.js';
-import {
-  Factory, Activity, Wrench, AlertOctagon, ClipboardCheck, ClipboardList,
-  FolderArchive, Timer, TimerReset, Gauge, ListChecks, Clock, ChevronRight,
-  FileText, User, Zap, BrainCircuit, AlertTriangle, Info, CalendarDays,
-  Sparkles, ArrowRight, Upload, FileSpreadsheet, ShieldCheck, AlertCircle,
-  Filter,
-} from 'lucide-react';
+import { timeAgo, greeting, formatDateLong, cleanText } from '../utils.js';
+import useComplianceAlerts from '../hooks/useComplianceAlerts.js';
+import Factory from 'lucide-react/dist/esm/icons/factory';
+import Activity from 'lucide-react/dist/esm/icons/activity';
+import Wrench from 'lucide-react/dist/esm/icons/wrench';
+import AlertOctagon from 'lucide-react/dist/esm/icons/alert-octagon';
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check';
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list';
+import FolderArchive from 'lucide-react/dist/esm/icons/folder-archive';
+import Timer from 'lucide-react/dist/esm/icons/timer';
+import TimerReset from 'lucide-react/dist/esm/icons/timer-reset';
+import Gauge from 'lucide-react/dist/esm/icons/gauge';
+import ListChecks from 'lucide-react/dist/esm/icons/list-checks';
+import Clock from 'lucide-react/dist/esm/icons/clock';
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right';
+import FileText from 'lucide-react/dist/esm/icons/file-text';
+import User from 'lucide-react/dist/esm/icons/user';
+import Zap from 'lucide-react/dist/esm/icons/zap';
+import BrainCircuit from 'lucide-react/dist/esm/icons/brain-circuit';
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle';
+import Info from 'lucide-react/dist/esm/icons/info';
+import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days';
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles';
+import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right';
+import Upload from 'lucide-react/dist/esm/icons/upload';
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet';
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check';
+import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle';
+import Filter from 'lucide-react/dist/esm/icons/filter';
+import Award from 'lucide-react/dist/esm/icons/award';
 import { ProgressGauge } from '../components/charts.jsx';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as RechartsTooltip, Legend,
 } from 'recharts';
 
+// New Dashboard components
+import { SolarPerformanceCard } from '../components/dashboard/SolarPerformanceCard.jsx';
+import { RenewableEnergyCard } from '../components/dashboard/RenewableEnergyCard.jsx';
+import { EnergySnapshotCard } from '../components/dashboard/EnergySnapshotCard.jsx';
+import { computeDashboardMetrics } from '../components/dashboard/DashboardAnalyticsEngine.js';
+
 const MODULE_GROUPS = [
-  { label: 'Module A · Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
-  { label: 'Module B · Utilities & Energy Management', cats: ['Energy Report (DG 500 & 380KVA)', 'Energy Report (Solar)', 'Plantwise Energy Consumption'] },
-  { label: 'Module C · Continuous Improvement & Compliance', cats: ['Kaizen', 'Improvement', 'ORM Data (Operational Risk Management)'] },
+  { label: 'Module A • Preventive & Corrective Maintenance', cats: ['Monthly PM Report', 'Plantwise Breakdown Report', 'Machine Asset Register', 'FAT (Factory Acceptance Test)'] },
+  { label: 'Module B • Utilities & Energy Management', cats: ['Energy Report (DG 500 & 380KVA)', 'Energy Report (Solar)', 'Plantwise Energy Consumption'] },
+  { label: 'Module C • Continuous Improvement & Compliance', cats: ['Kaizen', 'Improvement', 'ORM Data (Operational Risk Management)'] },
 ];
 
 const SEVERITY_META = {
@@ -77,10 +108,66 @@ export default function Dashboard() {
   const store = useMemo(() => getPlantScopedData(currentPlantId), [rawStore, currentPlantId]);
   const { machines, breakdowns, pms, machinePmRecords, dailyUtilityLog, dailySolarGeneration, monthlyHerbicide, monthlyInsecticide, monthlyWater, monthlyAirCompressor, energySettings } = store;
   const clock = useClock();
+  const { counts: complianceCounts, allAlerts: complianceAlerts, intervalAlerts } = useComplianceAlerts();
   const [categories, setCategories] = useState([]);
   const [recent, setRecent] = useState([]);
   const [loading, setLoading] = useState(true);
   const [periodFilter, setPeriodFilter] = useState('all');
+  // HYDRATION & FALLBACK STATE: ensure Dashboard uses same data context as EnergyManagement (store) with localStorage/supabase fallback
+  const [hydratedUtility, setHydratedUtility] = useState([]);
+  const [hydratedSolar, setHydratedSolar] = useState([]);
+  const [energyLoading, setEnergyLoading] = useState(false);
+
+  useEffect(() => {
+    // If store already has data, keep hydrated in sync and skip fetch
+    if (dailyUtilityLog.length > 0 || dailySolarGeneration.length > 0) {
+      setHydratedUtility(dailyUtilityLog);
+      setHydratedSolar(dailySolarGeneration);
+      return;
+    }
+    const fetchEnergyData = async () => {
+      try {
+        setEnergyLoading(true);
+        // 1. Fetch Utility Log Data (Fallback to LocalStorage if offline/cached)
+        let utilityData = [];
+        try {
+          const cachedUtility = localStorage.getItem('daily_utility_log') || localStorage.getItem('CCPL_DAILY_UTILITY_LOG_V1') || localStorage.getItem('energy_utility_data');
+          if (cachedUtility) {
+            const parsed = JSON.parse(cachedUtility);
+            if (Array.isArray(parsed) && parsed.length > 0) utilityData = parsed;
+          }
+        } catch {}
+        if (typeof window !== 'undefined' && window.supabase) {
+          try {
+            const { data: uData } = await window.supabase.from('daily_utility_log').select('*');
+            if (uData && uData.length > 0) utilityData = uData;
+          } catch {}
+        }
+        // 2. Fetch Solar Generation Data
+        let solarData = [];
+        try {
+          const cachedSolar = localStorage.getItem('daily_solar_generation') || localStorage.getItem('CCPL_DAILY_SOLAR_GENERATION_V1') || localStorage.getItem('energy_solar_data');
+          if (cachedSolar) {
+            const parsed = JSON.parse(cachedSolar);
+            if (Array.isArray(parsed) && parsed.length > 0) solarData = parsed;
+          }
+        } catch {}
+        if (typeof window !== 'undefined' && window.supabase) {
+          try {
+            const { data: sData } = await window.supabase.from('daily_solar_generation').select('*');
+            if (sData && sData.length > 0) solarData = sData;
+          } catch {}
+        }
+        if (Array.isArray(utilityData) && utilityData.length > 0) setHydratedUtility(utilityData);
+        if (Array.isArray(solarData) && solarData.length > 0) setHydratedSolar(solarData);
+      } catch (err) {
+        console.error('Error loading dashboard energy metrics:', err);
+      } finally {
+        setEnergyLoading(false);
+      }
+    };
+    fetchEnergyData();
+  }, [dailyUtilityLog, dailySolarGeneration]);
 
   useEffect(() => {
     (async () => {
@@ -102,7 +189,11 @@ export default function Dashboard() {
   // ---- everything below auto-recomputes when store data changes ----
   const kpi = useMemo(() => computeKPIs(store, totalFiles, periodFilter), [store, totalFiles, periodFilter]);
 
-  // Period filter for charts
+  // Effective rows: prefer store data, fallback to hydrated localStorage/supabase cache
+  const effectiveUtilityLog = useMemo(() => (dailyUtilityLog.length > 0 ? dailyUtilityLog : hydratedUtility), [dailyUtilityLog, hydratedUtility]);
+  const effectiveSolarLog = useMemo(() => (dailySolarGeneration.length > 0 ? dailySolarGeneration : hydratedSolar), [dailySolarGeneration, hydratedSolar]);
+
+  // Period filter for charts (uses effective logs so fallback hydration is included)
   const availablePeriods = useMemo(() => {
     const allPeriods = new Set();
     store.breakdowns.forEach((r) => r.period && allPeriods.add(r.period));
@@ -113,14 +204,14 @@ export default function Dashboard() {
     store.machineBreakdownLogs.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
-    dailyUtilityLog.forEach((r) => {
+    effectiveUtilityLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
-    dailySolarGeneration.forEach((r) => {
+    effectiveSolarLog.forEach((r) => {
       if (r.date) allPeriods.add(String(r.date).slice(0, 7));
     });
     return [...allPeriods].sort().reverse();
-  }, [store, dailyUtilityLog, dailySolarGeneration]);
+  }, [store, effectiveUtilityLog, effectiveSolarLog]);
 
   const filteredBreakdowns = useMemo(() =>
     periodFilter === 'all' ? store.breakdowns : store.breakdowns.filter((r) => r.period === periodFilter),
@@ -140,42 +231,47 @@ export default function Dashboard() {
   );
 
   const filteredDailyUtilityLog = useMemo(() =>
-    periodFilter === 'all' ? dailyUtilityLog : dailyUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
-    [dailyUtilityLog, periodFilter]
+    periodFilter === 'all' ? effectiveUtilityLog : effectiveUtilityLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [effectiveUtilityLog, periodFilter]
   );
   const filteredDailySolarGeneration = useMemo(() =>
-    periodFilter === 'all' ? dailySolarGeneration : dailySolarGeneration.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
-    [dailySolarGeneration, periodFilter]
+    periodFilter === 'all' ? effectiveSolarLog : effectiveSolarLog.filter((r) => String(r.date || '').slice(0, 7) === periodFilter),
+    [effectiveSolarLog, periodFilter]
   );
 
+  // Dashboard metrics using canonical calculations from canonical data sources
+  const dashboardMetrics = useMemo(() => {
+    return computeDashboardMetrics(filteredDailySolarGeneration, filteredDailyUtilityLog);
+  }, [filteredDailySolarGeneration, filteredDailyUtilityLog]);
+
   const pfTrend = useMemo(() =>
-    computePfTrend(dailyUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
-    [dailyUtilityLog, periodFilter]
+    computePfTrend(effectiveUtilityLog, 12, periodFilter).map((d) => ({ ...d, label: d.date ? d.date.slice(5) : '' })),
+    [effectiveUtilityLog, periodFilter]
   );
-  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(dailyUtilityLog, 6, periodFilter), [dailyUtilityLog, periodFilter]);
-  const pmTrend = useMemo(() => monthlyPMCompletionFromRecords(machinePmRecords, 6), [machinePmRecords]);
+  const dgFuelEfficiency = useMemo(() => computeDgFuelEfficiency(effectiveUtilityLog, 6, periodFilter), [effectiveUtilityLog, periodFilter]);
+  const pmTrend = useMemo(() => {
+    const fromRecords = monthlyPMCompletionFromRecords(machinePmRecords, 6);
+    const fromSummaries = monthlyPMCompletion(pms, 6);
+    return fromSummaries.map((s, i) => {
+      const r = fromRecords[i] || s;
+      return {
+        label: s.label,
+        planned: Math.max(s.planned, r.planned),
+        completed: Math.max(s.completed, r.completed),
+        pending: Math.max(s.pending, r.pending),
+        compliance: Math.max(s.compliance, r.compliance),
+      };
+    });
+  }, [machinePmRecords, pms]);
 
   const currentMonthKey = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }, []);
 
-  const renewableSummary = useMemo(
-    () => {
-      const mk = periodFilter === 'all' ? null : periodFilter;
-      return computeRenewableSummary(
-        dailyUtilityLog,
-        dailySolarGeneration,
-        energySettings,
-        mk
-      );
-    },
-    [dailyUtilityLog, dailySolarGeneration, energySettings, currentMonthKey, periodFilter]
-  );
-
   const latestPf = useMemo(() => {
-    if (dailyUtilityLog.length === 0) return null;
-    const allDeltas = computeDailyDeltas(dailyUtilityLog);
+    if (effectiveUtilityLog.length === 0) return null;
+    const allDeltas = computeDailyDeltas(effectiveUtilityLog);
     const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
     if (periodDeltas.length === 0) return null;
     const last = periodDeltas[0];
@@ -190,24 +286,41 @@ export default function Dashboard() {
       u2Pf: u2PfRaw > 0 ? formatPowerFactor(u2PfRaw) : null,
       avgPf: avgRaw > 0 ? formatPowerFactor(avgRaw) : null,
     };
-  }, [dailyUtilityLog, periodFilter]);
+  }, [effectiveUtilityLog, periodFilter]);
 
+  // Compute metrics dynamically from fetched rows — uses robust computeEnergySnapshot with flexible key parsing & localStorage fallback
   const energySnapshot = useMemo(() => {
-    const allDeltas = computeDailyDeltas(dailyUtilityLog);
-    const periodDeltas = periodFilter === 'all' ? allDeltas : allDeltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
-    const snapshot = computeEnergySnapshot(periodDeltas, filteredDailySolarGeneration);
-    return {
-      unit1KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u1ImportKwhReading) || 0), 0)),
-      unit2KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.u2ImportKwhReading) || 0), 0)),
-      totalGridMonth: snapshot.gridKwh,
-      dg500HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500HourmeterReading) || 0), 0)),
-      dg380HrsMonth: round1(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380HourmeterReading) || 0), 0)),
-      dg500KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg500KwhReading) || 0), 0)),
-      dg380KwhMonth: Math.round(periodDeltas.reduce((s, d) => s + (Number(d._delta?.dg380KwhReading) || 0), 0)),
-      solarMonth: snapshot.solarKwh,
-      fuelMonth: snapshot.fuelLtr,
-    };
-  }, [dailyUtilityLog, periodFilter, filteredDailySolarGeneration]);
+    return computeEnergySnapshot(filteredDailyUtilityLog, filteredDailySolarGeneration);
+  }, [filteredDailyUtilityLog, filteredDailySolarGeneration]);
+
+  // Solar Specific Yield — Units per kW per day, dynamic capacity 540 kW default
+  const solarSpecific = useMemo(() => {
+    const totalSolar = filteredDailySolarGeneration.reduce((sum, r) => {
+      const v = Number(r.grandTotal ?? r.dailyTotalKwh ?? getSolarDerived(r).grandTotal ?? 0);
+      return sum + (Number.isFinite(v) ? v : 0);
+    }, 0);
+    const fallbackTotal = Number(energySnapshot.solarKwh || 0);
+    const total = totalSolar > 0 ? totalSolar : fallbackTotal;
+    const capacity = getSolarCapacity(energySettings);
+    const uniqueDays = new Set(filteredDailySolarGeneration.map((r) => (r.date || '').slice(0, 10)).filter(Boolean)).size;
+    let days = uniqueDays;
+    if (days === 0 && filteredDailySolarGeneration.length > 0) days = filteredDailySolarGeneration.length;
+    if (days === 0 && periodFilter !== 'all') {
+      // For filtered period with no solar rows but periodFilter set, use calendar days in that month
+      const [y, m] = String(periodFilter).split('-').map(Number);
+      if (y && m) days = new Date(y, m, 0).getDate();
+    }
+    if (days === 0) days = 1;
+    const y = computeSpecificYield(total, capacity, days);
+    return { yield: y.toFixed(2), capacity, days, total: Math.round(total) };
+  }, [filteredDailySolarGeneration, energySettings, periodFilter, energySnapshot]);
+
+  const handleSolarCapacitySave = (newCap) => {
+    const cap = Number(newCap);
+    if (!Number.isFinite(cap) || cap <= 0) return;
+    upsertEnergySettings({ installedSolarCapacityKwp: cap }, user?.full_name || 'Admin');
+    try { localStorage.setItem('ccpl_solar_capacity', String(cap)); } catch {}
+  };
 
   const charts = useMemo(() => ({
     bdTrend: monthlyBreakdownTrend(filteredBreakdowns),
@@ -224,20 +337,21 @@ export default function Dashboard() {
     monthlyRegister: machineBreakdownRegister(filteredMachineBDLogs),
     activeBreakdowns: currentlyUnderBreakdown(store.machineBreakdownLogs),
     amcNotifications: buildAMCNotifications(store.amc, store.machines),
+    certNotifications: buildTestingCertificateNotifications(store.testingCertificates, store.machines),
     pfTrend,
     dgFuelEfficiency,
-  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, filteredMachinePmRecords, store.machines, store.machineBreakdownLogs, store.amc, pfTrend, dgFuelEfficiency]);
+  }), [filteredBreakdowns, filteredPMs, filteredMachineBDLogs, filteredMachinePmRecords, store.machines, store.machineBreakdownLogs, store.amc, store.testingCertificates, pfTrend, dgFuelEfficiency]);
   const insights = useMemo(() => buildInsights(store), [store]);
 
   // Merge local activity feed with server upload history
   const feed = useMemo(() => {
     const local = store.activity.map((a) => ({
-      id: a.id, user: a.user, text: `${a.action} ${a.detail ? '· ' + a.detail : ''}`,
+      id: a.id, user: a.user, text: `${a.action} ${a.detail ? ' • ' + a.detail : ''}`,
       type: a.type, ts: a.ts,
     }));
     const uploads = recent.map((r) => ({
       id: `srv-${r.id}`, user: r.uploader_name || 'System',
-      text: `uploaded ${r.filename} · ${r.category_name}`,
+      text: `uploaded ${r.filename} • ${r.category_name}`,
       type: 'upload', ts: r.uploaded_at, ext: r.file_format,
     }));
     return [...local, ...uploads]
@@ -260,7 +374,7 @@ export default function Dashboard() {
   }
 
   const noBDs = filteredBreakdowns.length === 0;
-  const noPMs = filteredPMs.length === 0;
+  const noPMs = filteredPMs.length === 0 && (machinePmRecords || []).length === 0;
   const noDailyUtility = filteredDailyUtilityLog.length === 0;
   const noSolar = filteredDailySolarGeneration.length === 0;
 
@@ -278,10 +392,10 @@ export default function Dashboard() {
         <div className="relative z-10 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <h2 className="text-page-title">
-              {greeting()}, {user?.full_name || 'Engineer'} 👋
+              {cleanText(greeting())}, {cleanText(user?.full_name || 'Engineer')}
             </h2>
             <p className="text-body mt-1.5">
-              {user ? 'Maintenance Engineer' : 'Viewer'} — {currentPlant?.plant_name || store.settings.plantName} · Crystal Crop Protection Ltd.
+              {cleanText(user ? 'Maintenance Engineer' : 'Viewer')} — {cleanText(store.settings.plantName)} • Crystal Crop Protection Ltd.
             </p>
             <p className="text-cyan-400 text-[10px] font-semibold tracking-wider mt-1">{currentPlant?.plant_code || 'NATHUPUR'} · {currentPlant?.location || 'Nathupur, Haryana'} · {kpi.machineCount} machines</p>
             <div className="flex flex-wrap items-center gap-2.5 mt-4">
@@ -320,6 +434,29 @@ export default function Dashboard() {
           </div>
         </div>
       </section>
+
+      {/* Subtle Top Bar Ribbon — always visible when any expiring data exists */}
+      {(() => {
+        const visible = complianceAlerts;
+        if (!visible || visible.length === 0) return null;
+        const critical = visible.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7);
+        const isCritical = critical.length > 0;
+        const certCount = visible.filter((a) => a.category === 'cert').length;
+        const amcCount = visible.filter((a) => a.category === 'amc').length;
+        const pmCount = visible.filter((a) => a.category === 'pm').length;
+        const total = visible.length;
+        return (
+          <section aria-label="Critical compliance ribbon" className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-control border text-xs ${isCritical ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'}`}>
+            <span>⚠️ {total} Compliance Alert{total!==1?'s':''} — {certCount} Certificates • {amcCount} AMC • {pmCount} PM {isCritical ? '— Critical <7 days!' : '— Expiring within 30 days'}</span>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('ccpl:open-alerts-drawer'))}
+              className={`px-3 py-1 rounded-control border text-[11px] font-semibold ${isCritical ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/40 text-amber-200' : 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-500/40 text-cyan-200'}`}
+            >
+              Review in Bell 🔔
+            </button>
+          </section>
+        );
+      })()}
 
       {/* Period filter bar */}
       {availablePeriods.length > 1 && (
@@ -375,90 +512,8 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Energy snapshot — dual-unit UHBVNL grid + DG 500/380 split */}
-      <section aria-label="Energy snapshot">
-        <div className="glass-card p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Zap size={16} className="text-amber-400" aria-hidden="true" />
-            <h3 className="text-card-title">Energy Snapshot — This Month</h3>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-8 gap-2.5">
-            {/* UHBVNL Unit 1 */}
-            <div className="rounded-control bg-cyan-500/[0.07] border border-cyan-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 1 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit1KwhMonth.toLocaleString()}</p>
-              <p className="text-cyan-400 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* UHBVNL Unit 2 */}
-            <div className="rounded-control bg-violet-500/[0.07] border border-violet-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Unit 2 Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.unit2KwhMonth.toLocaleString()}</p>
-              <p className="text-violet-400 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* Total Grid */}
-            <div className="rounded-control bg-white/[0.04] border border-white/[0.10] p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Total Grid</p>
-              <p className="text-white text-base font-bold tabular-nums">{energySnapshot.totalGridMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* DG 500 */}
-            <div className="rounded-control bg-amber-500/[0.07] border border-amber-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 500</p>
-              <p className="text-amber-300 text-base font-bold tabular-nums">{energySnapshot.dg500KwhMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg500HrsMonth} hrs</p>
-            </div>
-            {/* DG 380 */}
-            <div className="rounded-control bg-orange-500/[0.07] border border-orange-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">DG 380</p>
-              <p className="text-orange-300 text-base font-bold tabular-nums">{energySnapshot.dg380KwhMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh · {energySnapshot.dg380HrsMonth} hrs</p>
-            </div>
-            {/* Solar */}
-            <div className="rounded-control bg-emerald-500/[0.07] border border-emerald-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Solar</p>
-              <p className="text-emerald-300 text-base font-bold tabular-nums">{energySnapshot.solarMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">kWh</p>
-            </div>
-            {/* Fuel */}
-            <div className="rounded-control bg-red-500/[0.07] border border-red-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Fuel</p>
-              <p className="text-red-300 text-base font-bold tabular-nums">{energySnapshot.fuelMonth.toLocaleString()}</p>
-              <p className="text-slate-500 text-[10px] mt-0.5">Ltrs</p>
-            </div>
-            {/* Power Factor */}
-            <div className="rounded-control bg-teal-500/[0.07] border border-teal-500/20 p-3 text-center">
-              <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1 leading-tight">Power Factor</p>
-              {latestPf && latestPf.avgPf ? (
-                <>
-                  <p className="text-teal-300 text-base font-bold tabular-nums">{latestPf.avgPf}</p>
-                  <p className="text-slate-500 text-[10px] mt-0.5">U1 {latestPf.u1Pf || '—'} · U2 {latestPf.u2Pf || '—'}</p>
-                </>
-              ) : (
-                <p className="text-slate-500 text-[10px]">No data</p>
-              )}
-            </div>
-          </div>
-          {/* Unit 1 vs Unit 2 split bar */}
-          {energySnapshot.totalGridMonth > 0 && (
-            <div className="flex items-center gap-3 pt-1">
-              <span className="text-slate-500 text-[10px] whitespace-nowrap">Grid split:</span>
-              <div className="flex-1 h-2 rounded-full bg-white/[0.06] overflow-hidden flex">
-                <div
-                  className="h-full bg-cyan-400 transition-all duration-500"
-                  style={{ width: `${Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
-                />
-                <div
-                  className="h-full bg-violet-400 transition-all duration-500"
-                  style={{ width: `${Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%` }}
-                />
-              </div>
-              <span className="text-slate-500 text-[10px] whitespace-nowrap">
-                U1 {Math.round((energySnapshot.unit1KwhMonth / energySnapshot.totalGridMonth) * 100)}% · U2 {Math.round((energySnapshot.unit2KwhMonth / energySnapshot.totalGridMonth) * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-      </section>
+      {/* Energy Snapshot Section — now hydrates via same store/context as EnergyManagement with fallback handling */}
+      <EnergySnapshotCard snapshotMetrics={energySnapshot} solarSpecific={solarSpecific} onSolarCapacitySave={handleSolarCapacitySave} isLoading={energyLoading || loading} />
 
       {/* AI reliability insights */}
       <section aria-label="AI analytics">
@@ -556,81 +611,12 @@ export default function Dashboard() {
             />
           )}
         </ChartCard>
-        <ChartCard title="Solar Performance" subtitle="Inverter total vs meter-side import & export" empty={noSolar && noDailyUtility} height={260} raw>
-          {(noSolar && noDailyUtility) ? (
-            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-5 px-6">
-              <div className="flex items-end gap-6 w-full max-w-md">
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Inverter Total</p>
-                  <div className="rounded-t-md bg-emerald-500/20 border border-emerald-500/30 pt-3 pb-2 px-2">
-                    <p className="text-emerald-300 text-lg font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
-                    <p className="text-emerald-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Import</p>
-                  <div className="rounded-t-md bg-cyan-500/20 border border-cyan-500/30 pt-3 pb-2 px-2">
-                    <p className="text-cyan-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarImport.toLocaleString()}</p>
-                    <p className="text-cyan-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-                <div className="flex-1 text-center">
-                  <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">Meter Export</p>
-                  <div className="rounded-t-md bg-violet-500/20 border border-violet-500/30 pt-3 pb-2 px-2">
-                    <p className="text-violet-300 text-lg font-bold tabular-nums">{renewableSummary.meterSideSolarExport.toLocaleString()}</p>
-                    <p className="text-violet-400/60 text-[10px]">kWh</p>
-                  </div>
-                </div>
-              </div>
-              {renewableSummary.solarCrossCheck > 0 && (
-                <p className="text-[11px] text-amber-400/80">Cross-check deviation: {renewableSummary.solarCrossCheck}%</p>
-              )}
-            </div>
-          )}
-        </ChartCard>
-        <ChartCard title="Renewable Energy & CO₂ Avoided" subtitle="This month's sustainability metrics" empty={noSolar && noDailyUtility} height={260} raw>
-          {(noSolar && noDailyUtility) ? (
-            <div className="flex h-full items-center justify-center text-slate-500 text-sm">No data available for this period.</div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4 h-full items-center px-4">
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Solar Generation</p>
-                <p className="text-emerald-300 text-2xl font-bold tabular-nums">{renewableSummary.solarFromInverters.toLocaleString()}</p>
-                <p className="text-emerald-400/60 text-[10px] mt-0.5">kWh</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Renewable Share</p>
-                <p className="text-cyan-300 text-2xl font-bold tabular-nums">{renewableSummary.renewableSharePct}%</p>
-                <p className="text-cyan-400/60 text-[10px] mt-0.5">of total consumption</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">CO₂ Avoided</p>
-                <p className="text-teal-300 text-2xl font-bold tabular-nums">{renewableSummary.co2AvoidedKg.toLocaleString()}</p>
-                <p className="text-teal-400/60 text-[10px] mt-0.5">kg</p>
-              </div>
-              <div className="text-center">
-                <p className="text-slate-400 text-[10px] uppercase tracking-wider mb-1">Performance Ratio</p>
-                <p className="text-amber-300 text-2xl font-bold tabular-nums">{renewableSummary.performanceRatio}%</p>
-                <p className="text-amber-400/60 text-[10px] mt-0.5">of expected output</p>
-              </div>
-              {renewableSummary.warnings.length > 0 && (
-                <div className="col-span-2 mt-2">
-                  {renewableSummary.warnings.map((w, i) => (
-                    <p key={i} className="text-[11px] text-amber-400/80 flex items-center gap-1.5">
-                      <AlertTriangle size={11} aria-hidden="true" /> {w}
-                    </p>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </ChartCard>
+        <SolarPerformanceCard metrics={dashboardMetrics} />
+        <RenewableEnergyCard metrics={dashboardMetrics} />
         <ChartCard title="Machine Health Distribution" subtitle="Fleet condition derived from failures & PM" empty={!store.machines.length}>
           <PieDonutChart data={charts.health} donut centerLabel={kpi.machineCount} centerSub="Machines" />
         </ChartCard>
-        <ChartCard title="Availability Trend" subtitle="Plant availability % · last 6 months" empty={noBDs}>
+        <ChartCard title="Availability Trend" subtitle="Plant availability % • last 6 months" empty={noBDs}>
           <TrendChart data={charts.avail} color="#10B981" unit="%" yDomain={[0, 100]} />
         </ChartCard>
         <ChartCard title="MTTR Trend" subtitle="Mean time to repair (hrs)" empty={noBDs}>
@@ -682,9 +668,9 @@ export default function Dashboard() {
                         <td className="text-cyan-400 font-mono text-xs">{log.machineCode || log.machineId}</td>
                         <td className="text-white font-medium">{log.machineName}</td>
                         <td className="text-slate-300">{log.plantSection}</td>
-                        <td className="text-slate-300 text-xs whitespace-nowrap">{startD ? startD.toLocaleString('en-GB') : '—'}</td>
+                        <td className="text-slate-300 text-xs whitespace-nowrap">{startD ? startD.toLocaleString('en-GB') : '—' }</td>
                         <td className="text-amber-300 font-semibold">{durationHrs}h</td>
-                        <td className="text-slate-300 max-w-[200px] truncate" title={log.failureCause}>{log.failureCause || '—'}</td>
+                        <td className="text-slate-300 max-w-[200px] truncate" title={log.failureCause}>{log.failureCause || '—' }</td>
                         <td><span className="badge bg-red-500/15 text-red-400">{log.status}</span></td>
                       </tr>
                     );
@@ -731,7 +717,7 @@ export default function Dashboard() {
                         <td className="text-slate-300">{row.plantSection}</td>
                         <td className="text-slate-200 font-semibold">{row.breakdownCount}</td>
                         <td className="text-amber-300">{row.downtimeHours}h</td>
-                        <td className="text-slate-300 max-w-[180px] truncate" title={row.mainFailureCause}>{row.mainFailureCause || '—'}</td>
+                        <td className="text-slate-300 max-w-[180px] truncate" title={row.mainFailureCause}>{row.mainFailureCause || '—' }</td>
                         <td>
                           <span className={`badge ${row.status === 'ACTIVE' ? 'bg-red-500/15 text-red-400' : 'bg-emerald-500/15 text-emerald-400'}`}>
                             {row.status}
@@ -742,38 +728,6 @@ export default function Dashboard() {
                   })}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* AMC Alerts */}
-      {charts.amcNotifications.length > 0 && (
-        <section aria-label="AMC alerts">
-          <div className="glass-card p-5">
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-9 h-9 rounded-control bg-violet-400/10 border border-violet-400/25 flex items-center justify-center">
-                <ShieldCheck size={17} className="text-violet-400" aria-hidden="true" />
-              </div>
-              <div>
-                <h3 className="text-card-title">AMC Alerts</h3>
-                <p className="text-meta">Upcoming AMC expiries and service visit overdue alerts</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              {charts.amcNotifications.slice(0, 8).map((n) => (
-                <div key={n.id} className={`flex items-center gap-3 rounded-control border px-4 py-2.5 ${
-                  n.type === 'danger' ? 'bg-red-500/10 border-red-500/25 text-red-300' :
-                  n.type === 'warning' ? 'bg-amber-500/10 border-amber-500/25 text-amber-300' :
-                  'bg-cyan-500/10 border-cyan-500/25 text-cyan-300'
-                }`}>
-                  <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold">{n.title}</p>
-                    <p className="text-[11px] opacity-80">{n.detail}</p>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         </section>

@@ -25,9 +25,7 @@ const Energy = lazy(() => import('./pages/Energy.jsx'));
 const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
-const CorporateDashboard = lazy(() => import('./pages/CorporateDashboard.jsx'));
-const PlantManagement = lazy(() => import('./pages/PlantManagement.jsx'));
-const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
+const KPIStatus = lazy(() => import('./pages/KPIStatus.jsx'));
 
 const LOGIN_MODAL_KEY = 'ccpl_show_login_modal';
 
@@ -149,6 +147,7 @@ function AppContent() {
                 <Route path="/breakdowns" element={<Breakdowns />} />
                 <Route path="/pm" element={<PreventiveMaintenance />} />
                 <Route path="/energy" element={<Energy />} />
+                <Route path="/kpi" element={<KPIStatus />} />
                 <Route path="/sop" element={<SOPLibrary />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/settings" element={<Settings />} />

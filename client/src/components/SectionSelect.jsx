@@ -9,12 +9,12 @@ import { Plus, X, Check } from 'lucide-react';
  * Reusable Plant Section dropdown with inline "Add New Section" capability.
  *
  * Props:
- *   value        — currently selected section string
- *   onChange     — callback(newSection: string)
- *   id           — optional HTML id for the select
- *   className    — optional extra CSS classes
- *   showAddNew   — show the "+ Add New" option (default true for admin)
- *   ariaLabel    — accessible label
+ *   value — currently selected section string
+ *   onChange — callback(newSection: string)
+ *   id — optional HTML id for the select
+ *   className — optional extra CSS classes
+ *   showAddNew — show the "+ Add New" option (default true for admin)
+ *   ariaLabel — accessible label
  */
 export default function SectionSelect({
   value = '',

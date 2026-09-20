@@ -28,6 +28,21 @@ export function greeting() {
   return 'Good Evening';
 }
 
+export const cleanText = (str) => {
+  if (!str) return '';
+  return String(str)
+    .replace(/┬À/g, '•')
+    .replace(/┬—/g, '—')
+    .replace(/ÔÇÖ/g, "'")
+    .replace(/ÔÇ/g, "'")
+    .replace(/fæï/g, '')
+    .replace(/'ö/g, ' — ')
+    .replace(/ö/g, '—')
+    .replace(/[\u007F-\u009F\u00AD]/g, '')
+    .replace(/\s*•\s*/g, ' • ')
+    .replace(/\s*—\s*/g, ' — ');
+};
+
 // localStorage helpers with JSON safety
 export function loadLS(key, fallback) {
   try {

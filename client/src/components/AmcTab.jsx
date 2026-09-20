@@ -271,9 +271,9 @@ function AmcContractCard({ record, machineId, userName, isAdmin }) {
             <p className="text-white font-semibold text-sm truncate">{record.vendorName}</p>
             <p className="text-slate-500 text-[10px] mt-0.5 flex items-center gap-1">
               <CalendarDays size={10} aria-hidden="true" />
-              {record.contractStartDate ? new Date(record.contractStartDate).toLocaleDateString('en-GB') : '—'}
+              {record.contractStartDate ? new Date(record.contractStartDate).toLocaleDateString('en-GB') : '—' }
               {' → '}
-              {record.contractEndDate  ? new Date(record.contractEndDate).toLocaleDateString('en-GB')  : '—'}
+              {record.contractEndDate  ? new Date(record.contractEndDate).toLocaleDateString('en-GB')  : '—' }
             </p>
           </div>
         </div>
@@ -293,10 +293,10 @@ function AmcContractCard({ record, machineId, userName, isAdmin }) {
       <div className="px-5 py-4 space-y-3">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           {[
-            { label: 'Total Visits', value: record.totalVisitsAgreed || '—', icon: ClipboardList, color: 'text-cyan-300' },
+            { label: 'Total Visits', value: record.totalVisitsAgreed || '—' , icon: ClipboardList, color: 'text-cyan-300' },
             { label: 'Completed',    value: record.completedVisits   || 0,   icon: CheckCircle2,  color: 'text-emerald-300' },
             { label: 'Expected Now', value: exp,                              icon: Users,         color: visitOverdue ? 'text-amber-300' : 'text-slate-300' },
-            { label: 'Days Left',    value: days !== null ? `${days}d` : '—', icon: CalendarDays,  color: expired ? 'text-red-400' : expiring ? 'text-amber-300' : 'text-emerald-300' },
+            { label: 'Days Left',    value: days !== null ? `${days}d` : '—' , icon: CalendarDays,  color: expired ? 'text-red-400' : expiring ? 'text-amber-300' : 'text-emerald-300' },
           ].map((k) => {
             const Icon = k.icon;
             return (

@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM, updatePM, purgePmRecords , getPlantScopedData } from '../store.js';
-import { usePlant } from '../context/PlantContext.jsx';
+import { useStore, addPM, deletePM, updatePM, purgePmRecords, deleteMachinePmRecord } from '../store.js';
 import {
   formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,
@@ -172,7 +171,7 @@ function DetailModal({ row, onClose }) {
     ['Done PM Count', row.doneCount],
     ['Pending PM Count', row.pendingCount],
     ['Compliance', `${row.compliancePct}%`],
-    ['Remarks', row.remarks || '—'],
+    ['Remarks', row.remarks || '—' ],
   ];
   return (
     <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()} role="dialog" aria-modal="true" aria-label="PM summary details">
@@ -267,6 +266,8 @@ export default function PreventiveMaintenance() {
   const [deleting, setDeleting] = useState(null);
   const [confirmPurge, setConfirmPurge] = useState(false);
   const [purgeLoading, setPurgeLoading] = useState(false);
+  const [editingRegister, setEditingRegister] = useState(null);
+  const [deletingRegister, setDeletingRegister] = useState(null);
 
   // Register filters
   const [registerMonth, setRegisterMonth] = useState('');
@@ -302,7 +303,10 @@ export default function PreventiveMaintenance() {
   }, [kpiMonth, availableMonths]);
 
   const currentMonthRecords = useMemo(
-    () => machinePmRecords.filter((r) => activeKpiMonth && (r.pmDate || '').slice(0, 7) === activeKpiMonth),
+    () => {
+      if (!activeKpiMonth || activeKpiMonth === 'ALL') return machinePmRecords;
+      return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === activeKpiMonth);
+    },
     [machinePmRecords, activeKpiMonth]
   );
 
@@ -314,10 +318,10 @@ export default function PreventiveMaintenance() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }, [activeKpiMonth]);
 
-  const prevMonthRecords = useMemo(
-    () => machinePmRecords.filter((r) => prevKpiMonth && (r.pmDate || '').slice(0, 7) === prevKpiMonth),
-    [machinePmRecords, prevKpiMonth]
-  );
+  const prevMonthRecords = useMemo(() => {
+    if (!prevKpiMonth || prevKpiMonth === 'ALL') return [];
+    return machinePmRecords.filter((r) => (r.pmDate || '').slice(0, 7) === prevKpiMonth);
+  }, [machinePmRecords, prevKpiMonth]);
 
   const totalPlanned = currentMonthRecords.length;
   const totalCompleted = currentMonthRecords.filter((r) => String(r.status || '').toLowerCase() === 'completed' || r.completed === true).length;
@@ -336,20 +340,47 @@ export default function PreventiveMaintenance() {
 
   const complianceTrend = useMemo(() => monthlyPMComplianceTrendFromRecords(machinePmRecords, 12), [machinePmRecords]);
 
-  // Default to current month
+  // Default to current month on initial load only — do not override All Months selection
+  const hasInitializedRef = useRef(false);
   useEffect(() => {
+    if (hasInitializedRef.current) return;
     if (!registerMonth && availableMonths.length) {
       const currentM = availableMonths.find((m) => m.key === currentKey);
       const defaultMonth = currentM ? currentM.key : availableMonths[0].key;
       setRegisterMonth(defaultMonth);
       setKpiMonth(defaultMonth);
+      hasInitializedRef.current = true;
+    } else if (availableMonths.length) {
+      hasInitializedRef.current = true;
     }
   }, [availableMonths, registerMonth, currentKey]);
 
+  const handleSelectAllMonths = (e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    setRegisterMonth('ALL');
+    setKpiMonth('ALL');
+    setRegPage(1);
+    hasInitializedRef.current = true;
+  };
+  const handleMonthSelect = (monthKey, e) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (monthKey === 'ALL' || monthKey === '' || monthKey == null) {
+      setRegisterMonth('ALL');
+      setKpiMonth('ALL');
+      setRegPage(1);
+      hasInitializedRef.current = true;
+    } else {
+      setRegisterMonth(monthKey);
+      setKpiMonth(monthKey);
+      setRegPage(1);
+    }
+  };
+
   // Filtered register rows — search across Machine Code, Name, Section, and Task
+  // When registerMonth is '' or 'ALL', bypass date-range filtering and show full 447
   const registerRows = useMemo(() => {
     const filtered = monthlyRegister.filter((r) => {
-      if (registerMonth && r.period !== registerMonth) return false;
+      if (registerMonth && registerMonth !== 'ALL' && r.period !== registerMonth) return false;
       if (regSearch) {
         const q = regSearch.toLowerCase();
         const haystack = [
@@ -380,11 +411,11 @@ export default function PreventiveMaintenance() {
     return counts;
   }, [monthlyRegister]);
 
-  // Summary table
+  // Summary table — universal, skip filter when All Months
   const summaryRows = useMemo(() => {
     return [...pms]
       .filter((row) => {
-        if (registerMonth && row.period !== registerMonth) return false;
+        if (registerMonth && registerMonth !== 'ALL' && row.period !== registerMonth) return false;
         if (regSection && row.section !== regSection) return false;
         return true;
       })
@@ -547,24 +578,24 @@ export default function PreventiveMaintenance() {
           {/* Left Sidebar — Month Tabs */}
           <div className="col-span-12 lg:col-span-3">
             <div className="max-h-[480px] overflow-y-auto space-y-1 pr-1">
-              {/* All Months tab */}
+              {/* All Months tab — universal, shows all 447 */}
               <button
-                onClick={() => { setRegisterMonth(''); setKpiMonth(''); setRegPage(1); }}
+                onClick={handleSelectAllMonths}
                 className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
-                  !registerMonth
+                  !registerMonth || registerMonth === 'ALL'
                     ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
                     : 'text-slate-400 hover:bg-white/[0.04] border border-transparent'
                 }`}
               >
                 <span className="truncate">All Months</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${!registerMonth || registerMonth === 'ALL' ? 'bg-amber-400/20 text-amber-300' : 'bg-white/[0.06] text-slate-500'}`}>
                   {machinePmRecords.length}
                 </span>
               </button>
               {availableMonths.map((m) => (
                 <button
                   key={m.key}
-                  onClick={() => { setRegisterMonth(m.key); setKpiMonth(m.key); setRegPage(1); }}
+                  onClick={(e) => handleMonthSelect(m.key, e)}
                   className={`w-full text-left px-3 py-2.5 rounded-control text-xs transition-all flex items-center justify-between gap-2 ${
                     registerMonth === m.key
                       ? 'bg-amber-400/15 text-amber-300 border border-amber-400/30 font-semibold'
@@ -615,16 +646,17 @@ export default function PreventiveMaintenance() {
                         <th>PM Date</th>
                         <th>PM Type & Task</th>
                         <th>Status</th>
+                        <th className="w-20 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {regPageRows.map((row) => (
-                        <tr key={`${row.machineId}-${row.period}`} className="cursor-pointer hover:bg-white/[0.03]">
-                          <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—'}</td>
-                          <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—'}</td>
-                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—'}</td>
+                        <tr key={`${row.machineId}-${row.period}-${row.pmCount}`} className="hover:bg-white/[0.03]">
+                          <td className="text-cyan-400 font-mono text-xs whitespace-nowrap">{row.machineCode || '—' }</td>
+                          <td className="text-white font-medium text-xs max-w-[140px] truncate" title={row.machineName}>{row.machineName || '—' }</td>
+                          <td className="text-slate-300 text-xs max-w-[120px] truncate">{row.plantSection || '—' }</td>
                           <td className="text-slate-300 text-xs whitespace-nowrap">{formatDisplayDate(row.latestPmDate) || formatPeriodKey(row.period, true)}</td>
-                          <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—'}</td>
+                          <td className="text-slate-300 text-xs max-w-[160px] truncate" title={row.mainTask}>{row.mainTask || row.mainFailureCause || '—' }</td>
                           <td>
                             <span className={`badge text-[10px] ${
                               row.status === 'COMPLETED'
@@ -633,6 +665,32 @@ export default function PreventiveMaintenance() {
                             }`}>
                               {row.status === 'COMPLETED' ? 'Completed' : 'Pending'}
                             </span>
+                          </td>
+                          <td className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingRegister(row);
+                                }}
+                                className="btn-ghost !p-1.5 text-slate-500 hover:text-cyan-400"
+                                aria-label={`Edit PM for ${row.machineName} ${row.period}`}
+                                title="Edit this machine's PM for this month"
+                              >
+                                <Pencil size={13} />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingRegister(row);
+                                }}
+                                className="btn-ghost !p-1.5 text-slate-500 hover:text-red-400"
+                                aria-label={`Delete PM for ${row.machineName} ${row.period}`}
+                                title="Delete this machine's PM for this month"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -694,7 +752,7 @@ export default function PreventiveMaintenance() {
                     <td className="text-slate-300">{row.doneCount}</td>
                     <td className="text-slate-300">{row.pendingCount}</td>
                     <td className="text-slate-300">{row.compliancePct}%</td>
-                    <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—'}</td>
+                    <td className="text-slate-400 max-w-[120px] truncate">{row.remarks || '—' }</td>
                     <td>
                       <div className="flex items-center justify-end gap-1.5">
                         <button onClick={() => setViewing(row)} className="btn-ghost !p-1.5" aria-label="View"><Eye size={12} /></button>
@@ -744,6 +802,97 @@ export default function PreventiveMaintenance() {
               <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
               <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
                 <Trash2 size={12} aria-hidden="true" /> {purgeLoading ? 'Purging...' : 'Purge All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {editingRegister && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setEditingRegister(null)} role="dialog" aria-modal="true" aria-label="Edit machine PM">
+          <div className="modal-content glass-card p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-card-title">Edit PM — {editingRegister.machineName || editingRegister.machineCode}</h3>
+              <button onClick={() => setEditingRegister(null)} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
+            </div>
+            <p className="text-meta mb-4">{formatPeriodKey(editingRegister.period, true)} • {editingRegister.plantSection} • {editingRegister.pmCount} record(s)</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Status</label>
+                <select
+                  value={editingRegister.status}
+                  onChange={(e) => setEditingRegister((prev) => ({ ...prev, status: e.target.value }))}
+                  className="select-field text-xs w-full"
+                >
+                  <option value="PENDING">Pending</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Task</label>
+                <input
+                  type="text"
+                  value={editingRegister.mainTask || ''}
+                  onChange={(e) => setEditingRegister((prev) => ({ ...prev, mainTask: e.target.value }))}
+                  className="input-field text-xs w-full"
+                  placeholder="Task description"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setEditingRegister(null)} className="btn-ghost text-xs">Cancel</button>
+              <button
+                onClick={() => {
+                  const newStatus = String(editingRegister.status || '').toLowerCase();
+                  const isCompleted = newStatus === 'completed';
+                  const toUpdate = machinePmRecords.filter((r) => r.machineId === editingRegister.machineId && (r.pmDate || '').slice(0, 7) === editingRegister.period);
+                  const list = toUpdate.length ? toUpdate : machinePmRecords.filter((r) => (r.machineCode === editingRegister.machineCode || r.machineName === editingRegister.machineName) && (r.pmDate || '').slice(0, 7) === editingRegister.period);
+                  list.forEach((r) => {
+                    const updatedTask = editingRegister.mainTask || r.task;
+                    deleteMachinePmRecord(r.id, userName);
+                    addMachinePmRecord({
+                      machineId: r.machineId,
+                      machineCode: r.machineCode,
+                      machineName: r.machineName,
+                      plantSection: r.plantSection,
+                      pmDate: r.pmDate,
+                      pmType: r.pmType,
+                      task: updatedTask,
+                      status: isCompleted ? 'completed' : 'pending',
+                      completed: isCompleted,
+                      action: r.action,
+                      technician: r.technician,
+                      remarks: r.remarks,
+                    }, userName);
+                  });
+                  setEditingRegister(null);
+                }}
+                className="btn-primary text-xs"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deletingRegister && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDeletingRegister(null)} role="dialog" aria-modal="true" aria-label="Delete machine PM">
+          <div className="modal-content glass-card p-6 w-full max-w-sm">
+            <h3 className="text-card-title mb-2">Delete PM Records</h3>
+            <p className="text-body mb-5">
+              Delete <span className="text-white font-medium">{deletingRegister.machineName || deletingRegister.machineCode}</span> for <span className="text-white font-medium">{formatPeriodKey(deletingRegister.period, true)}</span> ({deletingRegister.pmCount} record(s))? This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeletingRegister(null)} className="btn-ghost text-xs">Cancel</button>
+              <button
+                onClick={() => {
+                  const toDelete = machinePmRecords.filter((r) => r.machineId === deletingRegister.machineId && (r.pmDate || '').slice(0, 7) === deletingRegister.period);
+                  const list = toDelete.length ? toDelete : machinePmRecords.filter((r) => (r.machineCode === deletingRegister.machineCode || r.machineName === deletingRegister.machineName) && (r.pmDate || '').slice(0, 7) === deletingRegister.period);
+                  list.forEach((r) => deleteMachinePmRecord(r.id, userName));
+                  setDeletingRegister(null);
+                }}
+                className="btn-danger text-xs inline-flex items-center gap-1.5"
+              >
+                <Trash2 size={12} /> Delete
               </button>
             </div>
           </div>

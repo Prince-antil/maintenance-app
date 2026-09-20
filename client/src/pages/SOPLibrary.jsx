@@ -138,7 +138,7 @@ export default function SOPLibrary() {
                           {d.machineName}
                         </button>
                       </td>
-                      <td className="text-slate-400 text-xs">{d.uploadedBy || '—'}</td>
+                      <td className="text-slate-400 text-xs">{d.uploadedBy || '—' }</td>
                       <td className="text-slate-500 text-xs whitespace-nowrap">{timeAgo(d.uploadedAt)}</td>
                       <td className="text-right">
                         <div className="inline-flex items-center gap-1">

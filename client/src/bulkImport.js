@@ -1,9 +1,10 @@
 import * as XLSX from 'xlsx';
+import { processUtilityRow, processSolarRow } from './lib/energyEngine.js';
 
 const CLEAN_RX = /[^a-z0-9]+/g;
 const toKey = (value) => String(value || '').trim().toLowerCase().replace(CLEAN_RX, '');
 
-const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'energyDailyUtility', 'energyMonthlyHerbicide', 'energyMonthlyInsecticide', 'energyMonthlyWater', 'energyMonthlyAirCompressor', 'energyDailySolar', 'machines', 'machinePmRecords'];
+const MODULE_ORDER = ['pm', 'breakdowns', 'machineBreakdownLogs', 'energy', 'energyDailyUtility', 'energyMonthlyHerbicide', 'energyMonthlyInsecticide', 'energyMonthlyWater', 'energyMonthlyAirCompressor', 'energyDailySolar', 'machines', 'machinePmRecords', 'kpi'];
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -52,7 +53,7 @@ export const IMPORT_MODULES = {
   },
   energy: {
     id: 'energy',
-    label: 'Energy Logs',
+    label: 'Energy Logs (Legacy Aggregate)',
     shortLabel: 'Energy',
     templateFilename: 'Energy_Log_Template.xlsx',
     defaultCategory: 'Plantwise Energy Consumption',
@@ -61,8 +62,8 @@ export const IMPORT_MODULES = {
       {
         'Date': new Date().toISOString().slice(0, 10),
         'Plant Section': 'Utility Section',
-        'UHBVNL Unit 1 KWh (Col H)': 4200,
-        'UHBVNL Unit 2 KWh (Col U)': 1850,
+        'UHBVNL Unit 1 KWh': 4200,
+        'UHBVNL Unit 2 KWh': 1850,
         'DG 500kVA Run Hrs': 4.5,
         'DG 380kVA Run Hrs': 2,
         'Fuel Consumed (Ltrs)': 180,
@@ -77,6 +78,7 @@ export const IMPORT_MODULES = {
         'Cartap (kWh)': 270,
         'Compressors (kWh)': 95,
         'Water/STP (kWh)': 65,
+        'Remarks': '(Total KWh & SEC auto-calculated if blank)',
       },
     ],
   },
@@ -277,7 +279,35 @@ export const IMPORT_MODULES = {
         'U2 INV1 KWh': 180,
         'U2 INV2 KWh': 170,
         'U2 INV3 KWh': 160,
+        'Daily Total KWh': '',
+        'Remarks': '(Daily Total auto = sum of 7 inverters if blank; or enter total alone if inverter split unavailable)',
       },
+    ],
+  },
+  kpi: {
+    id: 'kpi',
+    label: 'KPI FY 2026-27 Goal Cascade',
+    shortLabel: 'KPI',
+    templateFilename: 'KPI_FY2026-27_Goal_Cascade_Template.xlsx',
+    defaultCategory: 'Plantwise Breakdown Report',
+    required: ['sn'],
+    sampleRows: [
+      { Sn: 1, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'Asset / Equipment Availability – Plant', UoM: '%', 'KPI Wt %': 12, 'Pillar Wt %': 37, 'Annual Target (Rating 3)': '>=95', 'Rating 4': '>=97', 'Rating 5': '>=99', 'Parent Target': '>=95% (Engg Head)', 'Q1 Apr–Jun': '>=95', 'Q2 Jul–Sep': '>=95', 'Q3 Oct–Dec': '>=95', 'Q4 Jan–Mar': '>=95', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 2, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'PM Schedule Adherence – Plant', UoM: '%', 'KPI Wt %': 10, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=90', 'Rating 4': '>=95', 'Rating 5': '>=98', 'Parent Target': '>=90% (Engg Head)', 'Q1 Apr–Jun': '>=90', 'Q2 Jul–Sep': '>=90', 'Q3 Oct–Dec': '>=90', 'Q4 Jan–Mar': '>=90', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 3, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'Breakdown Frequency Reduction (MTBF improvement)', UoM: '% improve', 'KPI Wt %': 7, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10% (Engg Head)', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 4, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'MTTR – Mean Time to Repair Reduction', UoM: '% improve', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10% (Engg Head)', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 5, 'Focus Pillar': 'Q – Quality', 'KPI / Metric': 'Equipment Calibration Compliance – Plant', UoM: '%', 'KPI Wt %': 7, 'Pillar Wt %': 12, 'Annual Target (Rating 3)': '>=98', 'Rating 4': '>=99', 'Rating 5': '100', 'Parent Target': '>=98% (Engg Head)', 'Q1 Apr–Jun': '>=98', 'Q2 Jul–Sep': '>=98', 'Q3 Oct–Dec': '>=98', 'Q4 Jan–Mar': '>=98', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 6, 'Focus Pillar': 'Q – Quality', 'KPI / Metric': 'Audit/ Regulatory NC – Engineering – Plant', UoM: 'No. NCs', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '<=1', 'Rating 4': '0', 'Rating 5': '0', 'Parent Target': '<=2 consolidated', 'Q1 Apr–Jun': '<=1', 'Q2 Jul–Sep': '<=1', 'Q3 Oct–Dec': '<=1', 'Q4 Jan–Mar': '<=1', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 7, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'Zero LTI – Engineering / Maintenance – Plant', UoM: 'No. LTI', 'KPI Wt %': 8, 'Pillar Wt %': 20, 'Annual Target (Rating 3)': '0', 'Rating 4': '0', 'Rating 5': '0', 'Parent Target': '0 (Engg Head)', 'Q1 Apr–Jun': '0', 'Q2 Jul–Sep': '0', 'Q3 Oct–Dec': '0', 'Q4 Jan–Mar': '0', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 8, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'Near Miss Reporting – Production Team', UoM: 'No./Person/Mo', 'KPI Wt %': 3, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=2', 'Rating 4': '>=2.5', 'Rating 5': '>=3', 'Parent Target': '>=2 (HSE Head)', 'Q1 Apr–Jun': '>=2', 'Q2 Jul–Sep': '>=2', 'Q3 Oct–Dec': '>=2', 'Q4 Jan–Mar': '>=2', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 9, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'LOTO / PTW Compliance – Plant', UoM: '%', 'KPI Wt %': 7, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=98', 'Rating 4': '>=99', 'Rating 5': '100', 'Parent Target': '>=98%', 'Q1 Apr–Jun': '>=98', 'Q2 Jul–Sep': '>=98', 'Q3 Oct–Dec': '>=98', 'Q4 Jan–Mar': '>=98', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 10, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'ETP / STP Efficiency – Plant', UoM: '%', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=80', 'Rating 4': '>=85', 'Rating 5': '>=90', 'Parent Target': '>=80% (Engg Head)', 'Q1 Apr–Jun': '>=80', 'Q2 Jul–Sep': '>=80', 'Q3 Oct–Dec': '>=80', 'Q4 Jan–Mar': '>=80', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 11, 'Focus Pillar': 'C – Cost & OpEx', 'KPI / Metric': 'Energy Cost Reduction – Plant', UoM: '% vs LY', 'KPI Wt %': 10, 'Pillar Wt %': 23, 'Annual Target (Rating 3)': '>=5', 'Rating 4': '>=8', 'Rating 5': '>=10', 'Parent Target': '>=5% (Engg Head)', 'Q1 Apr–Jun': '>=5', 'Q2 Jul–Sep': '>=5', 'Q3 Oct–Dec': '>=5', 'Q4 Jan–Mar': '>=5', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 12, 'Focus Pillar': 'C – Cost & OpEx', 'KPI / Metric': 'Maintenance Cost vs Budget – Plant', UoM: '%', 'KPI Wt %': 8, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '<=100', 'Rating 4': '<=98', 'Rating 5': '<=95', 'Parent Target': '<=100%', 'Q1 Apr–Jun': '<=100', 'Q2 Jul–Sep': '<=100', 'Q3 Oct–Dec': '<=100', 'Q4 Jan–Mar': '<=100', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 13, 'Focus Pillar': 'C – Cost & OpEx', 'KPI / Metric': 'Spare Parts Inventory Optimisation – Plant', UoM: '% reduction', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10%', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 14, 'Focus Pillar': 'D – Delivery / OTIF', 'KPI / Metric': 'Engineering Clearance for Production – On Time', UoM: '% requests', 'KPI Wt %': 5, 'Pillar Wt %': 5, 'Annual Target (Rating 3)': '>=95', 'Rating 4': '>=97', 'Rating 5': '100', 'Parent Target': '>=95%', 'Q1 Apr–Jun': '>=95', 'Q2 Jul–Sep': '>=95', 'Q3 Oct–Dec': '>=95', 'Q4 Jan–Mar': '>=95', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 15, 'Focus Pillar': 'M – Morale & People', 'KPI / Metric': 'Engg Team Training Mandays – Plant', UoM: 'Mandays/Yr', 'KPI Wt %': 2, 'Pillar Wt %': 4, 'Annual Target (Rating 3)': '>=2', 'Rating 4': '>=3', 'Rating 5': '>=4', 'Parent Target': '>=2%', 'Q1 Apr–Jun': '>=2', 'Q2 Jul–Sep': '>=2', 'Q3 Oct–Dec': '>=2', 'Q4 Jan–Mar': '>=2', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 16, 'Focus Pillar': 'M – Morale & People', 'KPI / Metric': '5S – Engineering Areas – Plant', UoM: '%', 'KPI Wt %': 2, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=75', 'Rating 4': '>=85', 'Rating 5': '>=95', 'Parent Target': '>=75%', 'Q1 Apr–Jun': '>=75', 'Q2 Jul–Sep': '>=75', 'Q3 Oct–Dec': '>=75', 'Q4 Jan–Mar': '>=75', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
     ],
   },
 };
@@ -309,9 +339,9 @@ const FIELD_ALIASES = {
   energy: {
     date: ['date', 'logdate', 'readingdate'],
     plantSection: ['plantsection', 'section', 'department'],
-    // Dual UHBVNL grid feeders
-    uhbvnlUnit1Kwh: ['uhbvnlunit1kwh', 'unit1kwh', 'kwhi', 'kwh_i', 'columnh', 'gridunit1', 'uhbvnl1', 'unit1import', 'u1kwh'],
-    uhbvnlUnit2Kwh: ['uhbvnlunit2kwh', 'unit2kwh', 'kwhi10', 'kwh_i10', 'columnu', 'gridunit2', 'uhbvnl2', 'unit2import', 'u2kwh'],
+    // Dual UHBVNL grid feeders — includes legacy Col H/U suffix variants
+    uhbvnlUnit1Kwh: ['uhbvnlunit1kwh', 'uhbvnlunit1kwhcolh', 'uhbvnlunit1', 'unit1kwh', 'kwhi', 'kwh_i', 'columnh', 'gridunit1', 'uhbvnl1', 'unit1import', 'u1kwh', 'u1grid'],
+    uhbvnlUnit2Kwh: ['uhbvnlunit2kwh', 'uhbvnlunit2kwhcolu', 'uhbvnlunit2', 'unit2kwh', 'kwhi10', 'kwh_i10', 'columnu', 'gridunit2', 'uhbvnl2', 'unit2import', 'u2kwh', 'u2grid'],
     totalGridKwh:   ['totalgridkwh', 'gridkwh', 'totalgrid', 'gridtotal', 'totalimport'],
     // DG generators
     dg500RunHours: ['dg500kvarunhrs', 'dg500runhrs', 'dg500hours', 'dg500kvahours', 'dg500runhours'],
@@ -437,14 +467,43 @@ const FIELD_ALIASES = {
   },
   energyDailySolar: {
     date: ['date', 'readingdate', 'logdate'],
-    u1Inv1Kwh: ['u1inv1kwh', 'unit1inv1kwh', 'u1inv1'],
-    u1Inv2Kwh: ['u1inv2kwh', 'unit1inv2kwh', 'u1inv2'],
-    u1Inv3Kwh: ['u1inv3kwh', 'unit1inv3kwh', 'u1inv3'],
-    u1Inv4Kwh: ['u1inv4kwh', 'unit1inv4kwh', 'u1inv4'],
-    u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1'],
-    u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2'],
-    u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3'],
-    dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum'],
+    u1Inv1Kwh: ['u1inv1kwh', 'unit1inv1kwh', 'u1inv1', 'u1 inverter 1', 'inv1', 'inverter1'],
+    u1Inv2Kwh: ['u1inv2kwh', 'unit1inv2kwh', 'u1inv2', 'u1 inverter 2', 'inv2'],
+    u1Inv3Kwh: ['u1inv3kwh', 'unit1inv3kwh', 'u1inv3', 'u1 inverter 3', 'inv3'],
+    u1Inv4Kwh: ['u1inv4kwh', 'unit1inv4kwh', 'u1inv4', 'u1 inverter 4', 'inv4'],
+    u2Inv1Kwh: ['u2inv1kwh', 'unit2inv1kwh', 'u2inv1', 'u2 inverter 1'],
+    u2Inv2Kwh: ['u2inv2kwh', 'unit2inv2kwh', 'u2inv2', 'u2 inverter 2'],
+    u2Inv3Kwh: ['u2inv3kwh', 'unit2inv3kwh', 'u2inv3', 'u2 inverter 3'],
+    dailyTotalKwh: ['dailytotalkwh', 'totalkwh', 'total', 'dailysum', 'daily total kwh', 'grandtotal', 'grand total', 'daily solar', 'solar generation', 'solartotal', 'generationkwh', 'solarkwh'],
+  },
+  kpi: {
+    sn: ['sn', 'sno', 'serialno', 'srno', 'no', 'number'],
+    focusPillar: ['focuspillar', 'pillar', 'focus', 'pillars'],
+    kpiMetric: ['kpimetric', 'kpi', 'metric', 'kpimetric', 'kpi/metric', 'description'],
+    uom: ['uom', 'unit', 'unitofmeasure', 'uom', 'measure'],
+    kpiWt: ['kpiwt', 'kpiwt%', 'kpiweight', 'wt', 'weight', 'kpiwt%'],
+    pillarWt: ['pillarwt', 'pillarwt%', 'pillarweight', 'pillarwt%'],
+    annualTarget: ['annualtarget', 'annualtargetrating3', 'target', 'rating3', 'annualtargetrating3'],
+    rating4: ['rating4', 'rating4', 'targetrating4'],
+    rating5: ['rating5', 'rating5', 'targetrating5'],
+    parentTarget: ['parenttarget', 'parent', 'engheadtarget', 'headtarget'],
+    q1: ['q1', 'q1aprjun', 'q1aprmayjun', 'quarter1'],
+    q2: ['q2', 'q2julsep', 'quarter2'],
+    q3: ['q3', 'q3octdec', 'quarter3'],
+    q4: ['q4', 'q4janmar', 'quarter4'],
+    apr: ['apr', 'april', 'apr2026'],
+    may: ['may'],
+    jun: ['jun', 'june'],
+    jul: ['jul', 'july'],
+    aug: ['aug', 'august'],
+    sep: ['sep', 'september'],
+    oct: ['oct', 'october'],
+    nov: ['nov', 'november'],
+    dec: ['dec', 'december'],
+    jan: ['jan', 'january'],
+    feb: ['feb', 'february'],
+    mar: ['mar', 'march'],
+    ytdAvg: ['ytdavg', 'ytd', 'ytdaverage', 'average', 'ytdavg'],
   },
 };
 
@@ -697,6 +756,8 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const pmDateRaw = parseDateValue(getCell(row, mapping, 'pmDate'));
     const pmDate = pmDateRaw ? pmDateRaw.slice(0, 10) : new Date().toISOString().slice(0, 10);
 
+    const rawStatus = String(getCell(row, mapping, 'status') || '').trim().toLowerCase();
+    const status = rawStatus || 'pending';
     return {
       machineCode: String(getCell(row, mapping, 'machineCode') || '').trim(),
       machineName: mName,
@@ -704,8 +765,8 @@ function parseModuleRow(moduleId, row, mapping, index) {
       pmDate,
       pmType: String(getCell(row, mapping, 'pmType') || 'Preventive').trim() || 'Preventive',
       task: String(getCell(row, mapping, 'task') || '').trim(),
-      status: String(getCell(row, mapping, 'status') || 'completed').trim().toLowerCase() || 'completed',
-      completed: String(getCell(row, mapping, 'completed') || '').toLowerCase() !== 'false',
+      status,
+      completed: status === 'completed' || String(getCell(row, mapping, 'completed') || '').toLowerCase() === 'true',
       actionTaken: String(getCell(row, mapping, 'actionTaken') || '').trim(),
       technician: String(getCell(row, mapping, 'technician') || '').trim(),
       remarks: String(getCell(row, mapping, 'remarks') || '').trim(),
@@ -716,49 +777,38 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
 
-    const u1ImportKwhReading = parseNumber(getCell(row, mapping, 'u1ImportKwhReading'));
-    const u1ImportKvahReading = parseNumber(getCell(row, mapping, 'u1ImportKvahReading'));
-    const u2ImportKwhReading = parseNumber(getCell(row, mapping, 'u2ImportKwhReading'));
-    const u2ImportKvahReading = parseNumber(getCell(row, mapping, 'u2ImportKvahReading'));
-    let u1Pf = parseNumber(getCell(row, mapping, 'u1Pf'));
-    let u2Pf = parseNumber(getCell(row, mapping, 'u2Pf'));
-
-    if ((!u1Pf || u1Pf === 0) && u1ImportKvahReading > 0) {
-      u1Pf = Math.round((u1ImportKwhReading / u1ImportKvahReading) * 100000) / 100000;
-    }
-    if ((!u2Pf || u2Pf === 0) && u2ImportKvahReading > 0) {
-      u2Pf = Math.round((u2ImportKwhReading / u2ImportKvahReading) * 100000) / 100000;
-    }
-
-    return {
+    const rawRow = {
       date,
-      u1ImportKwhReading,
-      u1ImportKvahReading,
-      u1ExportKwhReading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
-      u1ExportKvahReading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
-      u1SolarKwhReading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
-      u1SolarKvahReading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
-      u1Pf,
-      u2ImportKwhReading,
-      u2ImportKvahReading,
-      u2ExportKwhReading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
-      u2ExportKvahReading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
-      u2SolarKwhReading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
-      u2SolarKvahReading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
-      u2Pf,
-      dg380KwhReading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
-      dg380HourmeterReading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
-      dg380HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),
-      dg380HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg380HsdAddedLtr')),
-      dg380DefOpeningPct: parseNumber(getCell(row, mapping, 'dg380DefOpeningPct')),
-      dg380DefAddedPct: parseNumber(getCell(row, mapping, 'dg380DefAddedPct')),
-      dg500KwhReading: parseNumber(getCell(row, mapping, 'dg500KwhReading')),
-      dg500HourmeterReading: parseNumber(getCell(row, mapping, 'dg500HourmeterReading')),
-      dg500HsdOpeningLtr: parseNumber(getCell(row, mapping, 'dg500HsdOpeningLtr')),
-      dg500HsdAddedLtr: parseNumber(getCell(row, mapping, 'dg500HsdAddedLtr')),
-      dg500DefOpeningPct: parseNumber(getCell(row, mapping, 'dg500DefOpeningPct')),
-      dg500DefAddedPct: parseNumber(getCell(row, mapping, 'dg500DefAddedPct')),
+      u1_import_kwh_reading: parseNumber(getCell(row, mapping, 'u1ImportKwhReading')),
+      u1_import_kvah_reading: parseNumber(getCell(row, mapping, 'u1ImportKvahReading')),
+      u2_import_kwh_reading: parseNumber(getCell(row, mapping, 'u2ImportKwhReading')),
+      u2_import_kvah_reading: parseNumber(getCell(row, mapping, 'u2ImportKvahReading')),
+      u1_export_kwh_reading: parseNumber(getCell(row, mapping, 'u1ExportKwhReading')),
+      u1_export_kvah_reading: parseNumber(getCell(row, mapping, 'u1ExportKvahReading')),
+      u1_solar_kwh_reading: parseNumber(getCell(row, mapping, 'u1SolarKwhReading')),
+      u1_solar_kvah_reading: parseNumber(getCell(row, mapping, 'u1SolarKvahReading')),
+      u1_pf: parseNumber(getCell(row, mapping, 'u1Pf')),
+      u2_pf: parseNumber(getCell(row, mapping, 'u2Pf')),
+      u2_export_kwh_reading: parseNumber(getCell(row, mapping, 'u2ExportKwhReading')),
+      u2_export_kvah_reading: parseNumber(getCell(row, mapping, 'u2ExportKvahReading')),
+      u2_solar_kwh_reading: parseNumber(getCell(row, mapping, 'u2SolarKwhReading')),
+      u2_solar_kvah_reading: parseNumber(getCell(row, mapping, 'u2SolarKvahReading')),
+      dg380_kwh_reading: parseNumber(getCell(row, mapping, 'dg380KwhReading')),
+      dg380_hourmeter_reading: parseNumber(getCell(row, mapping, 'dg380HourmeterReading')),
+      dg380_hsd_opening_ltr: parseNumber(getCell(row, mapping, 'dg380HsdOpeningLtr')),
+      dg380_hsd_added_ltr: parseNumber(getCell(row, mapping, 'dg380HsdAddedLtr')),
+      dg380_def_opening_pct: parseNumber(getCell(row, mapping, 'dg380DefOpeningPct')),
+      dg380_def_added_pct: parseNumber(getCell(row, mapping, 'dg380DefAddedPct')),
+      dg500_kwh_reading: parseNumber(getCell(row, mapping, 'dg500KwhReading')),
+      dg500_hourmeter_reading: parseNumber(getCell(row, mapping, 'dg500HourmeterReading')),
+      dg500_hsd_opening_ltr: parseNumber(getCell(row, mapping, 'dg500HsdOpeningLtr')),
+      dg500_hsd_added_ltr: parseNumber(getCell(row, mapping, 'dg500HsdAddedLtr')),
+      dg500_def_opening_pct: parseNumber(getCell(row, mapping, 'dg500DefOpeningPct')),
+      dg500_def_added_pct: parseNumber(getCell(row, mapping, 'dg500DefAddedPct')),
     };
+
+    // Use energy engine to auto-compute PF, totals, etc.
+    return processUtilityRow(rawRow);
   }
 
   if (moduleId === 'energyMonthlyHerbicide') {
@@ -828,16 +878,101 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const date = parseDateValue(getCell(row, mapping, 'date'));
     if (!date) return { error: `Row ${index}: date is required.` };
 
-    return {
+    const rawRow = {
       date,
-      u1Inv1Kwh: parseNumber(getCell(row, mapping, 'u1Inv1Kwh')),
-      u1Inv2Kwh: parseNumber(getCell(row, mapping, 'u1Inv2Kwh')),
-      u1Inv3Kwh: parseNumber(getCell(row, mapping, 'u1Inv3Kwh')),
-      u1Inv4Kwh: parseNumber(getCell(row, mapping, 'u1Inv4Kwh')),
-      u2Inv1Kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
-      u2Inv2Kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
-      u2Inv3Kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
-      dailyTotalKwh: parseNumber(getCell(row, mapping, 'dailyTotalKwh')),
+      u1_inv1_kwh: parseNumber(getCell(row, mapping, 'u1Inv1Kwh')),
+      u1_inv2_kwh: parseNumber(getCell(row, mapping, 'u1Inv2Kwh')),
+      u1_inv3_kwh: parseNumber(getCell(row, mapping, 'u1Inv3Kwh')),
+      u1_inv4_kwh: parseNumber(getCell(row, mapping, 'u1Inv4Kwh')),
+      u2_inv1_kwh: parseNumber(getCell(row, mapping, 'u2Inv1Kwh')),
+      u2_inv2_kwh: parseNumber(getCell(row, mapping, 'u2Inv2Kwh')),
+      u2_inv3_kwh: parseNumber(getCell(row, mapping, 'u2Inv3Kwh')),
+      daily_total_kwh: parseNumber(getCell(row, mapping, 'dailyTotalKwh')),
+    };
+
+    // Use energy engine to auto-compute totals (fixes grand total = 0 bug)
+    return processSolarRow(rawRow);
+  }
+
+  if (moduleId === 'kpi') {
+    const snRaw = String(getCell(row, mapping, 'sn') || '').trim();
+    const sn = parseInt(snRaw, 10);
+    if (!sn || sn < 1 || sn > 16) return { error: `Row ${index}: Sn (1-16) is required and must be valid.` };
+    const focusPillar = String(getCell(row, mapping, 'focusPillar') || '').trim();
+    const kpiMetric = String(getCell(row, mapping, 'kpiMetric') || '').trim();
+    if (!kpiMetric) return { error: `Row ${index}: KPI / Metric is required.` };
+    const uom = String(getCell(row, mapping, 'uom') || '').trim();
+    const kpiWtRaw = getCell(row, mapping, 'kpiWt');
+    const kpiWt = kpiWtRaw !== '' ? String(kpiWtRaw).trim() : '';
+    const pillarWtRaw = getCell(row, mapping, 'pillarWt');
+    const pillarWt = pillarWtRaw !== '' ? String(pillarWtRaw).trim() : '';
+    const annualTarget = String(getCell(row, mapping, 'annualTarget') || '').trim();
+    const rating4 = String(getCell(row, mapping, 'rating4') || '').trim();
+    const rating5 = String(getCell(row, mapping, 'rating5') || '').trim();
+    const parentTarget = String(getCell(row, mapping, 'parentTarget') || '').trim();
+    // Quarterly targets - inherit annual if blank (as per Excel)
+    const q1Raw = String(getCell(row, mapping, 'q1') || '').trim();
+    const q2Raw = String(getCell(row, mapping, 'q2') || '').trim();
+    const q3Raw = String(getCell(row, mapping, 'q3') || '').trim();
+    const q4Raw = String(getCell(row, mapping, 'q4') || '').trim();
+    const q1 = q1Raw !== '' ? q1Raw : annualTarget;
+    const q2 = q2Raw !== '' ? q2Raw : annualTarget;
+    const q3 = q3Raw !== '' ? q3Raw : annualTarget;
+    const q4 = q4Raw !== '' ? q4Raw : annualTarget;
+    // Monthly actuals - blank means no entry, do not convert to 0, ignore "NA"
+    const parseMonth = (key) => {
+      const raw = String(getCell(row, mapping, key) || '').trim();
+      if (raw === '' || raw.toLowerCase() === 'na' || raw.toLowerCase() === 'n/a') return '';
+      return raw;
+    };
+    const apr = parseMonth('apr');
+    const may = parseMonth('may');
+    const jun = parseMonth('jun');
+    const jul = parseMonth('jul');
+    const aug = parseMonth('aug');
+    const sep = parseMonth('sep');
+    const oct = parseMonth('oct');
+    const nov = parseMonth('nov');
+    const dec = parseMonth('dec');
+    const jan = parseMonth('jan');
+    const feb = parseMonth('feb');
+    const mar = parseMonth('mar');
+    // YTD Avg is auto-calculated, ignore imported value
+    const ytdRaw = String(getCell(row, mapping, 'ytdAvg') || '').trim();
+    // Compute YTD as average of available monthly actuals (ignore blank and NA)
+    const monthVals = [apr, may, jun, jul, aug, sep, oct, nov, dec, jan, feb, mar].filter((v)=> v!=='' && v.toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const ytdAvg = monthVals.length ? String(Math.round((monthVals.reduce((a,b)=>a+b,0)/monthVals.length)*10)/10) : '';
+    return {
+      sn,
+      focusPillar,
+      kpiMetric,
+      uom,
+      kpiWt,
+      pillarWt,
+      annualTarget,
+      rating4,
+      rating5,
+      parentTarget,
+      q1, q2, q3, q4,
+      apr, may, jun, jul, aug, sep, oct, nov, dec, jan, feb, mar,
+      ytdAvg: ytdRaw !== '' ? ytdRaw : ytdAvg,
+      // Manual flags for monthly cells where value was explicitly provided (non-blank)
+      isManualQ1: q1Raw !== '',
+      isManualQ2: q2Raw !== '',
+      isManualQ3: q3Raw !== '',
+      isManualQ4: q4Raw !== '',
+      isManualApr: apr !== '',
+      isManualMay: may !== '',
+      isManualJun: jun !== '',
+      isManualJul: jul !== '',
+      isManualAug: aug !== '',
+      isManualSep: sep !== '',
+      isManualOct: oct !== '',
+      isManualNov: nov !== '',
+      isManualDec: dec !== '',
+      isManualJan: jan !== '',
+      isManualFeb: feb !== '',
+      isManualMar: mar !== '',
     };
   }
 
@@ -937,24 +1072,40 @@ export function inferUploadMeta(moduleId, parsedRows) {
 /**
  * Canonical sheet name aliases for each module in a master workbook.
  * Matching is case-insensitive and strips non-alphanumeric chars.
+ * Each key maps to all known sheet/tab label variants for that module.
  */
 const MASTER_SHEET_ALIASES = {
-  pm: ['pmdata', 'preventivemaintenance', 'pm', 'pmreport', 'pmsummary', 'preventive'],
-  breakdowns: ['breakdowndata', 'breakdowns', 'breakdownreport', 'breakdownsummary', 'breakdown'],
-  energy: ['energydata', 'energylogs', 'energy', 'energyreport', 'energylog'],
+  pm: ['pmdata', 'preventivemaintenance', 'pm', 'pmreport', 'pmsummary', 'preventive', 'pmlogs', 'pmmaster'],
+  breakdowns: ['breakdowndata', 'breakdowns', 'breakdownreport', 'breakdownsummary', 'breakdown', 'bdlogs', 'breakdownlogs'],
+  machineBreakdownLogs: ['machinebreakdownlogs', 'breakdownlogs', 'bdlogs', 'machinebd', 'permachinebreakdown', 'machinebreakdown'],
+  machines: ['machines', 'machinesdata', 'equipment', 'equipmentmaster', 'machineregister', 'assetregister', 'machinemaster'],
+  machinePmRecords: ['machinepmrecords', 'pmrecords', 'permachinepm', 'machinepm', 'pmregister', 'machinewise'],
+  energy: ['energydata', 'energylogs', 'energy', 'energyreport', 'energylog', 'plantenergy', 'energylegacy'],
+  energyDailyUtility: ['dailyutility', 'dailyutilitylog', 'utilitydata', 'utilitylog', 'dailyutilityreadings', 'utility', 'dailyutilitydata'],
+  energyMonthlyHerbicide: ['herbicide', 'monthlyherbicide', 'herbicidedata', 'herbicidesection', 'herbi'],
+  energyMonthlyInsecticide: ['insecticide', 'monthlyinsecticide', 'insecticidedata', 'insecticidesection', 'insec'],
+  energyMonthlyWater: ['water', 'monthlywater', 'waterdata', 'waterstp', 'stp', 'waterstpsheet'],
+  energyMonthlyAirCompressor: ['aircompressor', 'monthlyaircompressor', 'aircompressordata', 'compressor', 'aircompsheet', 'air'],
+  energyDailySolar: ['dailysolar', 'dailysolargeneration', 'solardata', 'solargeneration', 'solarinverter', 'solarlog', 'solar'],
+  kpi: ['kpi', 'kpistatus', 'kpidata', 'kpis', 'kpisummary', 'kpi_status', 'maintenancekpi'],
 };
 
 /**
  * Detect which module a sheet name maps to.
+ * Tolerant: exact alias match OR header substring match (covers "PM_Data", "Energy - Daily Utility" etc.)
  * @param {string} sheetName
- * @returns {'pm'|'breakdowns'|'energy'|null}
+ * @returns {string|null}
  */
 function detectSheetModule(sheetName) {
   const key = toKey(sheetName);
   for (const [moduleId, aliases] of Object.entries(MASTER_SHEET_ALIASES)) {
     if (aliases.includes(key)) return moduleId;
+    // Fuzzy: if sheet key contains alias or alias contains key (min 3 chars)
+    if (key.length >= 3 && aliases.some(a => key.includes(a) || a.includes(key))) return moduleId;
   }
-  return null;
+  // Final fallback: try to match IMPORT_MODULES shortLabel/id directly
+  const direct = MODULE_ORDER.find(m => toKey(m) === key || toKey(IMPORT_MODULES[m]?.shortLabel || '') === key);
+  return direct || null;
 }
 
 /**
@@ -995,46 +1146,24 @@ function parseSheet(workbook, sheetName, moduleId) {
 
 /**
  * Parse a master multi-sheet workbook.
- *
- * Accepts a .xlsx file whose sheets are named (case-insensitive):
- *   - PM_Data / Preventive Maintenance / PM
- *   - Breakdown_Data / Breakdowns
- *   - Energy_Data / Energy Logs / Energy
- *
- * Returns a result object per module plus aggregate totals.
- *
- * @param {File} file
- * @returns {Promise<MasterImportResult>}
- *
- * @typedef {{ parsedRows: object[], errors: string[], counts: object }} SheetResult
- * @typedef {{ pm: SheetResult, breakdowns: SheetResult, energy: SheetResult, sheetMap: object, totalValid: number, totalErrors: string[], hasData: boolean }} MasterImportResult
+ * Supports all 12 modules — each sheet is auto-detected via MASTER_SHEET_ALIASES.
+ * Returns a result object per detected module plus aggregate totals.
  */
 export async function parseMasterImportFile(file) {
   const workbook = await readWorkbook(file);
   const sheetNames = workbook.SheetNames;
-
-  // Map each sheet name to a module
-  const sheetMap = {}; // moduleId -> sheetName
+  const sheetMap = {};
   sheetNames.forEach((name) => {
     const moduleId = detectSheetModule(name);
-    if (moduleId && !sheetMap[moduleId]) {
-      sheetMap[moduleId] = name;
-    }
+    if (moduleId && !sheetMap[moduleId]) sheetMap[moduleId] = name;
   });
-
   const results = {};
   const totalErrors = [];
   let totalValid = 0;
-
-  for (const moduleId of ['pm', 'breakdowns', 'energy']) {
+  for (const moduleId of MODULE_ORDER) {
     const sheetName = sheetMap[moduleId];
     if (!sheetName) {
-      results[moduleId] = {
-        parsedRows: [],
-        errors: [],
-        counts: { total: 0, valid: 0, invalid: 0 },
-        sheetName: null,
-      };
+      results[moduleId] = { parsedRows: [], errors: [], counts: { total: 0, valid: 0, invalid: 0 }, sheetName: null };
       continue;
     }
     const result = parseSheet(workbook, sheetName, moduleId);
@@ -1042,74 +1171,56 @@ export async function parseMasterImportFile(file) {
     totalErrors.push(...result.errors);
     totalValid += result.counts.valid;
   }
-
-  return {
-    pm: results.pm,
-    breakdowns: results.breakdowns,
-    energy: results.energy,
-    sheetMap,
-    sheetNames,
-    totalValid,
-    totalErrors,
-    hasData: totalValid > 0,
-  };
+  // Provide legacy aliases for backward-compat consumers (pm/breakdowns/energy)
+  return { ...results, sheetMap, sheetNames, totalValid, totalErrors, hasData: totalValid > 0 };
 }
 
 /**
- * Generate and download a master template workbook with all three sheets pre-populated.
+ * Generate and download a master template workbook with ALL sheets pre-populated.
+ * Uses canonical IMPORT_MODULES sampleRows so templates stay in sync with import logic.
+ * Sheet names are human-readable and auto-detected on import via aliases.
  */
 export function downloadMasterTemplate() {
   const workbook = XLSX.utils.book_new();
-
-  const pmSample = [
-    {
-      'Reporting Period': new Date().toISOString().slice(0, 7),
-      'Plant Section': 'Herbi EC Packaging',
-      'Planned PM Count': 24,
-      'Done PM Count': 21,
-      'Pending PM Count': 3,
-      'Compliance %': 87.5,
-      Remarks: '',
-    },
+  const sheetNameMap = {
+    pm: 'PM_Monthly_Summary',
+    breakdowns: 'Breakdown_Monthly_Summary',
+    machineBreakdownLogs: 'Machine_Breakdown_Logs',
+    machines: 'Machine_Register',
+    machinePmRecords: 'Machine_PM_Records',
+    energy: 'Energy_Log_Legacy',
+    energyDailyUtility: 'Energy_Daily_Utility',
+    energyMonthlyHerbicide: 'Energy_Herbicide',
+    energyMonthlyInsecticide: 'Energy_Insecticide',
+    energyMonthlyWater: 'Energy_Water_STP',
+    energyMonthlyAirCompressor: 'Energy_Air_Compressor',
+    energyDailySolar: 'Energy_Daily_Solar',
+    kpi: 'KPI_Status',
+  };
+  MODULE_ORDER.forEach((moduleId) => {
+    const def = IMPORT_MODULES[moduleId];
+    if (!def) return;
+    const sheetName = sheetNameMap[moduleId] || def.shortLabel;
+    const safeName = sheetName.slice(0, 31);
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(def.sampleRows), safeName);
+  });
+  // Add a README sheet explaining every template
+  const readme = [
+    { Sheet: 'PM_Monthly_Summary', Purpose: 'Monthly PM compliance per Plant Section', Required: 'Plant Section, Reporting Period, Planned PM Count', Notes: 'Compliance% & duration auto-calculated' },
+    { Sheet: 'Breakdown_Monthly_Summary', Purpose: 'Monthly breakdown stats per Section', Required: 'Plant Section, Reporting Period, Breakdown Count', Notes: 'MTTR/MTBF auto if blank' },
+    { Sheet: 'Machine_Breakdown_Logs', Purpose: 'Per-machine breakdown incidents', Required: 'Machine Name + Start Time', Notes: 'Downtime auto from Start/End' },
+    { Sheet: 'Machine_Register', Purpose: 'Machine asset master', Required: 'Machine Name', Notes: 'Machine Code auto if blank' },
+    { Sheet: 'Machine_PM_Records', Purpose: 'Per-machine PM history', Required: 'Machine Name', Notes: 'Status defaults to pending' },
+    { Sheet: 'Energy_Log_Legacy', Purpose: 'Legacy aggregate energy (dual grid+DG+SEC)', Required: 'Date', Notes: 'Total KWh/SEC auto if blank' },
+    { Sheet: 'Energy_Daily_Utility', Purpose: 'Daily grid/DG/HSD/DEF + PF readings', Required: 'Date', Notes: 'PF auto if kVAh missing' },
+    { Sheet: 'Energy_Herbicide', Purpose: 'Monthly Herbicide sub-meters (5 meters)', Required: 'Month (YYYY-MM)', Notes: 'Delta calculated vs prior month' },
+    { Sheet: 'Energy_Insecticide', Purpose: 'Monthly Insecticide (12 feeders)', Required: 'Month (YYYY-MM)', Notes: 'Delta vs prior month' },
+    { Sheet: 'Energy_Water_STP', Purpose: 'Monthly Water/STP/RO/PIAU (4 meters)', Required: 'Month (YYYY-MM)', Notes: 'Delta vs prior month' },
+    { Sheet: 'Energy_Air_Compressor', Purpose: 'Monthly Air Compressor run/load hrs', Required: 'Month (YYYY-MM)', Notes: 'Unload & Load% auto' },
+    { Sheet: 'Energy_Daily_Solar', Purpose: 'Daily solar inverter generation (7 inverters)', Required: 'Date', Notes: 'Daily Total = sum of 7 if blank; or enter total alone' },
+    { Sheet: 'KPI_Status', Purpose: 'Monthly KPI per Section/Machine (11 cols)', Required: 'Month, Plant/Section', Notes: 'KPI Status auto from thresholds if blank; values auto from PM/Breakdown if blank' },
+    { Sheet: 'README', Purpose: 'This index', Required: '-', Notes: 'Keep headers exactly as in row 1 — aliases handle variants' },
   ];
-  const bdSample = [
-    {
-      'Reporting Period': new Date().toISOString().slice(0, 7),
-      'Plant Section': 'EC INSEC Packaging',
-      'Breakdown Count': 8,
-      'Downtime Hours': 26.5,
-      'Operating Hours': 35280,
-      'MTTR': '',
-      'MTBF': '',
-      'Remarks': '(MTTR and MTBF are auto-calculated if left blank)',
-    },
-  ];
-  const energySample = [
-    {
-      'Date': new Date().toISOString().slice(0, 10),
-      'Plant Section': 'Utility Section',
-      'UHBVNL Unit 1 KWh (Col H)': 4200,
-      'UHBVNL Unit 2 KWh (Col U)': 1850,
-      'DG 500kVA Run Hrs': 4.5,
-      'DG 380kVA Run Hrs': 2,
-      'Fuel Consumed (Ltrs)': 180,
-      'Solar Generation (kWh)': 620,
-      'DG KWh': 0,
-      'Total KWh': '',
-      'Production MT': 120,
-      'Plant SEC (kWh/MT)': '',
-      'Glyphosate (kWh)': 310,
-      'ACM (kWh)': 820,
-      'Jet-mill (kWh)': 540,
-      'Cartap (kWh)': 270,
-      'Compressors (kWh)': 95,
-      'Water/STP (kWh)': 65,
-      'Remarks': '(Total KWh & SEC auto-calculated if blank)',
-    },
-  ];
-
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(pmSample), 'PM_Data');
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(bdSample), 'Breakdown_Data');
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(energySample), 'Energy_Data');
-  XLSX.writeFile(workbook, 'Master_Import_Template.xlsx');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(readme), 'README');
+  XLSX.writeFile(workbook, 'CCPL_Master_Import_Template.xlsx');
 }
