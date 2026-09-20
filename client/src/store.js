@@ -85,10 +85,49 @@ const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'mach
 
 const NATHUPUR_PLANT_ID = '00000000-0000-0000-0000-000000000001';
 const PLANT_LS_KEY = 'ccpl_current_plant_id';
+
+// ── Schema error detection (prevents infinite retry storm) ─────────────────
+function isSchemaConfigError(message) {
+  if (!message) return false;
+  const m = String(message).toLowerCase();
+  return (
+    m.includes('could not find the table') ||
+    m.includes('schema cache') ||
+    m.includes('does not exist') ||
+    m.includes('perhaps you meant to reference') ||
+    (m.includes('column') && m.includes('plant_id')) ||
+    (m.includes('column') && m.includes('plant_sec'))
+  );
+}
+const schemaErrorOnce = new Set();
+const plantFilterDisabled = new Set();
+let schemaConfigNotified = false;
+function logSchemaErrorOnce(key, message) {
+  if (schemaErrorOnce.has(key)) return;
+  schemaErrorOnce.add(key);
+  console.error(`[Schema] Configuration error [${key}]: ${message}`);
+  console.error('[Schema] Run the multi-plant migration: supabase/migrations/20260920_multi_plant_cmms.sql (or latest). Until migrated, queries will fall back to unfiltered mode.');
+}
+
 function getCurrentPlantId() {
   try {
     const v = localStorage.getItem(PLANT_LS_KEY);
-    if (v) return JSON.parse(v);
+    if (v) {
+      const parsed = JSON.parse(v);
+      if (parsed) return parsed;
+    }
+    // Prefer first active plant from cache when no explicit selection (avoids hard-coded fake ID when real plants exist)
+    try {
+      const cached = localStorage.getItem('ccpl_plants_cache');
+      if (cached) {
+        const plants = JSON.parse(cached);
+        if (Array.isArray(plants) && plants.length) {
+          const active = plants.find((p) => p.active !== false);
+          if (active?.id) return active.id;
+          if (plants[0]?.id) return plants[0].id;
+        }
+      }
+    } catch {}
     return NATHUPUR_PLANT_ID;
   } catch { return NATHUPUR_PLANT_ID; }
 }
@@ -2036,6 +2075,11 @@ async function pushCloudOp(op) {
   if (op.action === 'delete') {
     const { error } = await supabase.from(config.table).delete().eq('id', op.recordId);
     if (error) {
+      if (isSchemaConfigError(error.message)) {
+        logSchemaErrorOnce(`delete:${config.table}`, error.message);
+        // Do not throw for schema errors — drop the op to prevent infinite retry
+        return;
+      }
       rtLog('error', `DELETE failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '');
       throw error;
     }
@@ -2043,11 +2087,33 @@ async function pushCloudOp(op) {
     return;
   }
 
-  const row = config.toRow(op.payload);
-  const { error } = await supabase
+  let row = config.toRow(op.payload);
+  let { error } = await supabase
     .from(config.table)
     .upsert(row, { onConflict: 'id' });
+  // If plant_id column missing, retry without plant_id (pre-migration fallback) and disable future plant_id sends for this entity
+  if (error && isSchemaConfigError(error.message) && String(error.message).toLowerCase().includes('plant_id')) {
+    logSchemaErrorOnce(`upsert:${config.table}:plant_id`, error.message);
+    plantFilterDisabled.add(op.entity);
+    const retryRow = { ...row };
+    delete retryRow.plant_id;
+    const retry = await supabase.from(config.table).upsert(retryRow, { onConflict: 'id' });
+    if (!retry.error) {
+      rtLog('warn', `UPSERT fallback without plant_id succeeded for ${config.table} id=${op.recordId}`);
+      return;
+    }
+    error = retry.error;
+  }
   if (error) {
+    if (isSchemaConfigError(error.message)) {
+      logSchemaErrorOnce(`upsert:${config.table}`, error.message);
+      // Schema errors should not block queue indefinitely — log once and drop
+      if (op.entity === 'testingCertificates' || op.entity === 'kpiRecords' || op.entity === 'kpiSettings' || op.entity === 'kpiFySheet') return;
+      // For plant_id related, we already retried; if still failing, drop to avoid storm
+      if (String(error.message).toLowerCase().includes('plant_id') || String(error.message).toLowerCase().includes('does not exist') || String(error.message).toLowerCase().includes('could not find')) {
+        return;
+      }
+    }
     rtLog('error', `UPSERT failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '', 'row keys:', Object.keys(row).join(', '));
     throw error;
   }
@@ -2091,38 +2157,74 @@ async function fetchCloudEntity(entity) {
     rtLog('warn', `FETCH: no config for entity ${entity}`);
     return [];
   }
-  let query = supabase
-    .from(config.table)
-    .select('*');
 
-  // Plant-scoped fetch for performance: only fetch current plant unless corporate
-  try {
-    const pid = getCurrentPlantId();
-    let isCorporateFetch = false;
-    try {
-      const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
-      const u = raw ? JSON.parse(raw) : null;
-      const role = (u && u.role) ? String(u.role).toLowerCase() : '';
-      isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
-    } catch {}
-    // Only apply plant filter for operational entities that have plant_id and user is not corporate
-    // Do not filter plants table itself or audit_log
-    const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
-    if (!isCorporateFetch && pid && plantScopedEntities.has(entity)) {
-      query = query.eq('plant_id', pid);
+  // Helper to build and execute query with optional plant filter
+  async function execQuery(withPlantFilter) {
+    let query = supabase.from(config.table).select('*');
+    if (withPlantFilter) {
+      try {
+        const pid = getCurrentPlantId();
+        let isCorporateFetch = false;
+        try {
+          const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
+          const u = raw ? JSON.parse(raw) : null;
+          const role = (u && u.role) ? String(u.role).toLowerCase() : '';
+          isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
+        } catch {}
+        const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
+        if (!isCorporateFetch && pid && plantScopedEntities.has(entity) && !plantFilterDisabled.has(entity)) {
+          query = query.eq('plant_id', pid);
+        }
+      } catch {}
     }
-  } catch {}
+    (config.orderBy || []).forEach(({ column, ascending }) => {
+      query = query.order(column, { ascending });
+    });
+    return query;
+  }
 
-  (config.orderBy || []).forEach(({ column, ascending }) => {
-    query = query.order(column, { ascending });
-  });
+  // First attempt: with plant filter if applicable
+  let query = await execQuery(true);
+  let { data, error } = await query;
 
-  const { data, error } = await query;
+  // If plant_id column missing, retry without filter exactly once and disable filter for this entity
+  if (error && isSchemaConfigError(error.message) && String(error.message).toLowerCase().includes('plant_id')) {
+    const key = `${entity}:plant_id-missing`;
+    logSchemaErrorOnce(key, error.message);
+    plantFilterDisabled.add(entity);
+    // Retry without plant_id filter
+    query = await execQuery(false);
+    const retry = await query;
+    data = retry.data;
+    error = retry.error;
+    if (!error) {
+      rtLog('warn', `FETCH fallback without plant_id succeeded for ${config.table} — migration required for plant isolation`);
+    }
+  }
+
+  // Handle missing table / column errors as configuration errors, not transient
   if (error) {
-    // For optional tables (testingCertificates, kpiRecords, kpiSettings, kpiFySheet) return empty rather than crashing sync (table may not exist yet before migration)
+    const isConfigErr = isSchemaConfigError(error.message);
+    // For optional tables return empty rather than crashing sync
     if (entity === 'testingCertificates' || entity === 'kpiRecords' || entity === 'kpiSettings' || entity === 'kpiFySheet') {
+      if (isConfigErr) {
+        logSchemaErrorOnce(entity, error.message);
+        return [];
+      }
       rtLog('warn', `FETCH failed on ${config.table} (optional, returning empty):`, error.message);
       return [];
+    }
+    if (isConfigErr) {
+      logSchemaErrorOnce(entity, error.message);
+      // For plant_id missing on non-optional tables, we already retried; if still failing, return empty to prevent storm
+      if (String(error.message).toLowerCase().includes('plant_id') || String(error.message).toLowerCase().includes('plant_sec')) {
+        rtLog('warn', `FETCH returning empty for ${config.table} due to schema error — run migration`);
+        return [];
+      }
+      // Missing table 'plants' or others — return empty and let PlantContext handle UI
+      if (String(error.message).toLowerCase().includes('plants')) {
+        return [];
+      }
     }
     rtLog('error', `FETCH failed on ${config.table}:`, error.message, error.details || '', error.hint || '');
     throw error;
@@ -2139,14 +2241,26 @@ async function refreshCloudEntity(entity, notify = true) {
 
 function scheduleRemoteRefresh(entity) {
   if (!SYNCED_ENTITIES.includes(entity)) return;
+  // If this entity has known schema error, don't spam refresh
+  if (plantFilterDisabled.has(entity) && schemaErrorOnce.has(entity)) {
+    // Already logged fallback, only refresh when explicitly requested; skip auto-retry storm
+  }
   clearTimeout(refreshTimers[entity]);
   refreshTimers[entity] = setTimeout(() => {
     refreshCloudEntity(entity)
       .then(() => updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }))
-      .catch((error) => updateSyncState({
-        phase: isBrowserOnline() ? 'degraded' : 'offline',
-        lastError: error.message || 'Realtime refresh failed',
-      }));
+      .catch((error) => {
+        if (isSchemaConfigError(error.message)) {
+          logSchemaErrorOnce(`refresh:${entity}`, error.message);
+          // Don't set degraded repeatedly — keep quiet after first config error
+          updateSyncState({ phase: 'degraded', lastError: `Schema: ${entity} — migration required` }, false);
+          return;
+        }
+        updateSyncState({
+          phase: isBrowserOnline() ? 'degraded' : 'offline',
+          lastError: error.message || 'Realtime refresh failed',
+        });
+      });
   }, 250);
 }
 
@@ -2352,13 +2466,23 @@ function startRealtimeSubscriptions() {
       realtimeReconnectAttempts = 0; // reset back-off counter on clean connect
       updateSyncState({ phase: 'synced', lastError: '' });
     } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+      const errMsg = err?.message || err || '';
+      // If error is schema-related, don't trigger infinite refresh storm
+      if (isSchemaConfigError(errMsg)) {
+        logSchemaErrorOnce('realtime-channel', String(errMsg));
+        updateSyncState({ phase: 'degraded', lastError: `Realtime schema error — migration required` }, false);
+        return;
+      }
       // Channel lost — do a full refresh so we don't drift, then reconnect
       updateSyncState({
         phase: isBrowserOnline() ? 'degraded' : 'offline',
         lastError: `Realtime: ${status}${err ? ' – ' + (err.message || err) : ''}`,
       });
 
-      SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
+      // Only refresh entities that are not already known to be schema-broken
+      SYNCED_ENTITIES.forEach((entity) => {
+        if (!schemaErrorOnce.has(entity) && !plantFilterDisabled.has(entity)) scheduleRemoteRefresh(entity);
+      });
 
       // Exponential back-off: 2s, 4s, 8s … capped at 60s, plus ±500 ms jitter
       realtimeReconnectAttempts += 1;
@@ -2383,7 +2507,9 @@ function startOnlineListener() {
   window.addEventListener('online', () => {
     updateSyncState({ phase: 'syncing', lastError: '' });
     scheduleCloudFlush();
-    SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
+    SYNCED_ENTITIES.forEach((entity) => {
+      if (!schemaErrorOnce.has(entity) && !plantFilterDisabled.has(entity)) scheduleRemoteRefresh(entity);
+    });
     // Re-establish Realtime channel after coming back online
     if (!cloudSubscriptions) startRealtimeSubscriptions();
   });
@@ -2393,12 +2519,16 @@ function startOnlineListener() {
   });
 
   // Re-subscribe when app returns from background (critical for mobile)
+  let visibilityDebounce = null;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && isBrowserOnline() && isSupabaseConfigured) {
-      // Refresh all entities to catch up on missed events
-      SYNCED_ENTITIES.forEach((entity) => scheduleRemoteRefresh(entity));
-      // Re-subscribe if the channel was lost while in background
-      if (!cloudSubscriptions) startRealtimeSubscriptions();
+      clearTimeout(visibilityDebounce);
+      visibilityDebounce = setTimeout(() => {
+        SYNCED_ENTITIES.forEach((entity) => {
+          if (!schemaErrorOnce.has(entity) && !plantFilterDisabled.has(entity)) scheduleRemoteRefresh(entity);
+        });
+        if (!cloudSubscriptions) startRealtimeSubscriptions();
+      }, 1000);
     }
   });
 }
@@ -2424,26 +2554,43 @@ async function initializeCloudSync() {
   try {
     await flushPendingCloudOps();
 
-    const [remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet] = await Promise.all([
-      fetchCloudEntity('machines'),
-      fetchCloudEntity('breakdowns'),
-      fetchCloudEntity('pms'),
-      fetchCloudEntity('energy'),
-      fetchCloudEntity('amc'),
-      fetchCloudEntity('machineBreakdownLogs'),
-      fetchCloudEntity('machinePmRecords'),
-      fetchCloudEntity('plantSections'),
-      fetchCloudEntity('dailyUtilityLog'),
-      fetchCloudEntity('monthlyHerbicide'),
-      fetchCloudEntity('monthlyInsecticide'),
-      fetchCloudEntity('monthlyWater'),
-      fetchCloudEntity('monthlyAirCompressor'),
-      fetchCloudEntity('dailySolarGeneration'),
-      fetchCloudEntity('energySettings'),
-      fetchCloudEntity('testingCertificates'),
-      fetchCloudEntity('kpiRecords'),
-      fetchCloudEntity('kpiSettings'),
-      fetchCloudEntity('kpiFySheet'),
+    // Fetch each entity individually — per-entity errors (schema/config) must not abort the whole sync.
+    // Using allSettled-style handling ensures one missing column/table doesn't block others.
+    async function safeFetch(entity) {
+      try {
+        return await fetchCloudEntity(entity);
+      } catch (e) {
+        if (isSchemaConfigError(e.message)) {
+          logSchemaErrorOnce(`init:${entity}`, e.message);
+          return [];
+        }
+        rtLog('error', `Init fetch failed for ${entity}:`, e.message);
+        return [];
+      }
+    }
+
+    const [
+      remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet
+    ] = await Promise.all([
+      safeFetch('machines'),
+      safeFetch('breakdowns'),
+      safeFetch('pms'),
+      safeFetch('energy'),
+      safeFetch('amc'),
+      safeFetch('machineBreakdownLogs'),
+      safeFetch('machinePmRecords'),
+      safeFetch('plantSections'),
+      safeFetch('dailyUtilityLog'),
+      safeFetch('monthlyHerbicide'),
+      safeFetch('monthlyInsecticide'),
+      safeFetch('monthlyWater'),
+      safeFetch('monthlyAirCompressor'),
+      safeFetch('dailySolarGeneration'),
+      safeFetch('energySettings'),
+      safeFetch('testingCertificates'),
+      safeFetch('kpiRecords'),
+      safeFetch('kpiSettings'),
+      safeFetch('kpiFySheet'),
     ]);
 
     const remoteSnapshots = {
@@ -2552,17 +2699,29 @@ async function initializeCloudSync() {
 
     if (loadPendingCloudOps().length) {
       await flushPendingCloudOps();
-      await Promise.all(SYNCED_ENTITIES.map((entity) => refreshCloudEntity(entity, false)));
+      // Refresh only non-broken entities after pending flush
+      await Promise.all(SYNCED_ENTITIES.filter((e) => !schemaErrorOnce.has(e) && !plantFilterDisabled.has(e)).map((entity) => refreshCloudEntity(entity, false).catch(()=>[])));
       notifyStoreUpdate();
     }
 
-    updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '', pending: loadPendingCloudOps().length });
+    // Determine final phase — if any schema errors, surface as degraded with clear message
+    const hasSchemaErrors = schemaErrorOnce.size > 0 || plantFilterDisabled.size > 0;
+    if (hasSchemaErrors && !schemaConfigNotified) {
+      schemaConfigNotified = true;
+      console.warn('[Store] Some tables missing plant_id or plants table — operating in compatibility mode. Run migration for full isolation.');
+    }
+    updateSyncState({ phase: hasSchemaErrors ? 'degraded' : 'synced', lastSyncedAt: now(), lastError: hasSchemaErrors ? 'Schema migration required for full plant isolation — fallback active' : '', pending: loadPendingCloudOps().length });
   } catch (error) {
-    updateSyncState({
-      phase: isBrowserOnline() ? 'degraded' : 'offline',
-      lastError: error.message || 'Failed to initialize cloud sync',
-      pending: loadPendingCloudOps().length,
-    });
+    if (isSchemaConfigError(error.message)) {
+      logSchemaErrorOnce('init', error.message);
+      updateSyncState({ phase: 'degraded', lastError: `Schema configuration error: ${error.message}`, pending: loadPendingCloudOps().length });
+    } else {
+      updateSyncState({
+        phase: isBrowserOnline() ? 'degraded' : 'offline',
+        lastError: error.message || 'Failed to initialize cloud sync',
+        pending: loadPendingCloudOps().length,
+      });
+    }
   }
 }
 

@@ -26,6 +26,9 @@ const Reports = lazy(() => import('./pages/Reports.jsx'));
 const Settings = lazy(() => import('./pages/Settings.jsx'));
 const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
 const KPIStatus = lazy(() => import('./pages/KPIStatus.jsx'));
+const CorporateDashboard = lazy(() => import('./pages/CorporateDashboard.jsx'));
+const PlantManagement = lazy(() => import('./pages/PlantManagement.jsx'));
+const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
 
 const LOGIN_MODAL_KEY = 'ccpl_show_login_modal';
 

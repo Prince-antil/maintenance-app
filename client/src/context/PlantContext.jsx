@@ -36,10 +36,20 @@ export function PlantProvider({ children }) {
   const [plants, setPlants] = useState(() => plantsFromCache());
   const [currentPlantId, setCurrentPlantId] = useState(() => currentIdFromCache(plantsFromCache()));
   const [loading, setLoading] = useState(false);
+  const [configError, setConfigError] = useState(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  function isPlantsSchemaError(msg) {
+    if (!msg) return false;
+    const m = String(msg).toLowerCase();
+    return m.includes('could not find the table') || m.includes('schema cache') || m.includes('does not exist') || m.includes('plants');
+  }
 
   // Fetch plants from Supabase when configured
   const fetchPlants = useCallback(async () => {
     if (!isSupabaseConfigured || !supabase) return;
+    // If we already detected a schema/config error, don't spam retries — only retry manually or on user change
+    if (configError && retryCount > 2) return;
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -51,29 +61,49 @@ export function PlantProvider({ children }) {
       if (Array.isArray(data) && data.length) {
         setPlants(data);
         saveLS(PLANTS_LS_KEY, data);
-        // If current selection is no longer valid, reset to first
-        const ids = new Set(data.map((p) => p.id));
-        if (!ids.has(currentPlantId)) {
-          const fallback = data[0].id;
-          setCurrentPlantId(fallback);
-          saveLS(PLANT_LS_KEY, fallback);
-        }
+        setConfigError(null);
+        setRetryCount(0);
+        // If current selection is no longer valid, reset to first (use functional update to avoid stale closure)
+        setCurrentPlantId((prev) => {
+          const ids = new Set(data.map((p) => p.id));
+          if (!ids.has(prev)) {
+            const fallback = data[0].id;
+            saveLS(PLANT_LS_KEY, fallback);
+            return fallback;
+          }
+          return prev;
+        });
+      } else if (Array.isArray(data) && data.length === 0) {
+        // Plants table exists but empty — configuration error
+        setConfigError('No plants found. Run the multi-plant migration and ensure Nathupur plant exists.');
+        console.error('[PlantContext] No plants returned — check migration: plants table is empty');
       }
     } catch (e) {
-      console.warn('[PlantContext] fetch failed, using cache:', e?.message);
+      const msg = e?.message || String(e);
+      if (isPlantsSchemaError(msg)) {
+        setConfigError(`Plants table not found: ${msg}. Run migration supabase/migrations/20260920_multi_plant_cmms.sql`);
+        console.error('[PlantContext] Schema configuration error — plants table missing:', msg);
+        console.error('[PlantContext] Using local fallback plants until migration is applied. Plant isolation will be limited.');
+        setRetryCount((c) => c + 1);
+      } else {
+        // Transient error — warn but don't set configError (will retry)
+        console.warn('[PlantContext] fetch failed, using cache:', msg);
+        setRetryCount((c) => c + 1);
+      }
     } finally {
       setLoading(false);
     }
-  }, [currentPlantId]);
+  }, [configError, retryCount]);
 
   useEffect(() => {
     fetchPlants();
-  }, [fetchPlants]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Also re-fetch when user changes (different access may expose different plants)
   useEffect(() => {
     if (user) fetchPlants();
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user?.id, fetchPlants]);
 
   // Persist current plant to LS + set on change
   const setCurrentPlant = useCallback((plantId) => {
@@ -159,10 +189,24 @@ export function PlantProvider({ children }) {
     refreshPlants,
     upsertPlant,
     isNathupur: currentPlantId === NATHUPUR_PLANT_ID,
-  }), [plants, authorizedPlants, currentPlant, currentPlantId, setCurrentPlant, loading, refreshPlants, upsertPlant]);
+    configError,
+    hasConfigError: !!configError,
+  }), [plants, authorizedPlants, currentPlant, currentPlantId, setCurrentPlant, loading, refreshPlants, upsertPlant, configError]);
 
   return (
     <PlantContext.Provider value={value}>
+      {configError && isSupabaseConfigured && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-start gap-2.5 text-amber-200 text-xs" role="alert">
+          <span className="mt-0.5">⚠️</span>
+          <div className="flex-1">
+            <p className="font-semibold">Plant configuration required</p>
+            <p className="text-amber-300/80 mt-0.5">{configError}</p>
+            <p className="text-amber-400/60 mt-1">Using local fallback data. Run the Supabase migration to enable full multi-plant isolation and remove this warning.</p>
+          </div>
+          <button onClick={() => setConfigError(null)} className="text-amber-300 hover:text-white px-2 py-1 rounded">Dismiss</button>
+          <button onClick={() => { setRetryCount(0); setConfigError(null); fetchPlants(); }} className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 px-3 py-1 rounded-control text-xs border border-amber-500/30">Retry</button>
+        </div>
+      )}
       {children}
     </PlantContext.Provider>
   );

@@ -8,6 +8,7 @@ import {
   LayoutDashboard, Cog, AlertOctagon, ClipboardCheck, BookOpen,
   Zap, ShieldCheck, Lightbulb, FileBarChart2, Settings,
   AlertTriangle, CheckSquare, Sun, Activity, TrendingUp, X, Shield, BarChart3,
+  Layers, Building2, Users,
 } from 'lucide-react';
 
 // Enterprise CMMS navigation — core modules first, document archive below
