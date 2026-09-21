@@ -100,13 +100,55 @@ function isSchemaConfigError(message) {
   );
 }
 const schemaErrorOnce = new Set();
-const plantFilterDisabled = new Set();
+const PLANT_FILTER_DISABLED_LS_KEY = 'ccpl_plant_filter_disabled';
+const plantFilterDisabled = new Set(
+  (() => {
+    try {
+      const v = localStorage.getItem(PLANT_FILTER_DISABLED_LS_KEY);
+      return v ? JSON.parse(v) : [];
+    } catch { return []; }
+  })()
+);
 let schemaConfigNotified = false;
+function persistPlantFilterDisabled() {
+  try { localStorage.setItem(PLANT_FILTER_DISABLED_LS_KEY, JSON.stringify([...plantFilterDisabled])); } catch {}
+}
+function syncPlantFlagsFromLS() {
+  try {
+    const v = localStorage.getItem('ccpl_plants_table_missing');
+    plantsTableMissing = v === 'true';
+  } catch {}
+  try {
+    const ls = localStorage.getItem(PLANT_FILTER_DISABLED_LS_KEY);
+    if (!ls) {
+      // LS cleared (migration succeeded) — clear memory set
+      if (plantFilterDisabled.size) plantFilterDisabled.clear();
+    } else {
+      const arr = JSON.parse(ls);
+      if (Array.isArray(arr)) {
+        // Sync memory set to LS
+        plantFilterDisabled.clear();
+        arr.forEach((e) => plantFilterDisabled.add(e));
+      }
+    }
+  } catch {}
+}
+let plantsTableMissing = false;
+try {
+  const v = localStorage.getItem('ccpl_plants_table_missing');
+  plantsTableMissing = v === 'true';
+} catch {}
+function setPlantsTableMissing(v) {
+  plantsTableMissing = !!v;
+  try { localStorage.setItem('ccpl_plants_table_missing', v ? 'true' : 'false'); } catch {}
+}
 function logSchemaErrorOnce(key, message) {
   if (schemaErrorOnce.has(key)) return;
   schemaErrorOnce.add(key);
-  console.error(`[Schema] Configuration error [${key}]: ${message}`);
-  console.error('[Schema] Run the multi-plant migration: supabase/migrations/20260920_multi_plant_cmms.sql (or latest). Until migrated, queries will fall back to unfiltered mode.');
+  // Single consolidated warning per key — quiet unless VITE_REALTIME_DEBUG
+  if (!schemaConfigNotified) {
+    console.warn(`[Schema] Multi-plant migration required — ${key}: ${message} (fallback to unfiltered mode)`);
+  }
 }
 
 function getCurrentPlantId() {
@@ -2076,7 +2118,7 @@ async function pushCloudOp(op) {
     const { error } = await supabase.from(config.table).delete().eq('id', op.recordId);
     if (error) {
       if (isSchemaConfigError(error.message)) {
-        logSchemaErrorOnce(`delete:${config.table}`, error.message);
+        schemaErrorOnce.add(`delete:${config.table}`);
         // Do not throw for schema errors — drop the op to prevent infinite retry
         return;
       }
@@ -2093,20 +2135,21 @@ async function pushCloudOp(op) {
     .upsert(row, { onConflict: 'id' });
   // If plant_id column missing, retry without plant_id (pre-migration fallback) and disable future plant_id sends for this entity
   if (error && isSchemaConfigError(error.message) && String(error.message).toLowerCase().includes('plant_id')) {
-    logSchemaErrorOnce(`upsert:${config.table}:plant_id`, error.message);
+    schemaErrorOnce.add(`upsert:${config.table}:plant_id`);
     plantFilterDisabled.add(op.entity);
+    persistPlantFilterDisabled();
     const retryRow = { ...row };
     delete retryRow.plant_id;
     const retry = await supabase.from(config.table).upsert(retryRow, { onConflict: 'id' });
     if (!retry.error) {
-      rtLog('warn', `UPSERT fallback without plant_id succeeded for ${config.table} id=${op.recordId}`);
+      rtLog('debug', `UPSERT fallback without plant_id succeeded for ${config.table} id=${op.recordId}`);
       return;
     }
     error = retry.error;
   }
   if (error) {
     if (isSchemaConfigError(error.message)) {
-      logSchemaErrorOnce(`upsert:${config.table}`, error.message);
+      schemaErrorOnce.add(`upsert:${config.table}`);
       // Schema errors should not block queue indefinitely — log once and drop
       if (op.entity === 'testingCertificates' || op.entity === 'kpiRecords' || op.entity === 'kpiSettings' || op.entity === 'kpiFySheet') return;
       // For plant_id related, we already retried; if still failing, drop to avoid storm
@@ -2162,20 +2205,25 @@ async function fetchCloudEntity(entity) {
   async function execQuery(withPlantFilter) {
     let query = supabase.from(config.table).select('*');
     if (withPlantFilter) {
-      try {
-        const pid = getCurrentPlantId();
-        let isCorporateFetch = false;
+      syncPlantFlagsFromLS();
+      if (plantsTableMissing || plantFilterDisabled.has(entity)) {
+        // Skip plant filter entirely — migration missing, run unfiltered to avoid 400
+      } else {
         try {
-          const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
-          const u = raw ? JSON.parse(raw) : null;
-          const role = (u && u.role) ? String(u.role).toLowerCase() : '';
-          isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
+          const pid = getCurrentPlantId();
+          let isCorporateFetch = false;
+          try {
+            const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
+            const u = raw ? JSON.parse(raw) : null;
+            const role = (u && u.role) ? String(u.role).toLowerCase() : '';
+            isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
+          } catch {}
+          const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
+          if (!isCorporateFetch && pid && plantScopedEntities.has(entity) && !plantFilterDisabled.has(entity)) {
+            query = query.eq('plant_id', pid);
+          }
         } catch {}
-        const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
-        if (!isCorporateFetch && pid && plantScopedEntities.has(entity) && !plantFilterDisabled.has(entity)) {
-          query = query.eq('plant_id', pid);
-        }
-      } catch {}
+      }
     }
     (config.orderBy || []).forEach(({ column, ascending }) => {
       query = query.order(column, { ascending });
@@ -2183,22 +2231,22 @@ async function fetchCloudEntity(entity) {
     return query;
   }
 
-  // First attempt: with plant filter if applicable
   let query = await execQuery(true);
   let { data, error } = await query;
 
-  // If plant_id column missing, retry without filter exactly once and disable filter for this entity
+  // If plant_id column missing, retry without filter exactly once and disable filter for this entity (persist)
   if (error && isSchemaConfigError(error.message) && String(error.message).toLowerCase().includes('plant_id')) {
     const key = `${entity}:plant_id-missing`;
-    logSchemaErrorOnce(key, error.message);
+    schemaErrorOnce.add(key);
     plantFilterDisabled.add(entity);
+    persistPlantFilterDisabled();
     // Retry without plant_id filter
     query = await execQuery(false);
     const retry = await query;
     data = retry.data;
     error = retry.error;
     if (!error) {
-      rtLog('warn', `FETCH fallback without plant_id succeeded for ${config.table} — migration required for plant isolation`);
+      rtLog('debug', `FETCH fallback without plant_id succeeded for ${config.table} — migration required`);
     }
   }
 
@@ -2215,10 +2263,10 @@ async function fetchCloudEntity(entity) {
       return [];
     }
     if (isConfigErr) {
-      logSchemaErrorOnce(entity, error.message);
+      schemaErrorOnce.add(entity);
       // For plant_id missing on non-optional tables, we already retried; if still failing, return empty to prevent storm
       if (String(error.message).toLowerCase().includes('plant_id') || String(error.message).toLowerCase().includes('plant_sec')) {
-        rtLog('warn', `FETCH returning empty for ${config.table} due to schema error — run migration`);
+        rtLog('debug', `FETCH returning empty for ${config.table} due to schema error — run migration`);
         return [];
       }
       // Missing table 'plants' or others — return empty and let PlantContext handle UI
@@ -2436,7 +2484,7 @@ function startRealtimeSubscriptions() {
   // Tear down any stale channel before creating a fresh one
   teardownRealtimeSubscriptions();
 
-  rtLog('info', `Starting Realtime channel (attempt ${realtimeReconnectAttempts + 1})`);
+  rtLog('debug', `Starting Realtime channel (attempt ${realtimeReconnectAttempts + 1})`);
 
   cloudSubscriptions = supabase.channel('ccpl-maintenance-sync', {
     config: { broadcast: { self: false } },
@@ -2460,7 +2508,7 @@ function startRealtimeSubscriptions() {
   });
 
   cloudSubscriptions.subscribe((status, err) => {
-    rtLog('info', `Channel status: ${status}${err ? ' — ' + (err.message || err) : ''}`);
+    rtLog(status === 'SUBSCRIBED' ? 'info' : 'debug', `Channel status: ${status}${err ? ' — ' + (err.message || err) : ''}`);
 
     if (status === 'SUBSCRIBED') {
       realtimeReconnectAttempts = 0; // reset back-off counter on clean connect
@@ -2816,13 +2864,14 @@ export function notifyRealtimeAuthChange(accessToken) {
   if (accessToken) {
     // Update the JWT on the live WebSocket connection
     supabase.realtime.setAuth(accessToken);
-    rtLog('info', 'Realtime JWT updated after auth change');
+    rtLog('debug', 'Realtime JWT updated after auth change');
     // Re-subscribe if the channel was torn down while we had no session
     if (!cloudSubscriptions) startRealtimeSubscriptions();
   } else {
-    // Logged out — tear down the authenticated channel gracefully
-    rtLog('info', 'Auth cleared — tearing down Realtime channel');
-    teardownRealtimeSubscriptions();
+    // No Supabase Auth token (app uses custom API auth) — keep anon Realtime channel open
+    // Only tear down on explicit logout when user was previously authenticated via Supabase Auth
+    rtLog('debug', 'Auth cleared — keeping anon Realtime channel (custom auth mode)');
+    if (!cloudSubscriptions) startRealtimeSubscriptions();
   }
 }
 

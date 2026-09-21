@@ -63,6 +63,11 @@ export function PlantProvider({ children }) {
         saveLS(PLANTS_LS_KEY, data);
         setConfigError(null);
         setRetryCount(0);
+        // Clear persisted schema-missing flags — migration now succeeds, future fetches can use plant_id
+        try {
+          localStorage.removeItem('ccpl_plants_table_missing');
+          localStorage.removeItem('ccpl_plant_filter_disabled');
+        } catch {}
         // If current selection is no longer valid, reset to first (use functional update to avoid stale closure)
         setCurrentPlantId((prev) => {
           const ids = new Set(data.map((p) => p.id));
@@ -82,8 +87,14 @@ export function PlantProvider({ children }) {
       const msg = e?.message || String(e);
       if (isPlantsSchemaError(msg)) {
         setConfigError(`Plants table not found: ${msg}. Run migration supabase/migrations/20260920_multi_plant_cmms.sql`);
-        console.error('[PlantContext] Schema configuration error — plants table missing:', msg);
-        console.error('[PlantContext] Using local fallback plants until migration is applied. Plant isolation will be limited.');
+        // Persist flag so store.js skips plant_id filters and avoids 400 burst on next reload
+        try { localStorage.setItem('ccpl_plants_table_missing', 'true'); } catch {}
+        // Also persist disabled filter hint for all plant-scoped entities
+        try {
+          const allPlantEntities = ['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings'];
+          localStorage.setItem('ccpl_plant_filter_disabled', JSON.stringify(allPlantEntities));
+        } catch {}
+        console.warn('[PlantContext] Schema configuration error — plants table missing:', msg);
         setRetryCount((c) => c + 1);
       } else {
         // Transient error — warn but don't set configError (will retry)
