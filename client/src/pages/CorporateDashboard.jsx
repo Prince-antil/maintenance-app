@@ -7,9 +7,10 @@ import { canViewCorporateDashboard } from '../lib/plantAccess.js';
 import { computeKPIs, aggregateBreakdownRecords, aggregatePMRecords, monthlyBreakdownTrend, monthlyPMCompletion } from '../analytics.js';
 import KPIStatCard from '../components/KPIStatCard.jsx';
 import { ChartCard, GroupedBarChart, DualTrendChart, PieDonutChart, TrendChart } from '../components/AnalyticsCharts.jsx';
+import FormulaExplorerModal from '../components/FormulaExplorerModal.jsx';
 import {
   Factory, Layers, AlertOctagon, ClipboardCheck, Timer, Gauge,
-  Building2, Zap, TrendingUp, ArrowRight, Shield, BarChart3,
+  Building2, Zap, TrendingUp, ArrowRight, Shield, BarChart3, HelpCircle, Info,
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, LineChart, Line } from 'recharts';
 
@@ -111,6 +112,9 @@ export default function CorporateDashboard() {
   const store = useStore();
   const navigate = useNavigate();
   const [periodFilter, setPeriodFilter] = useState('all');
+  const [showPmFormula, setShowPmFormula] = useState(false);
+  const [showAvailFormula, setShowAvailFormula] = useState(false);
+  const [showEnergyFormula, setShowEnergyFormula] = useState(false);
 
   if (!canViewCorporateDashboard(user?.role)) {
     return (
@@ -153,18 +157,40 @@ export default function CorporateDashboard() {
     return out;
   }, [visiblePlants, store, periodFilter]);
 
-  // Aggregated totals
+  // Aggregated totals — WEIGHTED (fixes “total average PM wrong”)
+  // Previous simple average of percentages was incorrect for cross-plant; weighted is Σ done / Σ planned
   const totals = useMemo(() => {
     const allMachines = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.machines.length || 0), 0);
     const allBD = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.breakdown || 0), 0);
     const allBDHours = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.bdHours || 0), 0);
-    const avgCompliance = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.pmCompliance || 0), 0) / visiblePlants.length * 10) / 10 : 0;
-    const avgAvail = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.availability || 0), 0) / visiblePlants.length * 10) / 10 : 0;
-    const avgMttr = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.mttr || 0), 0) / visiblePlants.length * 10) / 10 : 0;
-    const avgMtbf = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.mtbf || 0), 0) / visiblePlants.length * 10) / 10 : 0;
+    // Weighted PM compliance = total completed / total planned across all visible plants
+    const totalPlanned = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.pmDue || plantData[p.id]?.kpi.pmCompleted + plantData[p.id]?.kpi.pmPending || 0), 0);
+    const totalDone = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.pmCompleted || 0), 0);
+    // Fallback: if pmDue/pmCompleted not populated (legacy), use simple average
+    const avgCompliance = totalPlanned > 0
+      ? Math.round((totalDone / totalPlanned) * 1000) / 10
+      : (visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.pmCompliance || 0), 0) / visiblePlants.length * 10) / 10 : 0);
+    // Weighted availability & MTTR/MTBF from aggregated downtime
+    let avgAvail = 0; let avgMttr = 0; let avgMtbf = 0;
+    try {
+      const totalOp = allMachines * 720;
+      avgAvail = totalOp > 0 ? Math.round(((totalOp - allBDHours) / totalOp) * 1000) / 10 : 0;
+      if (avgAvail > 100) avgAvail = 100; if (avgAvail < 0) avgAvail = 0;
+      avgMttr = allBD > 0 ? Math.round((allBDHours / allBD) * 10) / 10 : 0;
+      const totalOpMinusDown = Math.max(0, totalOp - allBDHours);
+      avgMtbf = allBD > 0 ? Math.round((totalOpMinusDown / allBD) * 10) / 10 : 0;
+      if (allBD === 0) {
+        avgMttr = visiblePlants.length ? Math.round(visiblePlants.reduce((s,p)=>s+(plantData[p.id]?.kpi.mttr||0),0)/visiblePlants.length*10)/10 : 0;
+        avgMtbf = visiblePlants.length ? Math.round(visiblePlants.reduce((s,p)=>s+(plantData[p.id]?.kpi.mtbf||0),0)/visiblePlants.length*10)/10 : 0;
+      }
+    } catch {
+      avgAvail = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.availability || 0), 0) / visiblePlants.length * 10) / 10 : 0;
+      avgMttr = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.mttr || 0), 0) / visiblePlants.length * 10) / 10 : 0;
+      avgMtbf = visiblePlants.length ? Math.round(visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.mtbf || 0), 0) / visiblePlants.length * 10) / 10 : 0;
+    }
     const totalEnergy = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.energyTotal || 0), 0);
     const openPM = visiblePlants.reduce((s, p) => s + (plantData[p.id]?.kpi.pmPending || 0), 0);
-    return { allMachines, allBD, allBDHours, avgCompliance, avgAvail, avgMttr, avgMtbf, totalEnergy, openPM };
+    return { allMachines, allBD, allBDHours, avgCompliance, avgAvail, avgMttr, avgMtbf, totalEnergy, openPM, totalPlanned, totalDone };
   }, [visiblePlants, plantData]);
 
   // Chart data: plant-wise PM compliance
@@ -244,17 +270,31 @@ export default function CorporateDashboard() {
         </div>
       </section>
 
-      {/* Summary cards */}
+      {/* Summary cards — Weighted totals with Explore */}
       <section className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-4">
         <KPIStatCard icon={Layers} label="Total Plants" value={visiblePlants.length} sub={visiblePlants.map((p) => p.plant_code).join(', ')} tone="accent" />
         <KPIStatCard icon={Factory} label="Total Machines" value={totals.allMachines} sub="Across all plants" tone="accent" />
         <KPIStatCard icon={AlertOctagon} label="Total Breakdowns" value={totals.allBD} sub={`${totals.allBDHours} hrs downtime`} tone={totals.allBD ? 'danger' : 'neutral'} />
-        <KPIStatCard icon={ClipboardCheck} label="PM Compliance" value={`${totals.avgCompliance}%`} sub="Average" tone={totals.avgCompliance>=90?'success':totals.avgCompliance>=75?'warning':'danger'} />
-        <KPIStatCard icon={Gauge} label="Avg Availability" value={`${totals.avgAvail}%`} sub="Plant average" tone={totals.avgAvail>=95?'success':totals.avgAvail>=85?'warning':'danger'} />
+        <div className="relative group">
+          <KPIStatCard icon={ClipboardCheck} label="PM Compliance" value={`${totals.avgCompliance}%`} sub={`Weighted · ${totals.totalDone||0}/${totals.totalPlanned||0} done`} tone={totals.avgCompliance>=90?'success':totals.avgCompliance>=75?'warning':'danger'} />
+          <button onClick={()=>setShowPmFormula(true)} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/[0.06] border border-white/[0.10] flex items-center justify-center text-slate-400 hover:text-cyan-300 hover:border-cyan-400/40 transition-colors" title="Explore PM formula"><HelpCircle size={11}/></button>
+        </div>
+        <div className="relative group">
+          <KPIStatCard icon={Gauge} label="Avg Availability" value={`${totals.avgAvail}%`} sub="Weighted by machines" tone={totals.avgAvail>=95?'success':totals.avgAvail>=85?'warning':'danger'} />
+          <button onClick={()=>setShowAvailFormula(true)} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/[0.06] border border-white/[0.10] flex items-center justify-center text-slate-400 hover:text-cyan-300 hover:border-cyan-400/40 transition-colors" title="Explore availability formula"><HelpCircle size={11}/></button>
+        </div>
         <KPIStatCard icon={Timer} label="Avg MTTR" value={`${totals.avgMttr}h`} sub={`MTBF ${totals.avgMtbf}h`} tone="accent" />
-        <KPIStatCard icon={Zap} label="Total Energy" value={totals.totalEnergy.toLocaleString()} sub="kWh" tone="accent" />
+        <div className="relative group">
+          <KPIStatCard icon={Zap} label="Total Energy" value={totals.totalEnergy.toLocaleString()} sub="kWh · Σ plants" tone="accent" />
+          <button onClick={()=>setShowEnergyFormula(true)} className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/[0.06] border border-white/[0.10] flex items-center justify-center text-slate-400 hover:text-cyan-300 hover:border-cyan-400/40 transition-colors" title="Explore energy formula"><HelpCircle size={11}/></button>
+        </div>
         <KPIStatCard icon={ClipboardCheck} label="Open PM" value={totals.openPM} sub="Pending across plants" tone={totals.openPM?'warning':'neutral'} />
       </section>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+        <Info size={12} className="text-slate-500"/> Weighted averages: PM = Σ done / Σ planned · Availability = (Σ machines×720 − Σ downtime)/ Σ machines×720 · MTTR = Σ downtime / Σ breakdowns
+        <span className="hidden sm:inline">·</span>
+        <button onClick={()=>setShowPmFormula(true)} className="text-cyan-400 hover:text-cyan-300 underline decoration-dotted">Explore formulas</button>
+      </div>
 
       {/* Plant comparison table */}
       <PlantComparisonTable plants={visiblePlants} plantData={plantData} onDrill={handleDrill} />
@@ -324,6 +364,68 @@ export default function CorporateDashboard() {
         <TrendingUp size={16} className="text-cyan-400" />
         <p className="text-slate-400 text-xs">Click <span className="text-white font-semibold">View</span> in the table above to drill down: Corporate → Plant Dashboard → Machines → Breakdown history. Breadcrumb always shows current plant.</p>
       </div>
+
+      {/* Formula Explorer Modals — senior UX */}
+      <FormulaExplorerModal
+        isOpen={showPmFormula}
+        onClose={()=>setShowPmFormula(false)}
+        title="PM Compliance — Weighted Average"
+        subtitle="Corporate PM % = total completed across all plants ÷ total planned across all plants"
+        formula="PM Compliance % = ( Σ done_p ) / ( Σ planned_p ) × 100"
+        variables={[
+          { name: 'Total Planned (all plants)', source: 'Σ pmDue', value: totals.totalPlanned ?? visiblePlants.reduce((s,p)=>s+(plantData[p.id]?.kpi.pmDue||0),0), unit: '' },
+          { name: 'Total Completed (all plants)', source: 'Σ pmCompleted', value: totals.totalDone ?? visiblePlants.reduce((s,p)=>s+(plantData[p.id]?.kpi.pmCompleted||0),0), unit: '' },
+          { name: 'Weighted Compliance', source: 'computed', value: `${totals.avgCompliance}%`, unit: '' },
+          ...visiblePlants.map(p=>({ name: `${p.plant_code} — done/planned`, source: `${p.plant_code}`, value: `${plantData[p.id]?.kpi.pmCompleted||0}/${plantData[p.id]?.kpi.pmDue||0} = ${plantData[p.id]?.kpi.pmCompliance||0}%`, unit: '' })),
+        ]}
+        steps={[
+          `Per plant: pmCompliance_p = done_p / planned_p × 100 (e.g. NATHUPUR ${plantData[visiblePlants[0]?.id]?.kpi.pmCompliance||0}%)`,
+          `Corporate weighted: Σ done = ${totals.totalDone}, Σ planned = ${totals.totalPlanned}`,
+          `Weighted = ${totals.totalDone} / ${totals.totalPlanned} × 100 = ${totals.avgCompliance}%`,
+          `Fixes previous bug: simple average of percentages (e.g. (90+0)/2=45%) is wrong when Plant 2 has 0 planned — weighted correctly gives ${totals.avgCompliance}%`,
+        ]}
+        result={`${totals.avgCompliance}%`}
+        resultLabel="Corporate Weighted PM Compliance"
+      />
+      <FormulaExplorerModal
+        isOpen={showAvailFormula}
+        onClose={()=>setShowAvailFormula(false)}
+        title="Availability — Weighted by Machines"
+        subtitle="Availability = (total operating hours − total downtime) / total operating hours"
+        formula="Availability % = ( Σ machines × 720 − Σ downtime ) / ( Σ machines × 720 ) × 100"
+        variables={[
+          { name: 'Total Machines', source: 'Σ machines', value: totals.allMachines, unit: '' },
+          { name: 'Total Downtime', source: 'Σ downtimeHours', value: `${totals.allBDHours} hrs`, unit: '' },
+          { name: 'Total Operating Hours', source: 'machines × 720', value: `${totals.allMachines * 720} hrs`, unit: '' },
+          { name: 'Weighted Availability', source: 'computed', value: `${totals.avgAvail}%`, unit: '' },
+        ]}
+        steps={[
+          `Total operating = ${totals.allMachines} machines × 720 hrs = ${totals.allMachines*720} hrs`,
+          `Availability = (${totals.allMachines*720} − ${totals.allBDHours}) / ${totals.allMachines*720} × 100 = ${totals.avgAvail}%`,
+          `Per-plant availability is weighted by its machine count, not simple average`,
+        ]}
+        result={`${totals.avgAvail}%`}
+        resultLabel="Corporate Weighted Availability"
+      />
+      <FormulaExplorerModal
+        isOpen={showEnergyFormula}
+        onClose={()=>setShowEnergyFormula(false)}
+        title="Energy — Plant-Isolated Totals"
+        subtitle="Each plant’s energy is Σ kWh for that plant only; corporate total = Σ plants"
+        formula="Energy_p = Σ (kwh_p)   ;   Corporate = Σ Energy_p"
+        variables={[
+          ...visiblePlants.map(p=>({ name: `${p.plant_code} energy`, source: `${p.plant_code}`, value: `${(plantData[p.id]?.energyTotal||0).toLocaleString()} kWh`, unit: '' })),
+          { name: 'Corporate Total', source: 'Σ Energy_p', value: `${totals.totalEnergy.toLocaleString()} kWh`, unit: '' },
+          { name: 'Note', source: 'isolation', value: totals.totalEnergy>0 && visiblePlants.some(p=> (plantData[p.id]?.energyTotal||0)===0) ? 'Plant 2/3 shows 0 until they upload — not duplicated from NATHUPUR' : 'Plant-isolated via plant_id', unit: '' },
+        ]}
+        steps={[
+          `Per plant: Energy_p = sum of kwh where plant_id = p (NATHUPUR ${ (plantData[visiblePlants.find(p=>p.plant_code==='NATHUPUR')?.id]?.energyTotal||0).toLocaleString()} kWh, others 0 until upload)`,
+          `Corporate total = sum across plants = ${totals.totalEnergy.toLocaleString()} kWh`,
+          `Data is plant-isolated; Plant 2/3 do NOT duplicate NATHUPUR — they show No data until uploaded for that plant`,
+        ]}
+        result={`${totals.totalEnergy.toLocaleString()} kWh`}
+        resultLabel="Corporate Energy Total"
+      />
     </div>
   );
 }

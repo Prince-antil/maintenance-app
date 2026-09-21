@@ -246,6 +246,24 @@ body {
   box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15);
 }
 
+/* Fix select option contrast — prevents white-on-white (senior fix) */
+select option {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+select option:checked,
+select option:hover,
+select option:focus {
+  background-color: #1e293b;
+  color: #22d3ee;
+}
+/* Ensure all form selects inherit dark option styling */
+.input-field option,
+.select-field option {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
 /* ================================================================
    Badges & Status Pills
    ================================================================ */

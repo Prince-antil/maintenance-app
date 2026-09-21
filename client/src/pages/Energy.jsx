@@ -50,7 +50,7 @@ import { downloadTemplate } from '../bulkImport.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
   Zap, Sun, Droplets, Wind, Settings, Download, Upload, Plus, Trash2, Pencil, AlertTriangle,
-  Calendar, ChevronLeft, ChevronRight, TrendingUp,
+  Calendar, ChevronLeft, ChevronRight, TrendingUp, Building2, Info,
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -1692,7 +1692,7 @@ export default function Energy() {
   const { user } = useAuth();
   const { openUpload, pushToast } = useUI();
   const rawStore = useStore();
-  const { currentPlant, currentPlantId } = usePlant();
+  const { currentPlant, currentPlantId, plants } = usePlant();
   const store = getPlantScopedData(currentPlantId);
   const {
     dailyUtilityLog, monthlyHerbicide, monthlyInsecticide,
@@ -1782,6 +1782,19 @@ export default function Energy() {
           <Zap size={28} className="text-amber-400" /> Energy Management
         </h2>
         <p className="text-body mt-1.5">Track utility, herbicide, insecticide, water, air compressor, solar and renewable energy metrics.</p>
+      </div>
+      {/* Plant-isolated context — senior fix */}
+      <div className="glass-card px-4 py-3 flex flex-wrap items-center gap-3">
+        <div className="w-9 h-9 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center"><Building2 size={16} className="text-cyan-400"/></div>
+        <div className="flex-1 min-w-[200px]">
+          <p className="text-white text-xs font-semibold flex items-center gap-2">{currentPlant?.plant_name} <span className="text-slate-500 font-mono text-[11px]">· {currentPlant?.plant_code}</span> <span className="badge bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 text-[10px]">Plant-isolated</span></p>
+          <p className="text-slate-500 text-[11px] mt-0.5">{store.dailyUtilityLog.length + store.monthlyHerbicide.length + store.monthlyInsecticide.length + store.monthlyWater.length + store.monthlyAirCompressor.length + store.dailySolarGeneration.length} records for this plant · Not shared with other plants</p>
+        </div>
+        {store.dailyUtilityLog.length===0 && store.dailySolarGeneration.length===0 && store.monthlyHerbicide.length===0 && store.monthlyInsecticide.length===0 && store.monthlyWater.length===0 && store.monthlyAirCompressor.length===0 ? (
+          <span className="text-amber-300 text-xs bg-amber-500/10 border border-amber-500/20 px-3 py-1.5 rounded-full flex items-center gap-1.5"><Info size={12}/> No energy data for {currentPlant?.plant_code} yet — upload for this plant. {currentPlant?.plant_code!=='NATHUPUR' && `NATHUPUR has ${rawStore.dailyUtilityLog.filter(r=> (r.plant_id||r.plantId)==='00000000-0000-0000-0000-000000000001' || !r.plant_id).length} records (not duplicated)`}</span>
+        ) : (
+          <span className="text-emerald-300 text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full">{store.dailyUtilityLog.length} utility · {store.dailySolarGeneration.length} solar · {store.monthlyHerbicide.length+store.monthlyInsecticide.length} herb/insect</span>
+        )}
       </div>
 
       <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-thin">

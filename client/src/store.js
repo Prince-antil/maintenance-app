@@ -2811,6 +2811,17 @@ export function getPlantScopedData(plantId) {
       return p === pid;
     });
   };
+  // Energy settings is a singleton per plant — isolate by plant_id (senior fix: was shared across all plants)
+  const scopedEnergySettings = (() => {
+    const s = state.energySettings;
+    if (!s) return s;
+    const spid = s.plant_id || s.plantId || s.plantId === '' ? (s.plant_id || s.plantId) : null;
+    // Legacy row without plant_id belongs only to Nathupur
+    if (!spid) return pid === NATHUPUR_PLANT_ID ? s : normalizeEnergySettings({ id: 'default', plant_id: pid });
+    if (spid === pid) return s;
+    // This plant has no settings row yet — return plant-specific default (not Nathupur's)
+    return normalizeEnergySettings({ id: 'default', plant_id: pid });
+  })();
   return {
     ...state,
     machines: filter(state.machines),
@@ -2827,6 +2838,7 @@ export function getPlantScopedData(plantId) {
     monthlyWater: filter(state.monthlyWater),
     monthlyAirCompressor: filter(state.monthlyAirCompressor),
     dailySolarGeneration: filter(state.dailySolarGeneration),
+    energySettings: scopedEnergySettings,
   };
 }
 

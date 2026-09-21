@@ -134,6 +134,7 @@ function CertificateForm({ initial, onSave, onCancel }) {
   const [uploading, setUploading] = useState(false);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const inp = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
+  const inpSelect = 'w-full rounded-control bg-slate-800 border border-white/[0.12] px-3 py-1.5 text-sm text-white focus:outline-none focus:border-cyan-400/60';
   const lbl = 'block text-xs text-slate-400 mb-1';
 
   const submit = async (e) => {
@@ -163,8 +164,8 @@ function CertificateForm({ initial, onSave, onCancel }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className={lbl}>Certificate Type *</label>
-          <select value={form.certificateType} onChange={set('certificateType')} className={inp} required>
-            {CERTIFICATE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          <select value={form.certificateType} onChange={set('certificateType')} className={inpSelect} required>
+            {CERTIFICATE_TYPES.map((t) => <option key={t} value={t} className="bg-slate-900 text-slate-100">{t}</option>)}
           </select>
         </div>
         <div>
@@ -185,8 +186,8 @@ function CertificateForm({ initial, onSave, onCancel }) {
         </div>
         <div>
           <label className={lbl}>Frequency</label>
-          <select value={form.frequency} onChange={set('frequency')} className={inp}>
-            {FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
+          <select value={form.frequency} onChange={set('frequency')} className={inpSelect}>
+            {FREQUENCIES.map((f) => <option key={f} value={f} className="bg-slate-900 text-slate-100">{f}</option>)}
           </select>
         </div>
         <div>
