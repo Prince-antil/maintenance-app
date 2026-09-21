@@ -1,8 +1,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
+import { usePlant } from '../context/PlantContext.jsx';
 import {
   useStore,
+  getPlantScopedData,
   addDailyUtilityLog, updateDailyUtilityLog, deleteDailyUtilityLog, purgeDailyUtilityLog,
   addMonthlyHerbicide, updateMonthlyHerbicide, deleteMonthlyHerbicide, purgeMonthlyHerbicide,
   addMonthlyInsecticide, updateMonthlyInsecticide, deleteMonthlyInsecticide, purgeMonthlyInsecticide,

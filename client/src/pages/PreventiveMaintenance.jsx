@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
-import { useStore, addPM, deletePM, updatePM, purgePmRecords, deleteMachinePmRecord } from '../store.js';
+import { usePlant } from '../context/PlantContext.jsx';
+import { useStore, getPlantScopedData, addPM, deletePM, updatePM, purgePmRecords, deleteMachinePmRecord, addMachinePmRecord } from '../store.js';
 import {
   formatPeriodKey, pmStats, lastNMonths,
   machineWisePM, pmTypePareto, machinePMRegister,

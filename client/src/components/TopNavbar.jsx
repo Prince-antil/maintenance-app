@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
 import { usePlant } from '../context/PlantContext.jsx';
+import PlantSwitcher from './PlantSwitcher.jsx';
 import { api } from '../api.js';
 import { useStore } from '../store.js';
 import { buildNotifications } from '../analytics.js';
