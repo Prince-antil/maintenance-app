@@ -120,21 +120,12 @@ export function AuthProvider({ children }) {
       }
       const enriched = enrichUser(entry.user);
       sessionStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(enriched));
-      // Set JWT cookie so the Express API can authenticate this session.
-      // The Express API uses jsonwebtoken with secret 'agro-maint-secret-key-2026'.
-      // We set the cookie here so that api.me() works when the API is unreachable
-      // and offline directory login was used.
-      try {
-        const { default: jwt } = await import('jsonwebtoken');
-        const token = jwt.sign(
-          { id: enriched.id, username: enriched.username, role: enriched.role, full_name: enriched.full_name },
-          'agro-maint-secret-key-2026'
-        );
-        document.cookie = `token=${token}; path=/; max-age=86400000; sameSite=none; secure=${window.location.protocol === 'https:'}`;
-      } catch {
-        // If jsonwebtoken import fails, continue without the cookie —
-        // the user remains logged in locally but api.me() may return 401.
-      }
+      // NOTE: no JWT-cookie minting here on purpose. The browser bundle cannot
+      // sign a server-verifiable JWT without pulling in Node-only crypto libs
+      // (jsonwebtoken -> safe-buffer crashes the production bundle with
+      // "Cannot read properties of undefined (reading 'from')" -> blank screen).
+      // api.me() returning 401 in this path is expected and handled by the
+      // offline-session restore in the effect above.
       setUser(enriched);
       return { user: enriched };
     }

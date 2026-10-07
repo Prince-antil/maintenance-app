@@ -2250,25 +2250,33 @@ async function writeToCloudNow(entity, action, payload) {
   }
 
   // ── Auth verification ──────────────────────────────────────────────
-  // Ensure a valid Supabase auth session exists before any cloud write.
-  // The Supabase JS client attaches the JWT to PostgREST requests; without it,
-  // RLS rejects the operation with 401 Unauthorized.
+  // The Supabase JS client attaches the session JWT to PostgREST requests.
+  // If the user is not logged into the app at all, fail fast with a clear
+  // error. If the user IS logged in via the app (API cookie session or the
+  // offline directory) but has no Supabase Auth JWT, still ATTEMPT the write:
+  // the project schema ships permissive anon policies on the operational
+  // tables, so the attempt may succeed — and the row-count verification below
+  // guarantees we never report success unless rows actually landed in the DB.
+  // If RLS rejects the write, it surfaces as a permanent error with an
+  // actionable message (see catch block below).
   const storedSession = getAuthSessionFromStorage();
   const isSupabaseSession =
     storedSession &&
     storedSession.access_token &&
     storedSession.refresh_token !== undefined !== storedSession.expires_at;
 
-  if (!isSupabaseSession) {
-    // No valid Supabase Auth session — do not proceed with cloud write.
-    // The user must have a Supabase Auth session (via login, OAuth, etc.)
-    // before database writes can succeed.  Show a clear error.
-    rtLog('warn', 'No valid Supabase Auth session — cannot perform cloud write');
+  if (!storedSession) {
+    // Not logged into the app at all — do not proceed with cloud write.
+    rtLog('warn', 'No app session — cannot perform cloud write');
     throw new Error(
       'Import requires an active Supabase Auth session. ' +
         'Please log in via the application login flow to establish a session ' +
         'before importing data.'
     );
+  }
+
+  if (!isSupabaseSession) {
+    rtLog('info', 'No Supabase Auth JWT — attempting write with app session (result will be verified)');
   }
 
   // 【CRITICAL SYNC】Sync custom offline session with Supabase client
@@ -2326,7 +2334,16 @@ async function writeToCloudNow(entity, action, payload) {
         phase: isBrowserOnline() ? 'degraded' : 'offline',
         lastError: err.message || 'Write failed',
       }, false);
-      // Re-throw without queueing for retry so caller (commitAndQueue) detects failure
+      // Re-throw without queueing for retry so caller (commitAndQueue) detects failure.
+      // If the write was rejected by RLS/auth and we have no Supabase JWT, say so
+      // plainly so the user knows a Supabase-backed login is required.
+      if (!isSupabaseSession) {
+        throw new Error(
+          'Import requires an active Supabase Auth session. ' +
+            'Please log in via the application login flow to establish a session ' +
+            'before importing data.'
+        );
+      }
       throw err;
     }
 
