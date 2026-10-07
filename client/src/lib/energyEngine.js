@@ -219,8 +219,9 @@ export function processSolarRow(row) {
   const u1_total = Number((u1_inv1 + u1_inv2 + u1_inv3 + u1_inv4).toFixed(2));
   const u2_total = Number((u2_inv1 + u2_inv2 + u2_inv3).toFixed(2));
   const invTotal = Number((u1_total + u2_total).toFixed(2));
-  // If inverter breakdown sums to 0 but a direct daily total is provided (e.g., single-column upload), use direct
-  const grand_total = invTotal > 0 ? invTotal : Number((Number.isFinite(effectiveDirect) ? effectiveDirect : 0).toFixed(2));
+  // Template contract: "Daily Total auto = sum of inverters IF BLANK".
+  // An explicitly entered total always wins over the recomputed inverter sum.
+  const grand_total = effectiveDirect > 0 ? Number(Number(effectiveDirect).toFixed(2)) : invTotal;
   // Snapshot totals: strictly sum of respective inverters (U1=4, U2=3). Do NOT 60/40 distribute here - snapshot must be truthful sum.
   const finalU1 = u1_total > 0 ? u1_total : (storedU1 > 0 ? storedU1 : 0);
   const finalU2 = u2_total > 0 ? u2_total : (storedU2 > 0 ? storedU2 : 0);

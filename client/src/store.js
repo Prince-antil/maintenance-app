@@ -311,37 +311,41 @@ function normalizeEnergyRecord(fields) {
 
 // ── Daily Utility Log normalizer ──────────────────────────────────────────
 function normalizeDailyUtilityLog(fields) {
+  // Accept BOTH camelCase (manual form, cloud re-read) and snake_case
+  // (bulkImport parser output). Without the snake_case fallbacks every
+  // imported value silently became 0.
+  const g = (camel, snake) => fields[camel] ?? fields[snake];
   return {
     id: fields.id || uid('dul'),
     date: fields.date || new Date().toISOString().slice(0, 10),
-    u1ImportKwhReading: toNumber(fields.u1ImportKwhReading),
-    u1ImportKvahReading: toNumber(fields.u1ImportKvahReading),
-    u1ExportKwhReading: toNumber(fields.u1ExportKwhReading),
-    u1ExportKvahReading: toNumber(fields.u1ExportKvahReading),
-    u1SolarKwhReading: toNumber(fields.u1SolarKwhReading),
-    u1SolarKvahReading: toNumber(fields.u1SolarKvahReading),
-    u1Pf: toNumber(fields.u1Pf),
-    u2ImportKwhReading: toNumber(fields.u2ImportKwhReading),
-    u2ImportKvahReading: toNumber(fields.u2ImportKvahReading),
-    u2ExportKwhReading: toNumber(fields.u2ExportKwhReading),
-    u2ExportKvahReading: toNumber(fields.u2ExportKvahReading),
-    u2SolarKwhReading: toNumber(fields.u2SolarKwhReading),
-    u2SolarKvahReading: toNumber(fields.u2SolarKvahReading),
-    u2Pf: toNumber(fields.u2Pf),
-    dg380KwhReading: toNumber(fields.dg380KwhReading),
-    dg380HourmeterReading: toNumber(fields.dg380HourmeterReading),
-    dg380HsdOpeningLtr: toNumber(fields.dg380HsdOpeningLtr),
-    dg380HsdAddedLtr: toNumber(fields.dg380HsdAddedLtr),
-    dg380DefOpeningPct: toNumber(fields.dg380DefOpeningPct),
-    dg380DefAddedPct: toNumber(fields.dg380DefAddedPct),
-    dg500KwhReading: toNumber(fields.dg500KwhReading),
-    dg500HourmeterReading: toNumber(fields.dg500HourmeterReading),
-    dg500HsdOpeningLtr: toNumber(fields.dg500HsdOpeningLtr),
-    dg500HsdAddedLtr: toNumber(fields.dg500HsdAddedLtr),
-    dg500DefOpeningPct: toNumber(fields.dg500DefOpeningPct),
-    dg500DefAddedPct: toNumber(fields.dg500DefAddedPct),
-    createdAt: fields.createdAt || now(),
-    updatedAt: fields.updatedAt || now(),
+    u1ImportKwhReading: toNumber(g('u1ImportKwhReading', 'u1_import_kwh_reading')),
+    u1ImportKvahReading: toNumber(g('u1ImportKvahReading', 'u1_import_kvah_reading')),
+    u1ExportKwhReading: toNumber(g('u1ExportKwhReading', 'u1_export_kwh_reading')),
+    u1ExportKvahReading: toNumber(g('u1ExportKvahReading', 'u1_export_kvah_reading')),
+    u1SolarKwhReading: toNumber(g('u1SolarKwhReading', 'u1_solar_kwh_reading')),
+    u1SolarKvahReading: toNumber(g('u1SolarKvahReading', 'u1_solar_kvah_reading')),
+    u1Pf: toNumber(g('u1Pf', 'u1_pf')),
+    u2ImportKwhReading: toNumber(g('u2ImportKwhReading', 'u2_import_kwh_reading')),
+    u2ImportKvahReading: toNumber(g('u2ImportKvahReading', 'u2_import_kvah_reading')),
+    u2ExportKwhReading: toNumber(g('u2ExportKwhReading', 'u2_export_kwh_reading')),
+    u2ExportKvahReading: toNumber(g('u2ExportKvahReading', 'u2_export_kvah_reading')),
+    u2SolarKwhReading: toNumber(g('u2SolarKwhReading', 'u2_solar_kwh_reading')),
+    u2SolarKvahReading: toNumber(g('u2SolarKvahReading', 'u2_solar_kvah_reading')),
+    u2Pf: toNumber(g('u2Pf', 'u2_pf')),
+    dg380KwhReading: toNumber(g('dg380KwhReading', 'dg380_kwh_reading')),
+    dg380HourmeterReading: toNumber(g('dg380HourmeterReading', 'dg380_hourmeter_reading')),
+    dg380HsdOpeningLtr: toNumber(g('dg380HsdOpeningLtr', 'dg380_hsd_opening_ltr')),
+    dg380HsdAddedLtr: toNumber(g('dg380HsdAddedLtr', 'dg380_hsd_added_ltr')),
+    dg380DefOpeningPct: toNumber(g('dg380DefOpeningPct', 'dg380_def_opening_pct')),
+    dg380DefAddedPct: toNumber(g('dg380DefAddedPct', 'dg380_def_added_pct')),
+    dg500KwhReading: toNumber(g('dg500KwhReading', 'dg500_kwh_reading')),
+    dg500HourmeterReading: toNumber(g('dg500HourmeterReading', 'dg500_hourmeter_reading')),
+    dg500HsdOpeningLtr: toNumber(g('dg500HsdOpeningLtr', 'dg500_hsd_opening_ltr')),
+    dg500HsdAddedLtr: toNumber(g('dg500HsdAddedLtr', 'dg500_hsd_added_ltr')),
+    dg500DefOpeningPct: toNumber(g('dg500DefOpeningPct', 'dg500_def_opening_pct')),
+    dg500DefAddedPct: toNumber(g('dg500DefAddedPct', 'dg500_def_added_pct')),
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
   };
 }
 
@@ -637,7 +641,9 @@ function normalizeDailySolarGeneration(fields) {
   const storedU2 = toNumber(fields.u2_total ?? fields.u2Total ?? fields.u2_total_kwh ?? fields.u2TotalKwh ?? 0);
   const storedGrand = toNumber(fields.grand_total ?? fields.grandTotal ?? fields.grand_total_kwh ?? fields.grandTotalKwh ?? fields.dailyTotalKwh ?? fields.daily_total_kwh ?? 0);
   const effectiveDirect = storedGrand > 0 ? storedGrand : (directTotal > 0 ? directTotal : (storedU1 + storedU2 > 0 ? storedU1 + storedU2 : 0));
-  const dailyTotalKwh = invTotal > 0 ? invTotal : effectiveDirect;
+  // Template contract: "Daily Total auto = sum of inverters IF BLANK".
+  // An explicitly entered total always wins over the recomputed inverter sum.
+  const dailyTotalKwh = effectiveDirect > 0 ? effectiveDirect : invTotal;
   return {
     id: fields.id || uid('dsg'),
     date: fields.date || new Date().toISOString().slice(0, 10),
@@ -3341,10 +3347,12 @@ export const getDailyUtilityLogs = () => state.dailyUtilityLog;
 
 export function addDailyUtilityLog(fields, userName) {
   const log = normalizeDailyUtilityLog({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, dailyUtilityLog: [log, ...state.dailyUtilityLog] };
-  commitAndQueue('dailyUtilityLog', 'upsert', log);
-  logActivity(userName, 'added daily utility log', log.date, 'energy');
-  return log;
+  // Single date = single record: reuse the existing id when this plant + date exists
+  const [resolved] = assignEnergyImportIds(state.dailyUtilityLog, getCurrentPlantId() || NATHUPUR_PLANT_ID, [log], dailyPeriodKey);
+  state = { ...state, dailyUtilityLog: [resolved, ...state.dailyUtilityLog.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('dailyUtilityLog', 'upsert', resolved);
+  logActivity(userName, 'added daily utility log', resolved.date, 'energy');
+  return resolved;
 }
 
 export function updateDailyUtilityLog(id, patch, userName) {
@@ -3368,10 +3376,11 @@ export const getMonthlyHerbicides = () => state.monthlyHerbicide;
 
 export function addMonthlyHerbicide(fields, userName) {
   const record = normalizeMonthlyHerbicide({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, monthlyHerbicide: [record, ...state.monthlyHerbicide] };
-  commitAndQueue('monthlyHerbicide', 'upsert', record);
-  logActivity(userName, 'added monthly herbicide', record.month, 'energy');
-  return record;
+  const [resolved] = assignEnergyImportIds(state.monthlyHerbicide, getCurrentPlantId() || NATHUPUR_PLANT_ID, [record], monthlyPeriodKey);
+  state = { ...state, monthlyHerbicide: [resolved, ...state.monthlyHerbicide.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('monthlyHerbicide', 'upsert', resolved);
+  logActivity(userName, 'added monthly herbicide', resolved.month, 'energy');
+  return resolved;
 }
 
 export function updateMonthlyHerbicide(id, patch, userName) {
@@ -3395,10 +3404,11 @@ export const getMonthlyInsecticides = () => state.monthlyInsecticide;
 
 export function addMonthlyInsecticide(fields, userName) {
   const record = normalizeMonthlyInsecticide({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, monthlyInsecticide: [record, ...state.monthlyInsecticide] };
-  commitAndQueue('monthlyInsecticide', 'upsert', record);
-  logActivity(userName, 'added monthly insecticide', record.month, 'energy');
-  return record;
+  const [resolved] = assignEnergyImportIds(state.monthlyInsecticide, getCurrentPlantId() || NATHUPUR_PLANT_ID, [record], monthlyPeriodKey);
+  state = { ...state, monthlyInsecticide: [resolved, ...state.monthlyInsecticide.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('monthlyInsecticide', 'upsert', resolved);
+  logActivity(userName, 'added monthly insecticide', resolved.month, 'energy');
+  return resolved;
 }
 
 export function updateMonthlyInsecticide(id, patch, userName) {
@@ -3422,8 +3432,9 @@ export const getMonthlyWaters = () => state.monthlyWater;
 
 export function addMonthlyWater(fields, userName) {
   const record = normalizeMonthlyWater({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, monthlyWater: [record, ...state.monthlyWater] };
-  commitAndQueue('monthlyWater', 'upsert', record);
+  const [resolved] = assignEnergyImportIds(state.monthlyWater, getCurrentPlantId() || NATHUPUR_PLANT_ID, [record], monthlyPeriodKey);
+  state = { ...state, monthlyWater: [resolved, ...state.monthlyWater.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('monthlyWater', 'upsert', resolved);
   logActivity(userName, 'added monthly water', record.month, 'energy');
   return record;
 }
@@ -3449,10 +3460,11 @@ export const getMonthlyAirCompressors = () => state.monthlyAirCompressor;
 
 export function addMonthlyAirCompressor(fields, userName) {
   const record = normalizeMonthlyAirCompressor({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, monthlyAirCompressor: [record, ...state.monthlyAirCompressor] };
-  commitAndQueue('monthlyAirCompressor', 'upsert', record);
-  logActivity(userName, 'added monthly air compressor', record.month, 'energy');
-  return record;
+  const [resolved] = assignEnergyImportIds(state.monthlyAirCompressor, getCurrentPlantId() || NATHUPUR_PLANT_ID, [record], monthlyPeriodKey);
+  state = { ...state, monthlyAirCompressor: [resolved, ...state.monthlyAirCompressor.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('monthlyAirCompressor', 'upsert', resolved);
+  logActivity(userName, 'added monthly air compressor', resolved.month, 'energy');
+  return resolved;
 }
 
 export function updateMonthlyAirCompressor(id, patch, userName) {
@@ -3476,10 +3488,11 @@ export const getDailySolarGenerations = () => state.dailySolarGeneration;
 
 export function addDailySolarGeneration(fields, userName) {
   const record = normalizeDailySolarGeneration({ ...fields, createdAt: now(), updatedAt: now() });
-  state = { ...state, dailySolarGeneration: [record, ...state.dailySolarGeneration] };
-  commitAndQueue('dailySolarGeneration', 'upsert', record);
-  logActivity(userName, 'added daily solar generation', record.date, 'energy');
-  return record;
+  const [resolved] = assignEnergyImportIds(state.dailySolarGeneration, getCurrentPlantId() || NATHUPUR_PLANT_ID, [record], dailyPeriodKey);
+  state = { ...state, dailySolarGeneration: [resolved, ...state.dailySolarGeneration.filter((e) => e.id !== resolved.id)] };
+  commitAndQueue('dailySolarGeneration', 'upsert', resolved);
+  logActivity(userName, 'added daily solar generation', resolved.date, 'energy');
+  return resolved;
 }
 
 export function updateDailySolarGeneration(id, patch, userName) {
@@ -4067,9 +4080,12 @@ function _purgeDomain(entityKey, tableName, records, dateFrom, dateTo, isMonthly
   let targets = records;
   if (isRange) {
     targets = targets.filter((r) => {
-      const key = isMonthly ? (r.month || '') : (r.date || '');
-      const from = isMonthly ? (dateFrom || '').slice(0, 7) : (dateFrom || '');
-      const to = isMonthly ? (dateTo || '').slice(0, 7) : (dateTo || '');
+      // Compare on the calendar-day prefix: stored dates are full ISO
+      // timestamps ("2026-10-31T00:00:00.000Z") while bounds are YYYY-MM-DD.
+      // Comparing raw strings wrongly excludes the final day of the range.
+      const key = isMonthly ? (r.month || '') : String(r.date || '').slice(0, 10);
+      const from = isMonthly ? (dateFrom || '').slice(0, 7) : String(dateFrom || '').slice(0, 10);
+      const to = isMonthly ? (dateTo || '').slice(0, 7) : String(dateTo || '').slice(0, 10);
       if (from && key < from) return false;
       if (to && key > to) return false;
       return true;
@@ -4993,6 +5009,30 @@ export async function importBreakdownsBulk(rows, userName) {
   return { created, updated, total: rows.length };
 }
 
+// ── Energy import dedup: single date = single record per plant ─────────────
+// Reuses the existing record id when the same plant + date (daily) or plant
+// + month (monthly) already exists, so re-imports UPDATE instead of creating
+// duplicates. Also collapses repeats inside the same uploaded file.
+function assignEnergyImportIds(existingRecords, plantId, imports, getPeriodKey) {
+  const seen = new Map();
+  return imports.map((record) => {
+    const period = getPeriodKey(record);
+    const key = `${plantId}::${period}`;
+    if (seen.has(key)) return { ...record, id: seen.get(key) };
+    const hit = (existingRecords || []).find((r) => {
+      const rPlant = r.plant_id || r.plantId;
+      if (rPlant && rPlant !== plantId) return false;
+      return getPeriodKey(r) === period;
+    });
+    const id = hit ? hit.id : record.id;
+    seen.set(key, id);
+    return { ...record, id };
+  });
+}
+
+const dailyPeriodKey = (r) => String(r.date || '').slice(0, 10);
+const monthlyPeriodKey = (r) => r.month || '';
+
 export async function importEnergyBulk(rows, userName) {
   const imports = rows.map((row) => normalizeEnergyRecord({
     date: String(row.date || '').slice(0, 10),
@@ -5014,11 +5054,14 @@ export async function importEnergyBulk(rows, userName) {
 
   const successful = [];
   const failed = [];
+  const energyPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const energyImports = assignEnergyImportIds(state.energy, energyPlantId, imports, dailyPeriodKey);
+  const energyReuse = new Set(energyImports.map((r) => r.id));
+  state = { ...state, energy: [...energyImports, ...state.energy.filter((r) => !energyReuse.has(r.id))] };
+  commit('energy');
 
-  for (const record of imports) {
+  for (const record of energyImports) {
     try {
-      state = { ...state, energy: [...imports, ...state.energy] };
-      commit('energy');
       await commitAndQueue('energy', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5037,11 +5080,14 @@ export async function importDailyUtilityLogBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailyUtilityLog({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const dulPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const dulImports = assignEnergyImportIds(state.dailyUtilityLog, dulPlantId, imports, dailyPeriodKey);
+  const dulReuse = new Set(dulImports.map((r) => r.id));
+  state = { ...state, dailyUtilityLog: [...dulImports, ...state.dailyUtilityLog.filter((r) => !dulReuse.has(r.id))] };
+  commit('dailyUtilityLog');
 
-  for (const record of imports) {
+  for (const record of dulImports) {
     try {
-      state = { ...state, dailyUtilityLog: [...imports, ...state.dailyUtilityLog] };
-      commit('dailyUtilityLog');
       await commitAndQueue('dailyUtilityLog', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5060,11 +5106,14 @@ export async function importMonthlyHerbicideBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyHerbicide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const herbPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const herbImports = assignEnergyImportIds(state.monthlyHerbicide, herbPlantId, imports, monthlyPeriodKey);
+  const herbReuse = new Set(herbImports.map((r) => r.id));
+  state = { ...state, monthlyHerbicide: [...herbImports, ...state.monthlyHerbicide.filter((r) => !herbReuse.has(r.id))] };
+  commit('monthlyHerbicide');
 
-  for (const record of imports) {
+  for (const record of herbImports) {
     try {
-      state = { ...state, monthlyHerbicide: [...imports, ...state.monthlyHerbicide] };
-      commit('monthlyHerbicide');
       await commitAndQueue('monthlyHerbicide', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5083,11 +5132,14 @@ export async function importMonthlyInsecticideBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyInsecticide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const insPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const insImports = assignEnergyImportIds(state.monthlyInsecticide, insPlantId, imports, monthlyPeriodKey);
+  const insReuse = new Set(insImports.map((r) => r.id));
+  state = { ...state, monthlyInsecticide: [...insImports, ...state.monthlyInsecticide.filter((r) => !insReuse.has(r.id))] };
+  commit('monthlyInsecticide');
 
-  for (const record of imports) {
+  for (const record of insImports) {
     try {
-      state = { ...state, monthlyInsecticide: [...imports, ...state.monthlyInsecticide] };
-      commit('monthlyInsecticide');
       await commitAndQueue('monthlyInsecticide', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5106,11 +5158,14 @@ export async function importMonthlyWaterBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyWater({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const watPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const watImports = assignEnergyImportIds(state.monthlyWater, watPlantId, imports, monthlyPeriodKey);
+  const watReuse = new Set(watImports.map((r) => r.id));
+  state = { ...state, monthlyWater: [...watImports, ...state.monthlyWater.filter((r) => !watReuse.has(r.id))] };
+  commit('monthlyWater');
 
-  for (const record of imports) {
+  for (const record of watImports) {
     try {
-      state = { ...state, monthlyWater: [...imports, ...state.monthlyWater] };
-      commit('monthlyWater');
       await commitAndQueue('monthlyWater', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5129,11 +5184,14 @@ export async function importMonthlyAirCompressorBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyAirCompressor({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const airPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const airImports = assignEnergyImportIds(state.monthlyAirCompressor, airPlantId, imports, monthlyPeriodKey);
+  const airReuse = new Set(airImports.map((r) => r.id));
+  state = { ...state, monthlyAirCompressor: [...airImports, ...state.monthlyAirCompressor.filter((r) => !airReuse.has(r.id))] };
+  commit('monthlyAirCompressor');
 
-  for (const record of imports) {
+  for (const record of airImports) {
     try {
-      state = { ...state, monthlyAirCompressor: [...imports, ...state.monthlyAirCompressor] };
-      commit('monthlyAirCompressor');
       await commitAndQueue('monthlyAirCompressor', 'upsert', record);
       successful.push(record);
     } catch (err) {
@@ -5152,11 +5210,14 @@ export async function importDailySolarGenerationBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailySolarGeneration({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
   const successful = [];
   const failed = [];
+  const solPlantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const solImports = assignEnergyImportIds(state.dailySolarGeneration, solPlantId, imports, dailyPeriodKey);
+  const solReuse = new Set(solImports.map((r) => r.id));
+  state = { ...state, dailySolarGeneration: [...solImports, ...state.dailySolarGeneration.filter((r) => !solReuse.has(r.id))] };
+  commit('dailySolarGeneration');
 
-  for (const record of imports) {
+  for (const record of solImports) {
     try {
-      state = { ...state, dailySolarGeneration: [...imports, ...state.dailySolarGeneration] };
-      commit('dailySolarGeneration');
       await commitAndQueue('dailySolarGeneration', 'upsert', record);
       successful.push(record);
     } catch (err) {

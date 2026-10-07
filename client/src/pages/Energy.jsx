@@ -72,7 +72,7 @@ const TABS = [
 const r1 = (n) => Math.round(n * 10) / 10;
 const toN = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const mk = (v) => { const d = new Date(v); return Number.isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const dateInRange = (d, f, t) => { if (!d) return false; if (f && d < f) return false; if (t && d > t) return false; return true; };
+const dateInRange = (d, f, t) => { if (!d) return false; const day = String(d).slice(0, 10); if (f && day < f) return false; if (t && day > t) return false; return true; };
 const monthInRange = (m, f, t) => { if (!m) return false; if (f && m < f.slice(0, 7)) return false; if (t && m > t.slice(0, 7)) return false; return true; };
 const FILTER_PRESETS = [
   { label: 'This Month', get: () => { const d = new Date(); return { from: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`, to: new Date().toISOString().slice(0, 10) }; } },
