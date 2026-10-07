@@ -2067,7 +2067,13 @@ function commit(entity) {
  * Supabase fires a postgres_changes event the moment the DB row changes,
  * which every subscribed client receives within ~100-300 ms.
  */
-function commitAndQueue(entity, action, payload) {
+/**
+ * Persist locally + notify UI + write directly to Supabase immediately.
+ * Direct write is critical for cross-PC / cross-device Realtime broadcast:
+ * Supabase fires a postgres_changes event the moment the DB row changes,
+ * which every subscribed client receives within ~100-300 ms.
+ */
+async function commitAndQueue(entity, action, payload) {
   // Plant enforcement: ALWAYS override plant_id from current context — never trust payload
   let safePayload = payload;
   if (payload && typeof payload === 'object' && payload !== null && SYNCED_ENTITIES.includes(entity)) {
