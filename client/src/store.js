@@ -3477,7 +3477,7 @@ export function deleteDailySolarGeneration(id, userName) {
 // ── Energy Settings CRUD (upsert single row) ────────────────────────────
 export const getEnergySettings = () => state.energySettings;
 
-export function upsertEnergySettings(fields, userName) {
+export async function upsertEnergySettings(fields, userName) {
   const existing = state.energySettings;
   const updated = normalizeEnergySettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
   state = { ...state, energySettings: updated };
@@ -3824,7 +3824,7 @@ export async function purgeKpiRecords(userName, periodFrom, periodTo) {
   return { purged: toDelete.length };
 }
 
-export function upsertKpiSettings(fields, userName) {
+export async function upsertKpiSettings(fields, userName) {
   const existing = state.kpiSettings || normalizeKpiSettings({});
   const updated = normalizeKpiSettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
   state = { ...state, kpiSettings: updated };
@@ -4165,7 +4165,7 @@ export async function purgeDailySolarGeneration(userName, dateFrom, dateTo) {
 }
 
 
-export function importMachinePmRecordsBulk(rows, userName) {
+export async function importMachinePmRecordsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
   const autoMapped = [];
@@ -4547,7 +4547,7 @@ export function deleteMachineBreakdownLog(id, userName) {
  * Time, Breakdown End Time, Downtime Hours (auto-calculated when blank),
  * Failure Cause, Action Taken, Status, Remarks.
  */
-export function importMachineBreakdownLogsBulk(rows, userName) {
+export async function importMachineBreakdownLogsBulk(rows, userName) {
   const logs = [];
   const unmatchedRows = [];
   const autoMapped = [];
@@ -4861,7 +4861,7 @@ function ensureMachine(fields) {
   return machine;
 }
 
-export function importMachinesBulk(rows, userName) {
+export async function importMachinesBulk(rows, userName) {
   let created = 0;
   let updated = 0;
   const touchedMachines = [];
