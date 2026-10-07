@@ -126,6 +126,22 @@ const login = async (username, password) => {
         { id: enriched.id, username: enriched.username, role: enriched.role, full_name: enriched.full_name }
       );
       document.cookie = `token=${token}; path=/; max-age=86400000; sameSite=none; secure=${window.location.protocol === 'https:'}`;
+      // Also establish a Supabase session so that cloud writes (imports, etc.) work
+      // with RLS using the same JWT. The Supabase access_token uses the same secret
+      // as the Express API, so the role-based RLS policies will apply consistently.
+      if (supabase && isSupabaseConfigured) {
+        try {
+          await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: token,
+            expires_at: Math.floor(Date.now() / 1000) + 86400,
+          });
+        } catch {
+          // If setting the session fails (e.g. token format mismatch), continue
+          // without it — the user remains logged in locally but imports may require
+          // a proper Supabase Auth session.
+        }
+      }
       setUser(enriched);
       return { user: enriched };
     }
