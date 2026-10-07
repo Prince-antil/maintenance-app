@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { notifyRealtimeAuthChange } from '../store.js';
 import { normalizeRole, ROLES } from '../lib/plantAccess.js';
+import { jwtSign } from '../lib/jwt-utils.js';
 
 const AuthContext = createContext(null);
 
@@ -104,7 +105,7 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (username, password) => {
+const login = async (username, password) => {
     try {
       const d = await api.login(username, password);
       sessionStorage.removeItem(OFFLINE_SESSION_KEY);
@@ -120,6 +121,11 @@ export function AuthProvider({ children }) {
       }
       const enriched = enrichUser(entry.user);
       sessionStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(enriched));
+      // Set JWT cookie so the Express API can authenticate this session
+      const token = jwtSign(
+        { id: enriched.id, username: enriched.username, role: enriched.role, full_name: enriched.full_name }
+      );
+      document.cookie = `token=${token}; path=/; max-age=86400000; sameSite=none; secure=${window.location.protocol === 'https:'}`;
       setUser(enriched);
       return { user: enriched };
     }
