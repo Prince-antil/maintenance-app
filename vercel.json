@@ -1,4 +1,8 @@
 {
+  "env": {
+    "VITE_SUPABASE_URL": "https://rcrulczatkgqzybizwtx.supabase.co",
+    "VITE_SUPABASE_ANON_KEY": "sb_publishable_qNgb7m4gbqiI9l51snGbKA_RfNrAqyr"
+  },
   "buildCommand": "cd client && node scripts/generate-master-template.mjs && npm run build",
   "outputDirectory": "client/dist",
   "installCommand": "npm install && cd client && npm install --include=dev",
