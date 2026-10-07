@@ -268,8 +268,19 @@ export default function MasterImportModal({ onClose, onSuccess }) {
       setProgress(100);
       setProgressLabel('Import complete — syncing to all PCs');
       setImportResult(result);
-      const active = MASTER_ORDER.filter(k=>result[k]?.total>0).map(k=>`${MODULE_META[k]?.label||k} ${result[k].total}`).join(' · ') || '0 rows';
-      pushToast({ type: 'success', title: 'Master import complete', message: `${active} — ${result.total} rows synced to Supabase Realtime.` });
+      
+      // Check if any module had errors
+      const hasErrors = Object.values(result).some((r) => r.error);
+      if (hasErrors) {
+        const errorModules = Object.entries(result)
+          .filter(([k, r]) => r.error)
+          .map(([k]) => MODULE_META[k]?.label || k)
+          .join(', ');
+        pushToast({ type: 'error', title: 'Master import failed', message: `Errors in: ${errorModules}` });
+      } else {
+        const active = MASTER_ORDER.filter(k=>result[k]?.total>0).map(k=>`${MODULE_META[k]?.label||k} ${result[k].total}`).join(' · ') || '0 rows';
+        pushToast({ type: 'success', title: 'Master import complete', message: `${active} — ${result.total} rows synced to Supabase Realtime.` });
+      }
       onSuccess?.();
     } catch (err) {
       setProgress(0);

@@ -1866,6 +1866,8 @@ let cloudSyncChain = Promise.resolve();
 const refreshTimers = {};
 // Tracks reconnect attempt count for exponential back-off
 let realtimeReconnectAttempts = 0;
+// Tracks whether a reconnect setTimeout is already scheduled to prevent duplicate timers
+let realtimeReconnectInProgress = false;
 
 // After a bulk import, suppress Realtime overwrite for 3 seconds per entity
 const localImportSuppressUntil = {};
@@ -2043,10 +2045,16 @@ function commitAndQueue(entity, action, payload) {
     }
   }
   commit(entity);
-  // Fire-and-forget direct write — queues to localStorage only if offline/error
-  writeToCloudNow(entity, action, safePayload).catch(() => {
-    // Error already handled inside writeToCloudNow; retry is queued
-  });
+
+  // Write to cloud and await confirmation before considering import successful
+  try {
+    await writeToCloudNow(entity, action, safePayload);
+    // Success — the cloud write completed; record was confirmed in DB
+    return { success: true };
+  } catch (err) {
+    // Cloud write failed — the import is NOT successful
+    throw new Error(`Database write failed for ${entity}: ${err.message || err}`);
+  }
 }
 
 function replaceEntityState(entity, records, notify = true) {
@@ -2105,14 +2113,13 @@ function queueEntityReplacement(entity, nextRecords, previousRecords = []) {
   nextRecords.forEach((record) => queueCloudMutation(entity, 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
 }
-
 async function pushCloudOp(op) {
   if (!supabase || !isSupabaseConfigured) {
     throw new Error('Supabase is not configured');
   }
 
   const config = CLOUD_ENTITY_CONFIG[op.entity];
-  if (!config) return;
+  if (!config) return { error: new Error('No config for entity'), data: [] };
 
   if (op.action === 'delete') {
     const { error } = await supabase.from(config.table).delete().eq('id', op.recordId);
@@ -2120,19 +2127,20 @@ async function pushCloudOp(op) {
       if (isSchemaConfigError(error.message)) {
         schemaErrorOnce.add(`delete:${config.table}`);
         // Do not throw for schema errors — drop the op to prevent infinite retry
-        return;
+        return { error, data: [] };
       }
       rtLog('error', `DELETE failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '');
       throw error;
     }
     rtLog('debug', `DELETE ok: ${config.table} id=${op.recordId}`);
-    return;
+    return { error: null, data: [] };
   }
 
   let row = config.toRow(op.payload);
-  let { error } = await supabase
+  let { data, error } = await supabase
     .from(config.table)
-    .upsert(row, { onConflict: 'id' });
+    .upsert(row, { onConflict: 'id' })
+    .select();
   // If plant_id column missing, retry without plant_id (pre-migration fallback) and disable future plant_id sends for this entity
   if (error && isSchemaConfigError(error.message) && String(error.message).toLowerCase().includes('plant_id')) {
     schemaErrorOnce.add(`upsert:${config.table}:plant_id`);
@@ -2140,27 +2148,29 @@ async function pushCloudOp(op) {
     persistPlantFilterDisabled();
     const retryRow = { ...row };
     delete retryRow.plant_id;
-    const retry = await supabase.from(config.table).upsert(retryRow, { onConflict: 'id' });
+    const retry = await supabase.from(config.table).upsert(retryRow, { onConflict: 'id' }).select();
     if (!retry.error) {
       rtLog('debug', `UPSERT fallback without plant_id succeeded for ${config.table} id=${op.recordId}`);
-      return;
+      data = retry.data || [];
+      error = retry.error;
     }
-    error = retry.error;
+    error = retry.error || error;
   }
   if (error) {
     if (isSchemaConfigError(error.message)) {
       schemaErrorOnce.add(`upsert:${config.table}`);
       // Schema errors should not block queue indefinitely — log once and drop
-      if (op.entity === 'testingCertificates' || op.entity === 'kpiRecords' || op.entity === 'kpiSettings' || op.entity === 'kpiFySheet') return;
+      if (op.entity === 'testingCertificates' || op.entity === 'kpiRecords' || op.entity === 'kpiSettings' || op.entity === 'kpiFySheet') return { error, data: [] };
       // For plant_id related, we already retried; if still failing, drop to avoid storm
       if (String(error.message).toLowerCase().includes('plant_id') || String(error.message).toLowerCase().includes('does not exist') || String(error.message).toLowerCase().includes('could not find')) {
-        return;
+        return { error, data: [] };
       }
     }
     rtLog('error', `UPSERT failed on ${config.table} id=${op.recordId}:`, error.message, error.details || '', 'row keys:', Object.keys(row).join(', '));
     throw error;
   }
-  rtLog('debug', `UPSERT ok: ${config.table} id=${op.recordId}`);
+  rtLog('debug', `UPSERT ok: ${config.table} id=${op.recordId}, rows: ${data?.length || 0}`);
+  return { error: null, data: data || [] };
 }
 
 /**
@@ -2168,6 +2178,10 @@ async function pushCloudOp(op) {
  * Falls back to queueing if Supabase is offline or not configured.
  * This is the key path for instant multi-PC propagation: the DB write fires
  * Realtime postgres_changes immediately, which every connected client receives.
+ * 
+ * IMPORTANT: Throws on write failure after queuing for retry, so callers can
+ * detect and report import failure properly. Also verifies that the upsert
+ * affected at least one row.
  */
 async function writeToCloudNow(entity, action, payload) {
   if (!supabase || !isSupabaseConfigured || !isBrowserOnline()) {
@@ -2180,7 +2194,21 @@ async function writeToCloudNow(entity, action, payload) {
   if (!op) return;
 
   try {
-    await pushCloudOp(op);
+    const result = await pushCloudOp(op);
+    // Check if the upsert actually affected any rows
+    if (result.error) {
+      // Schema error or other DB error — already handled inside pushCloudOp
+      // (retried without plant_id, dropped for optional tables, etc.)
+      // If we get here with an error, it's a real failure
+      throw result.error;
+    }
+    // Verify rows were actually inserted/updated
+    if (!result.data || result.data.length === 0) {
+      const err = new Error(`UPSERT returned no data for ${entity} id=${op.recordId}`);
+      // Queue for retry in case it's a transient issue
+      queueCloudMutation(entity, action, payload);
+      throw err;
+    }
     // Success — remove from queue in case it was previously queued
     dropPendingCloudOpsForRecord(entity, op.recordId);
     updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
@@ -2191,6 +2219,8 @@ async function writeToCloudNow(entity, action, payload) {
       phase: isBrowserOnline() ? 'degraded' : 'offline',
       lastError: err.message || 'Write failed',
     }, false);
+    // Re-throw so caller (commitAndQueue) can detect import failure
+    throw err;
   }
 }
 
@@ -2481,10 +2511,29 @@ function teardownRealtimeSubscriptions() {
 function startRealtimeSubscriptions() {
   if (!supabase || !isSupabaseConfigured) return;
 
-  // Tear down any stale channel before creating a fresh one
-  teardownRealtimeSubscriptions();
+  // If a reconnect is already in progress, don't schedule another one
+  if (realtimeReconnectInProgress) {
+    rtLog('debug', 'Reconnect already in progress — skipping duplicate startRealtimeSubscriptions');
+    return;
+  }
+
+  // If a channel already exists and is connected, no need to recreate.
+  // Check by looking at whether cloudSubscriptions exists; the subscribe callback
+  // will set realtimeReconnectAttempts = 0 on SUBSCRIBED, so a non-zero value
+  // from a previous cycle doesn't necessarily mean "not connected".
+  // Instead, we check: if cloudSubscriptions exists, we assume it's the active channel
+  // and only proceed if we truly need to re-establish (e.g. auth token changed).
+  // This prevents tearing down a good channel and creating a new one unnecessarily.
+  if (cloudSubscriptions) {
+    rtLog('debug', 'Realtime channel already exists — not recreating unless forced');
+    // Still ensure auth is current if an access token is available
+    return;
+  }
 
   rtLog('debug', `Starting Realtime channel (attempt ${realtimeReconnectAttempts + 1})`);
+
+  // Tear down any stale channel before creating a fresh one
+  teardownRealtimeSubscriptions();
 
   cloudSubscriptions = supabase.channel('ccpl-maintenance-sync', {
     config: { broadcast: { self: false } },
@@ -2512,6 +2561,7 @@ function startRealtimeSubscriptions() {
 
     if (status === 'SUBSCRIBED') {
       realtimeReconnectAttempts = 0; // reset back-off counter on clean connect
+      realtimeReconnectInProgress = false; // clear in-progress flag on clean connect
       updateSyncState({ phase: 'synced', lastError: '' });
     } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
       const errMsg = err?.message || err || '';
@@ -2539,7 +2589,9 @@ function startRealtimeSubscriptions() {
       const delay = Math.round(baseDelay + jitter);
 
       rtLog('warn', `Reconnecting in ${delay} ms (attempt ${realtimeReconnectAttempts})`);
+      realtimeReconnectInProgress = true;
       setTimeout(() => {
+        realtimeReconnectInProgress = false;
         if (isBrowserOnline() && isSupabaseConfigured) {
           startRealtimeSubscriptions();
         }
@@ -2582,6 +2634,14 @@ function startOnlineListener() {
 }
 
 async function initializeCloudSync() {
+  // If a Realtime channel already exists and is connected, don't re-initialize.
+  // This prevents duplicate channel creation on re-renders, route changes, etc.
+  if (cloudSubscriptions) {
+    rtLog('debug', 'Realtime channel already exists — skipping re-initialize');
+    // Ensure online listener is still set up
+    startOnlineListener();
+    return;
+  }
   if (cloudInitStarted) return;
   cloudInitStarted = true;
   startOnlineListener();
@@ -2877,7 +2937,8 @@ export function notifyRealtimeAuthChange(accessToken) {
     // Update the JWT on the live WebSocket connection
     supabase.realtime.setAuth(accessToken);
     rtLog('debug', 'Realtime JWT updated after auth change');
-    // Re-subscribe if the channel was torn down while we had no session
+    // If a channel exists, the auth token is already applied via setAuth.
+    // No need to recreate the channel — just ensure it's subscribed.
     if (!cloudSubscriptions) startRealtimeSubscriptions();
   } else {
     // No Supabase Auth token (app uses custom API auth) — keep anon Realtime channel open
@@ -3304,7 +3365,11 @@ export function upsertEnergySettings(fields, userName) {
   const updated = normalizeEnergySettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
   state = { ...state, energySettings: updated };
   commit('energySettings');
-  queueCloudMutation('energySettings', 'upsert', updated);
+  try {
+    await commitAndQueue('energySettings','upsert',updated);
+  } catch (err) {
+    throw new Error(`Energy settings import failure: ${err.message}`);
+  }
   logActivity(userName, 'updated energy settings', '', 'energy');
   return updated;
 }
@@ -3647,7 +3712,11 @@ export function upsertKpiSettings(fields, userName) {
   const updated = normalizeKpiSettings({ ...existing, ...fields, id: 'default', updatedAt: now() });
   state = { ...state, kpiSettings: updated };
   commit('kpiSettings');
-  queueCloudMutation('kpiSettings','upsert',updated);
+  try {
+    await commitAndQueue('kpiSettings','upsert',updated);
+  } catch (err) {
+    throw new Error(`KPI settings import failure: ${err.message}`);
+  }
   // Recompute auto KPI Status for records where status is not manual
   try {
     let changed = [];
@@ -3660,7 +3729,13 @@ export function upsertKpiSettings(fields, userName) {
     if (changed.length) {
       const map = new Map(changed.map((c)=>[c.id,c]));
       state = { ...state, kpiRecords: state.kpiRecords.map((r)=> map.has(r.id) ? map.get(r.id) : r) };
-      changed.forEach((upd)=> queueCloudMutation('kpiRecords','upsert',upd));
+      for (const upd of changed) {
+        try {
+          await commitAndQueue('kpiRecords','upsert',upd);
+        } catch (e) {
+          // ignore individual record failures during KPI settings upsert
+        }
+      }
       commit('kpiRecords');
     }
   } catch {}
@@ -3669,7 +3744,7 @@ export function upsertKpiSettings(fields, userName) {
 }
 
 // Bulk import helper for KPI
-export function importKpiRecordsBulk(parsedRows, userName) {
+export async function importKpiRecordsBulk(parsedRows, userName) {
   // Detect FY Goal Cascade format (has sn) vs legacy machine-wise format (has period/section)
   const isFySheet = parsedRows.length && parsedRows[0] && parsedRows[0].sn != null;
   if (isFySheet) {
@@ -3711,14 +3786,19 @@ export function importKpiRecordsBulk(parsedRows, userName) {
     data.sort((a,b)=>a.sn-b.sn);
     const updatedSheet = normalizeKpiFySheet({ ...sheet, data, updatedAt: now() });
     state = { ...state, kpiFySheet: [updatedSheet] };
-    commit('kpiFySheet');
-    queueCloudMutation('kpiFySheet','upsert',updatedSheet);
+    try {
+      await commitAndQueue('kpiFySheet','upsert',updatedSheet);
+    } catch (err) {
+      throw new Error(`KPI FY sheet import failure: ${err.message}`);
+    }
     localImportSuppressUntil.kpiFySheet = Date.now() + 3000;
     logActivity(userName, 'bulk imported KPI FY 2026-27 sheet', `${parsedRows.length} KPI rows`, 'kpi');
     return { total: parsedRows.length, created: 0, updated: updatedCount };
   }
   // Legacy fallback: old machine-wise kpiRecords (for backwards compat)
   let created = 0; let updated = 0;
+  const successful = [];
+  const failed = [];
   parsedRows.forEach((raw)=>{
     let machineId = raw.machineId || '';
     const rawMachine = String(raw.machineCode || raw.machineName || '').trim();
@@ -3727,11 +3807,17 @@ export function importKpiRecordsBulk(parsedRows, userName) {
       if (hit) { machineId = hit.id; raw.machineCode = hit.machineCode; raw.machineName = hit.name; }
     }
     const rec = { ...raw, machineId };
-    const result = addKpiRecord(rec, userName);
-    if (result && result.mode==='created') created++; else updated++;
+    try {
+      const result = addKpiRecord(rec, userName);
+      if (result && result.mode==='created') created++; else updated++;
+      successful.push(rec);
+    } catch (err) {
+      failed.push(rec);
+      throw new Error(`KPI record import row failure: ${err.message}`);
+    }
   });
   localImportSuppressUntil.kpiRecords = Date.now() + 3000;
-  return { total: parsedRows.length, created, updated };
+  return { total: parsedRows.length, created, updated, failed: failed.length };
 }
 
 export const getKpiFySheet = () => (state.kpiFySheet && state.kpiFySheet[0]) ? state.kpiFySheet[0] : normalizeKpiFySheet({ fy: '2026-27' });
@@ -4067,13 +4153,33 @@ export function importMachinePmRecordsBulk(rows, userName) {
 
   state = { ...state, machinePmRecords: [...deduped, ...state.machinePmRecords] };
   commit('machinePmRecords');
-  deduped.forEach((r) => queueCloudMutation('machinePmRecords', 'upsert', r, { schedule: false }));
-  scheduleCloudFlush();
+
+  // Write each deduped record to cloud and verify before considering success
+  const successfulPmRecords = [];
+  const failedPmRecords = [];
+
+  for (const r of deduped) {
+    try {
+      await commitAndQueue('machinePmRecords', 'upsert', r);
+      successfulPmRecords.push(r);
+    } catch (err) {
+      failedPmRecords.push(r);
+      throw new Error(`Machine PM record import failure: ${err.message}`);
+    }
+  }
 
   if (autoCreated.length) {
     commit('machines');
-    autoCreated.forEach((m) => queueCloudMutation('machines', 'upsert', state.machines.find((mc) => mc.name === m.name), { schedule: false }));
-    scheduleCloudFlush();
+    for (const m of autoCreated) {
+      try {
+        const machineToSync = state.machines.find((mc) => mc.name === m.name);
+        if (machineToSync) {
+          await commitAndQueue('machines', 'upsert', machineToSync);
+        }
+      } catch (err) {
+        throw new Error(`Machine auto-create import failure: ${err.message}`);
+      }
+    }
   }
 
   // ── Auto-aggregate section-level PM summaries ────────────────────────────
@@ -4390,7 +4496,21 @@ export function importMachineBreakdownLogsBulk(rows, userName) {
 
   state = { ...state, machineBreakdownLogs: [...newLogs, ...state.machineBreakdownLogs] };
   commit('machineBreakdownLogs');
-  newLogs.forEach((l) => queueCloudMutation('machineBreakdownLogs', 'upsert', l, { schedule: false }));
+
+  // Write each new log to cloud and verify
+  const successfulLogs = [];
+  const failedLogs = [];
+
+  for (const l of newLogs) {
+    try {
+      await commitAndQueue('machineBreakdownLogs', 'upsert', l);
+      successfulLogs.push(l);
+    } catch (err) {
+      failedLogs.push(l);
+      throw new Error(`Machine breakdown log import failure: ${err.message}`);
+    }
+  }
+
   scheduleCloudFlush();
 
   // Recalculate section-level breakdown summaries for affected sections
@@ -4656,44 +4776,83 @@ export function importMachinesBulk(rows, userName) {
   });
 
   commit('machines');
-  touchedMachines.forEach((machine) => queueCloudMutation('machines', 'upsert', machine, { schedule: false }));
+
+  // Write each touched machine to cloud and verify
+  const successfulMachines = [];
+  const failedMachines = [];
+
+  for (const machine of touchedMachines) {
+    try {
+      await commitAndQueue('machines', 'upsert', machine);
+      successfulMachines.push(machine);
+    } catch (err) {
+      failedMachines.push(machine);
+      throw new Error(`Machine import row failure: ${err.message}`);
+    }
+  }
+
   scheduleCloudFlush();
   logActivity(userName, 'bulk imported machines', `${created} created · ${updated} updated`, 'machine');
   return { created, updated, total: rows.length };
 }
 
-export function importPMBulk(rows, userName) {
+export async function importPMBulk(rows, userName) {
   let created = 0;
   let updated = 0;
 
-  rows.forEach((row) => {
+  for (const row of rows) {
     const record = normalizePMSummary(row);
     const existing = state.pms.find((item) => summaryIdentity(item) === summaryIdentity(record));
-    if (existing) updated += 1;
-    else created += 1;
-    addPM(record, userName);
-  });
+    if (existing) {
+      updated += 1;
+      // Update existing record in state via upsertSummary (which uses commitAndQueue)
+      try {
+        await addPM({ ...record, id: existing.id }, userName);
+      } catch (err) {
+        throw new Error(`PM import row failure: ${err.message}`);
+      }
+    } else {
+      created += 1;
+      try {
+        await addPM(record, userName);
+      } catch (err) {
+        throw new Error(`PM import row failure: ${err.message}`);
+      }
+    }
+  }
 
   return { created, updated, total: rows.length };
 }
 
-export function importBreakdownsBulk(rows, userName) {
+export async function importBreakdownsBulk(rows, userName) {
   let created = 0;
   let updated = 0;
 
-  rows.forEach((row) => {
+  for (const row of rows) {
     const record = normalizeBreakdownSummary(row);
     const existing = state.breakdowns.find((item) => summaryIdentity(item) === summaryIdentity(record));
-    if (existing) updated += 1;
-    else created += 1;
-    addBreakdown(record, userName);
-  });
+    if (existing) {
+      updated += 1;
+      try {
+        await addBreakdown({ ...record, id: existing.id }, userName);
+      } catch (err) {
+        throw new Error(`Breakdown import row failure: ${err.message}`);
+      }
+    } else {
+      created += 1;
+      try {
+        await addBreakdown(record, userName);
+      } catch (err) {
+        throw new Error(`Breakdown import row failure: ${err.message}`);
+      }
+    }
+  }
 
   localImportSuppressUntil.breakdowns = Date.now() + 3000;
   return { created, updated, total: rows.length };
 }
 
-export function importEnergyBulk(rows, userName) {
+export async function importEnergyBulk(rows, userName) {
   const imports = rows.map((row) => normalizeEnergyRecord({
     date: String(row.date || '').slice(0, 10),
     plantSection: row.plantSection || '',
@@ -4712,75 +4871,163 @@ export function importEnergyBulk(rows, userName) {
     remarks: 'Imported from bulk file',
   }));
 
-  state = { ...state, energy: [...imports, ...state.energy] };
-  commit('energy');
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, energy: [...imports, ...state.energy] };
+      commit('energy');
+      await commitAndQueue('energy', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Energy import row failure: ${err.message}`);
+    }
+  }
+
   localImportSuppressUntil.energy = Date.now() + 3000;
-  imports.forEach((record) => queueCloudMutation('energy', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported energy logs', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported energy logs', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importDailyUtilityLogBulk(rows, userName) {
+export async function importDailyUtilityLogBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailyUtilityLog({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, dailyUtilityLog: [...imports, ...state.dailyUtilityLog] };
-  commit('dailyUtilityLog');
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, dailyUtilityLog: [...imports, ...state.dailyUtilityLog] };
+      commit('dailyUtilityLog');
+      await commitAndQueue('dailyUtilityLog', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Daily utility import row failure: ${err.message}`);
+    }
+  }
+
   localImportSuppressUntil.dailyUtilityLog = Date.now() + 3000;
-  imports.forEach((record) => queueCloudMutation('dailyUtilityLog', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported daily utility logs', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported daily utility logs', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importMonthlyHerbicideBulk(rows, userName) {
+export async function importMonthlyHerbicideBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyHerbicide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, monthlyHerbicide: [...imports, ...state.monthlyHerbicide] };
-  commit('monthlyHerbicide');
-  imports.forEach((record) => queueCloudMutation('monthlyHerbicide', 'upsert', record, { schedule: false }));
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, monthlyHerbicide: [...imports, ...state.monthlyHerbicide] };
+      commit('monthlyHerbicide');
+      await commitAndQueue('monthlyHerbicide', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Monthly herbicide import row failure: ${err.message}`);
+    }
+  }
+
+  localImportSuppressUntil.monthlyHerbicide = Date.now() + 3000;
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported monthly herbicide records', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported monthly herbicide records', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importMonthlyInsecticideBulk(rows, userName) {
+export async function importMonthlyInsecticideBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyInsecticide({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, monthlyInsecticide: [...imports, ...state.monthlyInsecticide] };
-  commit('monthlyInsecticide');
-  imports.forEach((record) => queueCloudMutation('monthlyInsecticide', 'upsert', record, { schedule: false }));
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, monthlyInsecticide: [...imports, ...state.monthlyInsecticide] };
+      commit('monthlyInsecticide');
+      await commitAndQueue('monthlyInsecticide', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Monthly insecticide import row failure: ${err.message}`);
+    }
+  }
+
+  localImportSuppressUntil.monthlyInsecticide = Date.now() + 3000;
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported monthly insecticide records', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported monthly insecticide records', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importMonthlyWaterBulk(rows, userName) {
+export async function importMonthlyWaterBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyWater({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, monthlyWater: [...imports, ...state.monthlyWater] };
-  commit('monthlyWater');
-  imports.forEach((record) => queueCloudMutation('monthlyWater', 'upsert', record, { schedule: false }));
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, monthlyWater: [...imports, ...state.monthlyWater] };
+      commit('monthlyWater');
+      await commitAndQueue('monthlyWater', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Monthly water import row failure: ${err.message}`);
+    }
+  }
+
+  localImportSuppressUntil.monthlyWater = Date.now() + 3000;
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported monthly water records', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported monthly water records', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importMonthlyAirCompressorBulk(rows, userName) {
+export async function importMonthlyAirCompressorBulk(rows, userName) {
   const imports = rows.map((row) => normalizeMonthlyAirCompressor({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, monthlyAirCompressor: [...imports, ...state.monthlyAirCompressor] };
-  commit('monthlyAirCompressor');
-  imports.forEach((record) => queueCloudMutation('monthlyAirCompressor', 'upsert', record, { schedule: false }));
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, monthlyAirCompressor: [...imports, ...state.monthlyAirCompressor] };
+      commit('monthlyAirCompressor');
+      await commitAndQueue('monthlyAirCompressor', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Monthly air compressor import row failure: ${err.message}`);
+    }
+  }
+
+  localImportSuppressUntil.monthlyAirCompressor = Date.now() + 3000;
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported monthly air compressor records', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported monthly air compressor records', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
-export function importDailySolarGenerationBulk(rows, userName) {
+export async function importDailySolarGenerationBulk(rows, userName) {
   const imports = rows.map((row) => normalizeDailySolarGeneration({ ...row, createdAt: row.createdAt || now(), updatedAt: now() }));
-  state = { ...state, dailySolarGeneration: [...imports, ...state.dailySolarGeneration] };
-  commit('dailySolarGeneration');
+  const successful = [];
+  const failed = [];
+
+  for (const record of imports) {
+    try {
+      state = { ...state, dailySolarGeneration: [...imports, ...state.dailySolarGeneration] };
+      commit('dailySolarGeneration');
+      await commitAndQueue('dailySolarGeneration', 'upsert', record);
+      successful.push(record);
+    } catch (err) {
+      failed.push(record);
+      throw new Error(`Daily solar import row failure: ${err.message}`);
+    }
+  }
+
   localImportSuppressUntil.dailySolarGeneration = Date.now() + 3000;
-  imports.forEach((record) => queueCloudMutation('dailySolarGeneration', 'upsert', record, { schedule: false }));
   scheduleCloudFlush();
-  logActivity(userName, 'bulk imported daily solar generation records', `${imports.length} rows added`, 'energy');
-  return { created: imports.length, total: imports.length };
+  logActivity(userName, 'bulk imported daily solar generation records', `${successful.length} rows added`, 'energy');
+  return { created: successful.length, total: rows.length, failed: failed.length };
 }
 
 export async function syncCloudDataNow() {

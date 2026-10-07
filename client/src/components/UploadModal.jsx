@@ -162,11 +162,24 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
       if (isBulk) {
         setProgress(84);
         setProgressLabel('Importing structured rows into synchronized records');
-        const result = importers[parseState.moduleId](parseState.parsedRows, user?.full_name || 'Prince');
+        let result;
+        try {
+          result = await importers[parseState.moduleId](parseState.parsedRows, user?.full_name || 'Prince');
+        } catch (err) {
+          setProgress(0);
+          setProgressLabel('Import failed');
+          pushToast({
+            type: 'error',
+            title: 'Import failed',
+            message: err.message || 'Import failed - see errors above',
+          });
+          setLoading(false);
+          return;
+        }
         setProgress(100);
         setProgressLabel('Import complete');
 
-        // Build success message with auto-mapping summary
+        // Build success message with auto-mapping summary — only shown if import succeeded
         let message = `${result.total} ${IMPORT_MODULES[parseState.moduleId].shortLabel} records synchronized.`;
         if (result.autoMapped && result.autoMapped.length > 0) {
           const mappedSample = result.autoMapped.slice(0, 3).map((m) => `"${m.fields.machineCode || m.fields.machineName || m.fields.plantSection}" → ${m.machine}`).join(', ');
@@ -174,6 +187,9 @@ export default function UploadModal({ onClose, onSuccess, initialState = {} }) {
         }
         if (result.unmatched && result.unmatched.length > 0) {
           message += ` ${result.unmatched.length} row(s) could not be matched to a machine.`;
+        }
+        if (result.failed && result.failed.length > 0) {
+          message += ` ${result.failed.length} row(s) failed to save to database.`;
         }
         pushToast({
           type: 'success',
