@@ -7,6 +7,23 @@ import { normalizeRole, ROLES } from '../lib/plantAccess.js';
 const AuthContext = createContext(null);
 
 const OFFLINE_SESSION_KEY = 'ccpl_offline_session';
+// Marker set when the user authenticated via the Express API (/api/auth/login
+// or a successful api.me() restore). writeToCloudNow() in store.js treats the
+// presence of either key as "logged into the app" so imports are attempted
+// and verified instead of being refused upfront.
+const API_SESSION_KEY = 'ccpl_api_session';
+
+function markApiSession(username) {
+  try {
+    sessionStorage.setItem(API_SESSION_KEY, JSON.stringify({ username, ts: Date.now() }));
+  } catch {}
+}
+
+function clearApiSession() {
+  try {
+    sessionStorage.removeItem(API_SESSION_KEY);
+  } catch {}
+}
 const NATHUPUR_ID = '00000000-0000-0000-0000-000000000001';
 
 // Offline sign-in directory — passwords stored as SHA-256 digests only,
@@ -90,15 +107,20 @@ export function AuthProvider({ children }) {
   // ── App-level session restore ────────────────────────────────────────────
   useEffect(() => {
     api.me()
-      .then((d) => setUser(enrichUser(d.user)))
+      .then((d) => {
+        setUser(enrichUser(d.user));
+        markApiSession(d.user?.username);
+      })
       .catch(() => {
         // Restore an offline session if one is active
         try {
           const saved = JSON.parse(sessionStorage.getItem(OFFLINE_SESSION_KEY));
           const offline = saved?.username && OFFLINE_USERS[saved.username] ? OFFLINE_USERS[saved.username].user : null;
           setUser(offline ? enrichUser(offline) : null);
+          if (!offline) clearApiSession();
         } catch {
           setUser(null);
+          clearApiSession();
         }
       })
       .finally(() => setLoading(false));
@@ -108,6 +130,7 @@ export function AuthProvider({ children }) {
     try {
       const d = await api.login(username, password);
       sessionStorage.removeItem(OFFLINE_SESSION_KEY);
+      markApiSession(d.user?.username || username);
       const enriched = enrichUser(d.user);
       setUser(enriched);
       return { ...d, user: enriched };
@@ -118,6 +141,7 @@ export function AuthProvider({ children }) {
       if (!entry || (await sha256Hex(password)) !== entry.hash) {
         throw new Error('Invalid credentials');
       }
+      clearApiSession();
       const enriched = enrichUser(entry.user);
       sessionStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(enriched));
       // NOTE: no JWT-cookie minting here on purpose. The browser bundle cannot
@@ -133,6 +157,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     sessionStorage.removeItem(OFFLINE_SESSION_KEY);
+    clearApiSession();
     await api.logout().catch(() => {});
     // Tear down the Realtime channel — notifyRealtimeAuthChange(null)
     // is also called by onAuthStateChange(SIGNED_OUT) if using Supabase Auth.

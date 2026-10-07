@@ -2264,8 +2264,15 @@ async function writeToCloudNow(entity, action, payload) {
     storedSession &&
     storedSession.access_token &&
     storedSession.refresh_token !== undefined !== storedSession.expires_at;
+  // Users authenticated via the Express API (/api/auth/login) carry an
+  // HttpOnly JWT cookie instead of a sessionStorage entry — see
+  // markApiSession() in AuthContext.jsx. Either marker proves app login.
+  let hasApiSession = false;
+  try {
+    hasApiSession = !!sessionStorage.getItem('ccpl_api_session');
+  } catch {}
 
-  if (!storedSession) {
+  if (!storedSession && !hasApiSession) {
     // Not logged into the app at all — do not proceed with cloud write.
     rtLog('warn', 'No app session — cannot perform cloud write');
     throw new Error(
