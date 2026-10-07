@@ -3,7 +3,6 @@ import { api } from '../api.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { notifyRealtimeAuthChange } from '../store.js';
 import { normalizeRole, ROLES } from '../lib/plantAccess.js';
-import { jwtSign } from '../lib/jwt-utils.js';
 
 const AuthContext = createContext(null);
 
@@ -105,7 +104,7 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-const login = async (username, password) => {
+  const login = async (username, password) => {
     try {
       const d = await api.login(username, password);
       sessionStorage.removeItem(OFFLINE_SESSION_KEY);
@@ -121,26 +120,20 @@ const login = async (username, password) => {
       }
       const enriched = enrichUser(entry.user);
       sessionStorage.setItem(OFFLINE_SESSION_KEY, JSON.stringify(enriched));
-      // Set JWT cookie so the Express API can authenticate this session
-      const token = jwtSign(
-        { id: enriched.id, username: enriched.username, role: enriched.role, full_name: enriched.full_name }
-      );
-      document.cookie = `token=${token}; path=/; max-age=86400000; sameSite=none; secure=${window.location.protocol === 'https:'}`;
-      // Also establish a Supabase session so that cloud writes (imports, etc.) work
-      // with RLS using the same JWT. The Supabase access_token uses the same secret
-      // as the Express API, so the role-based RLS policies will apply consistently.
-      if (supabase && isSupabaseConfigured) {
-        try {
-          await supabase.auth.setSession({
-            access_token: token,
-            refresh_token: token,
-            expires_at: Math.floor(Date.now() / 1000) + 86400,
-          });
-        } catch {
-          // If setting the session fails (e.g. token format mismatch), continue
-          // without it — the user remains logged in locally but imports may require
-          // a proper Supabase Auth session.
-        }
+      // Set JWT cookie so the Express API can authenticate this session.
+      // The Express API uses jsonwebtoken with secret 'agro-maint-secret-key-2026'.
+      // We set the cookie here so that api.me() works when the API is unreachable
+      // and offline directory login was used.
+      try {
+        const { default: jwt } = await import('jsonwebtoken');
+        const token = jwt.sign(
+          { id: enriched.id, username: enriched.username, role: enriched.role, full_name: enriched.full_name },
+          'agro-maint-secret-key-2026'
+        );
+        document.cookie = `token=${token}; path=/; max-age=86400000; sameSite=none; secure=${window.location.protocol === 'https:'}`;
+      } catch {
+        // If jsonwebtoken import fails, continue without the cookie —
+        // the user remains logged in locally but api.me() may return 401.
       }
       setUser(enriched);
       return { user: enriched };
