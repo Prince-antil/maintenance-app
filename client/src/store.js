@@ -173,9 +173,48 @@ function getCurrentPlantId() {
     return NATHUPUR_PLANT_ID;
   } catch { return NATHUPUR_PLANT_ID; }
 }
-function ensurePlantId(record) {
-  const pid = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
-  return { ...record, plant_id: pid, plantId: pid };
+/**
+ * Extract the authenticated user session from storage.
+ * Returns the user object if a valid session exists, null otherwise.
+ * This syncs the custom offline session with the Supabase client so that
+ * subsequent REST calls carry the correct JWT for RLS.
+ */
+// ── Session state helpers ──────────────────────────────────────────────────────
+//
+// The application uses custom offline authentication (SHA-256 hashed passwords
+// stored in sessionStorage). The Supabase JS client expects a Supabase Auth
+// JWT for PostgREST RLS. We synchronize the custom session with the Supabase
+// client so that REST carries the correct JWT for RLS validation.
+//
+// If the app is used with Supabase Auth (email/password or OAuth), the native
+// session management applies automatically. For custom offline auth, the login
+// flow must also establish a Supabase Auth session (e.g. via the REST auth
+// endpoint) so that supabase.auth.getSession() returns a valid token.
+//
+// ---------------------------------------------------------------------------
+function getAuthSessionFromStorage() {
+  try {
+    const raw = sessionStorage.getItem('ccpl_offline_session') || localStorage.getItem('ccpl_offline_session');
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    // Validate minimal structure — either a Supabase Auth session or our
+    // custom offline session format that includes a user id.
+    if (!session) return null;
+
+    // Supabase Auth session shape: { access_token, refresh_token, expires_at }
+    if (session.access_token && session.refresh_token !== undefined !== session.expires_at) {
+      return session; // native Supabase Auth session
+    }
+
+    // Custom offline session shape: { user: { id, username, role, plantIds, plantIds }, ... }
+    // This session is valid for app logic but does NOT provide a JWT for Supabase.
+    // We return it so the caller can decide (e.g. show auth required UI).
+    if (session.user && session.user.id) return session;
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 const uid = (p) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -2202,6 +2241,46 @@ async function writeToCloudNow(entity, action, payload) {
     // Offline or not configured — queue for later
     queueCloudMutation(entity, action, payload);
     return;
+  }
+
+  // ── Auth verification ──────────────────────────────────────────────
+  // Ensure a valid Supabase auth session exists before any cloud write.
+  // The Supabase JS client attaches the JWT to PostgREST requests; without it,
+  // RLS rejects the operation with 401 Unauthorized.
+  const storedSession = getAuthSessionFromStorage();
+  const isSupabaseSession =
+    storedSession &&
+    storedSession.access_token &&
+    storedSession.refresh_token !== undefined !== storedSession.expires_at;
+
+  if (!isSupabaseSession) {
+    // No valid Supabase Auth session — do not proceed with cloud write.
+    // The user must have a Supabase Auth session (via login, OAuth, etc.)
+    // before database writes can succeed.  Show a clear error.
+    rtLog('warn', 'No valid Supabase Auth session — cannot perform cloud write');
+    throw new Error(
+      'Import requires an active Supabase Auth session. ' +
+        'Please log in via the application login flow to establish a session ' +
+        'before importing data.'
+    );
+  }
+
+  // 【CRITICAL SYNC】Sync custom offline session with Supabase client
+  // so that PostgREST requests carry the correct JWT for RLS validation.
+  // The app uses custom offline auth (not Supabase Auth), so we must manually
+  // set the session before any cloud write, otherwise the client sends no token
+  // and RLS rejects the request with 401 Unauthorized.
+  if (isSupabaseSession) {
+    try {
+      supabase.auth.setSession({
+        access_token: storedSession.access_token,
+        refresh_token: storedSession.refresh_token,
+        expires_at: storedSession.expires_at,
+      });
+      rtLog('debug', 'Synced Supabase Auth session with client for write');
+    } catch (e) {
+      rtLog('warn', 'Failed to sync session with Supabase client:', e.message);
+    }
   }
 
   const op = buildPendingOp(entity, action, payload);
