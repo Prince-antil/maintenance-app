@@ -2157,12 +2157,26 @@ async function pushCloudOp(op) {
     error = retry.error || error;
   }
   if (error) {
+    // ── permanent errors: do NOT retry indefinitely ────────────────────────
+    const permanentErrorPatterns = [
+      /401|unauthorized|invalid.*token|jwt.*expired/i,
+      /row.level.security|rls policy|violates.*policy/i,
+      /schema.config|missing.*table|does not exist|column.*does not exist/i,
+    ];
+    const isPermanentError = permanentErrorPatterns.some((re) => re.test(error.message || ''));
+    if (isPermanentError) {
+      rtLog('error', `Permanent write error on ${config.table} id=${op.recordId}:`, error.message);
+      // Mark as failed — do NOT queue for retry; caller will show import failure
+      return { error, data: [] };
+    }
+
     if (isSchemaConfigError(error.message)) {
       schemaErrorOnce.add(`upsert:${config.table}`);
       // Schema errors should not block queue indefinitely — log once and drop
       if (op.entity === 'testingCertificates' || op.entity === 'kpiRecords' || op.entity === 'kpiSettings' || op.entity === 'kpiFySheet') return { error, data: [] };
       // For plant_id related, we already retried; if still failing, drop to avoid storm
       if (String(error.message).toLowerCase().includes('plant_id') || String(error.message).toLowerCase().includes('does not exist') || String(error.message).toLowerCase().includes('could not find')) {
+        rtLog('debug', `FETCH fallback without plant_id succeeded for ${config.table} — migration required`);
         return { error, data: [] };
       }
     }
@@ -2213,7 +2227,25 @@ async function writeToCloudNow(entity, action, payload) {
     dropPendingCloudOpsForRecord(entity, op.recordId);
     updateSyncState({ phase: 'synced', lastSyncedAt: now(), lastError: '' }, false);
   } catch (err) {
-    // Write failed — queue it for retry
+    // Write failed — determine if this is a permanent error (RLS, 401) or transient
+    const permanentErrorPatterns = [
+      /401|unauthorized|invalid.*token|jwt.*expired/i,
+      /row.level.security|rls policy|violates.*policy/i,
+    ];
+    const isPermanentError = permanentErrorPatterns.some((re) => re.test(err.message || ''));
+
+    if (isPermanentError) {
+      // Permanent error — do NOT retry. Mark as failed and show import failure.
+      rtLog('error', `Permanent write failure for ${entity}:`, err.message);
+      updateSyncState({
+        phase: isBrowserOnline() ? 'degraded' : 'offline',
+        lastError: err.message || 'Write failed',
+      }, false);
+      // Re-throw without queueing for retry so caller (commitAndQueue) detects failure
+      throw err;
+    }
+
+    // Transient error — queue for retry
     queueCloudMutation(entity, action, payload);
     updateSyncState({
       phase: isBrowserOnline() ? 'degraded' : 'offline',
