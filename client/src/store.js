@@ -2207,6 +2207,22 @@ async function pushCloudOp(op) {
     }
     error = retry.error || error;
   }
+  // If the live table is missing other columns the client sends (schema drift
+  // between repo schema and the deployed project, e.g. pm_logs.duration_hours),
+  // strip each unknown column PostgREST names and retry (max 4). This keeps
+  // imports working instead of failing every row on a stale schema.
+  for (let attempt = 0; attempt < 4 && error; attempt += 1) {
+    const missing = /Could not find the '([^']+)' column/i.exec(error.message || '');
+    if (!missing || missing[1] === 'plant_id' || !(missing[1] in row)) break;
+    const column = missing[1];
+    schemaErrorOnce.add(`upsert:${config.table}:strip:${column}`);
+    rtLog('warn', `UPSERT stripping unknown column ${column} on ${config.table} and retrying`);
+    row = { ...row };
+    delete row[column];
+    const retry = await supabase.from(config.table).upsert(row, { onConflict: 'id' }).select();
+    data = retry.data || [];
+    error = retry.error;
+  }
   if (error) {
     // ── permanent errors: do NOT retry indefinitely ────────────────────────
     const permanentErrorPatterns = [
@@ -2289,7 +2305,8 @@ async function writeToCloudNow(entity, action, payload) {
   }
 
   if (!isSupabaseSession) {
-    rtLog('info', 'No Supabase Auth JWT — attempting write with app session (result will be verified)');
+    // Routine per-row note (debug level = silent unless VITE_REALTIME_DEBUG=true)
+    rtLog('debug', 'No Supabase Auth JWT — attempting write with app session (result will be verified)');
   }
 
   // 【CRITICAL SYNC】Sync custom offline session with Supabase client
@@ -2591,7 +2608,7 @@ function applyRealtimePayload(entity, payload) {
     return;
   }
 
-  rtLog('info',
+  rtLog('debug',
     `← ${eventType} on ${config.table}`,
     `id=${newRow?.id || oldRow?.id || '?'}`,
   );
