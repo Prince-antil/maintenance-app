@@ -4033,7 +4033,51 @@ export function refreshKpiAutoValues(period, section, machineId) {
   });
 }
 
-export async function purgePmRecords(userName) {
+export async function purgePmRecords(userName, monthKey) {
+  // monthKey (YYYY-MM) optional: purge ONLY that month — both the machine
+  // section records punched against specific machines (machine_pm_records,
+  // matched by pmDate) and the section summaries (pm_logs, matched by
+  // period). Without monthKey, purges everything (legacy behavior).
+  if (monthKey) {
+    const targets = state.machinePmRecords.filter((r) => String(r.pmDate || '').slice(0, 7) === monthKey);
+    const sumTargets = state.pms.filter((s) => (s.period || '') === monthKey);
+    const count = targets.length + sumTargets.length;
+    if (count === 0) return { purged: 0, summariesPurged: 0, month: monthKey };
+    const pmIds = new Set(targets.map((r) => r.id));
+    const sumIds = new Set(sumTargets.map((r) => r.id));
+    // Clear local state FIRST to prevent Realtime from re-adding
+    state = {
+      ...state,
+      machinePmRecords: state.machinePmRecords.filter((r) => !pmIds.has(r.id)),
+      pms: state.pms.filter((r) => !sumIds.has(r.id)),
+    };
+    commit('machinePmRecords');
+    commit('pms');
+    notifyStoreUpdate();
+    // Drop queued ops for the purged record ids only — keep other months' ops
+    const queue = loadPendingCloudOps().filter(
+      (op) => !((op.entity === 'machinePmRecords' && pmIds.has(op.recordId)) ||
+        (op.entity === 'pms' && sumIds.has(op.recordId)))
+    );
+    savePendingCloudOps(queue);
+    updateSyncState({ pending: queue.length });
+    localImportSuppressUntil.machinePmRecords = Date.now() + 5000;
+    localImportSuppressUntil.pms = Date.now() + 5000;
+    // Then delete from Supabase
+    if (supabase && isSupabaseConfigured) {
+      if (pmIds.size) {
+        const { error: pmErr } = await supabase.from('machine_pm_records').delete().in('id', [...pmIds]);
+        if (pmErr) { rtLog('error', 'PURGE failed on machine_pm_records:', pmErr.message); throw pmErr; }
+      }
+      if (sumIds.size) {
+        const { error: summaryErr } = await supabase.from('pm_logs').delete().in('id', [...sumIds]);
+        if (summaryErr) { rtLog('error', 'PURGE failed on pm_logs:', summaryErr.message); throw summaryErr; }
+      }
+    }
+    logActivity(userName, `purged PM records (${monthKey})`, `${targets.length} records + ${sumTargets.length} summaries removed`, 'pm');
+    return { purged: targets.length, summariesPurged: sumTargets.length, month: monthKey };
+  }
+
   const previousPmCount = state.machinePmRecords.length;
   const previousSummaryCount = state.pms.length;
 

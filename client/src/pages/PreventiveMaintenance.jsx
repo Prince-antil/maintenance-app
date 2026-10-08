@@ -436,10 +436,10 @@ export default function PreventiveMaintenance() {
     'pm-machine-register.csv'
   );
 
-  const handlePurge = async () => {
+  const handlePurge = async (month) => {
     setPurgeLoading(true);
     try {
-      await purgePmRecords(userName);
+      await purgePmRecords(userName, month || undefined);
       setConfirmPurge(false);
     } catch (err) {
       // error logged inside store
@@ -794,14 +794,19 @@ export default function PreventiveMaintenance() {
       {confirmPurge && (
         <div className="modal-overlay" onClick={(event) => event.target === event.currentTarget && !purgeLoading && setConfirmPurge(false)} role="dialog" aria-modal="true">
           <div className="modal-content glass-card p-6 w-full max-w-sm">
-            <h3 className="text-card-title mb-2">Purge All PM Data</h3>
+            <h3 className="text-card-title mb-2">Purge PM Data</h3>
             <p className="text-body mb-5">
-              This will delete all <span className="text-white font-medium">{machinePmRecords.length} PM records</span> and <span className="text-white font-medium">{pms.length} section summaries</span>.
+              This will delete all <span className="text-white font-medium">{machinePmRecords.length} PM records</span> (machine section included) and <span className="text-white font-medium">{pms.length} section summaries</span>.
               Existing <span className="text-white font-medium">{machines.length} machines</span> will remain untouched.
             </p>
+            {registerMonth && registerMonth !== 'ALL' && (
+              <button onClick={() => handlePurge(registerMonth)} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5 w-full justify-center mb-2">
+                <Trash2 size={12} aria-hidden="true" /> {purgeLoading ? 'Purging...' : `Purge ${availableMonths.find((m) => m.key === registerMonth)?.full || registerMonth} only`}
+              </button>
+            )}
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmPurge(false)} disabled={purgeLoading} className="btn-ghost text-xs">Cancel</button>
-              <button onClick={handlePurge} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
+              <button onClick={() => handlePurge()} disabled={purgeLoading} className="btn-danger text-xs inline-flex items-center gap-1.5">
                 <Trash2 size={12} aria-hidden="true" /> {purgeLoading ? 'Purging...' : 'Purge All'}
               </button>
             </div>
