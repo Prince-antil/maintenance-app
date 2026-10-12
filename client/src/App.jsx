@@ -27,6 +27,7 @@ const Settings = lazy(() => import('./pages/Settings.jsx'));
 const SOPLibrary = lazy(() => import('./pages/SOPLibrary.jsx'));
 const KPIStatus = lazy(() => import('./pages/KPIStatus.jsx'));
 const CorporateDashboard = lazy(() => import('./pages/CorporateDashboard.jsx'));
+const Compliance = lazy(() => import('./pages/Compliance.jsx'));
 const PlantManagement = lazy(() => import('./pages/PlantManagement.jsx'));
 const UserManagement = lazy(() => import('./pages/UserManagement.jsx'));
 
@@ -150,6 +151,7 @@ function AppContent() {
                 <Route path="/breakdowns" element={<Breakdowns />} />
                 <Route path="/pm" element={<PreventiveMaintenance />} />
                 <Route path="/energy" element={<Energy />} />
+                <Route path="/compliance" element={<Compliance />} />
                 <Route path="/kpi" element={<KPIStatus />} />
                 <Route path="/sop" element={<SOPLibrary />} />
                 <Route path="/reports" element={<Reports />} />

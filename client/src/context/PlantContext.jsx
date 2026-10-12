@@ -91,7 +91,7 @@ export function PlantProvider({ children }) {
         try { localStorage.setItem('ccpl_plants_table_missing', 'true'); } catch {}
         // Also persist disabled filter hint for all plant-scoped entities
         try {
-          const allPlantEntities = ['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings'];
+          const allPlantEntities = ['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings','complianceEquipment','complianceInspections'];
           localStorage.setItem('ccpl_plant_filter_disabled', JSON.stringify(allPlantEntities));
         } catch {}
         console.warn('[PlantContext] Schema configuration error — plants table missing:', msg);
