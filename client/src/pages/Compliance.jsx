@@ -5,12 +5,13 @@
 // linking here stores a REFERENCE only (no copy/move/duplicate).
 // Statuses are always derived from dates + outcomes via complianceLogic.
 // =============================================================================
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   useStore, getPlantScopedData,
   addComplianceEquipment, updateComplianceEquipment, deleteComplianceEquipment,
   addComplianceInspection, updateComplianceInspection, deleteComplianceInspection,
   linkMachineCertificate, getComplianceEquipmentStatus,
+  getComplianceSettings, saveComplianceSettings,
 } from '../store.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { usePlant } from '../context/PlantContext.jsx';
@@ -21,11 +22,11 @@ import {
   DUE_SOON_DAYS, categoryLabel, defaultFreqFor,
   filterCompliance, summarizeCompliance, buildComplianceCsv,
 } from '../lib/complianceLogic.js';
-import { supabase, isSupabaseConfigured, SUPABASE_CERT_BUCKET } from '../lib/supabaseClient.js';
+import { uploadComplianceDoc, resolveComplianceDocumentUrl } from '../lib/complianceDocs.js';
 import EmptyState from '../components/EmptyState.jsx';
 import {
-  ClipboardList, Plus, Pencil, Trash2, FileText, Download,
-  ShieldCheck, AlertTriangle, X, Save, Eye, CalendarDays, Award,
+  ClipboardList, Plus, Pencil, Trash2, FileText, Download, Upload, FileSpreadsheet,
+  ShieldCheck, AlertTriangle, X, Save, Eye, CalendarDays, Award, History, Info,
 } from 'lucide-react';
 
 const PAGE_SIZE = 12;
@@ -46,33 +47,6 @@ const saveDismissed = (set) => { try { localStorage.setItem(DISMISS_LS_KEY, JSON
 
 const fmtDate = (d) => (d ? new Date(`${String(d).slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB') : '—');
 
-async function uploadComplianceDoc(file, plantId, equipmentId, eventId, uploadedBy) {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const stamp = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-      const safeName = String(file.name || 'certificate').toLowerCase().replace(/[^a-z0-9.]+/g, '-');
-      const storagePath = `compliance/${plantId}/${equipmentId}/${eventId}/${stamp}-${safeName}`;
-      const { error } = await supabase.storage.from(SUPABASE_CERT_BUCKET).upload(storagePath, file, { cacheControl: '3600', upsert: false });
-      if (!error) {
-        const { data } = supabase.storage.from(SUPABASE_CERT_BUCKET).getPublicUrl(storagePath);
-        return { filename: file.name, storagePath, publicUrl: data?.publicUrl || '', uploadedAt: new Date().toISOString(), uploadedBy };
-      }
-      const { error: fbErr } = await supabase.storage.from('maintenance-documents').upload(storagePath, file, { cacheControl: '3600', upsert: false });
-      if (!fbErr) {
-        const { data } = supabase.storage.from('maintenance-documents').getPublicUrl(storagePath);
-        return { filename: file.name, storagePath, publicUrl: data?.publicUrl || '', uploadedAt: new Date().toISOString(), uploadedBy };
-      }
-    } catch { /* fall through to dataUrl */ }
-  }
-  const dataUrl = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
-  return { filename: file.name, storagePath: '', publicUrl: dataUrl, uploadedAt: new Date().toISOString(), uploadedBy };
-}
-
 function downloadCsv(filename, csv) {
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -92,6 +66,27 @@ const toneCls = {
 function StatusBadge({ status }) {
   const meta = COMPLIANCE_STATUS_META[status] || COMPLIANCE_STATUS_META.NO_CERTIFICATE;
   return <span className={`badge text-[10px] px-2 py-0.5 rounded-full font-bold ${toneCls[meta.tone] || toneCls.info}`}>{meta.label}</span>;
+}
+
+/**
+ * Document link that resolves asynchronously: private-bucket objects get a
+ * short-lived signed URL via resolveComplianceDocumentUrl, offline data URLs
+ * and public objects resolve immediately.
+ */
+function DocLink({ doc }) {
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let alive = true;
+    setUrl(doc?.publicUrl || doc?.dataUrl || '');
+    resolveComplianceDocumentUrl(doc).then((u) => { if (alive && u) setUrl(u); });
+    return () => { alive = false; };
+  }, [doc]);
+  if (!doc || !url) return <span className="text-slate-600 text-[10px]">unavailable</span>;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300">
+      <FileText size={11} /> {doc.filename || 'document'}
+    </a>
+  );
 }
 
 const inp = 'w-full rounded-control bg-white/[0.06] border border-white/[0.12] px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400/60';
@@ -210,7 +205,7 @@ export default function Compliance() {
   const canWrite = canUpload(user?.role);
   const corporate = canViewCorporateDashboard(user?.role);
 
-  const [tab, setTab] = useState('dashboard'); // dashboard | register | reports | settings
+  const [tab, setTab] = useState('dashboard'); // dashboard | register | history | reports | settings | import
   const [reportPlant, setReportPlant] = useState(''); // '' = all authorized (corporate) else current
   const [q, setQ] = useState('');
   const [fCat, setFCat] = useState('');
@@ -226,11 +221,22 @@ export default function Compliance() {
   const [inspectEq, setInspectEq] = useState(null);
   const [detailEq, setDetailEq] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [excelBusy, setExcelBusy] = useState(false);
   const [err, setErr] = useState('');
   const [dismissed, setDismissed] = useState(loadDismissed);
   const [cfgTick, setCfgTick] = useState(0);
+  // History tab filters.
+  const [hQuery, setHQuery] = useState('');
+  const [hResult, setHResult] = useState('');
+  const [hFrom, setHFrom] = useState('');
+  const [hTo, setHTo] = useState('');
+  // Import wizard: parse preview before committing.
+  const [importFile, setImportFile] = useState(null);
+  const [importParsed, setImportParsed] = useState(null);
+  const [importDone, setImportDone] = useState(null);
 
-  const cfg = useMemo(() => ({ dueSoonDays: DUE_SOON_DAYS, ...(loadCfg()), _t: cfgTick }), [cfgTick]);
+  const settings = useMemo(() => getComplianceSettings(currentPlantId), [currentPlantId, rawStore]);
+  const cfg = useMemo(() => ({ dueSoonDays: settings.dueSoonDays, ...(loadCfg()), _t: cfgTick }), [cfgTick, settings]);
   const dueSoonDays = Number(cfg.dueSoonDays) > 0 ? Number(cfg.dueSoonDays) : DUE_SOON_DAYS;
   const customCats = Array.isArray(cfg.customCategories) ? cfg.customCategories : [];
   const freqOverrides = cfg.freqOverrides || {};
@@ -260,13 +266,29 @@ export default function Compliance() {
   const enriched = useMemo(() => scoped.map((e) => {
     const hist = inspectionsByEq[e.id] || [];
     const st = getComplianceEquipmentStatus(e);
+    const docs = [];
+    const seenDocs = new Set();
+    const pushDoc = (d) => {
+      if (!d) return;
+      const key = d.storagePath || d.publicUrl || d.filename || JSON.stringify(d);
+      if (seenDocs.has(key)) return;
+      seenDocs.add(key); docs.push(d);
+    };
+    (Array.isArray(e.documents) ? e.documents : []).forEach(pushDoc);
+    if (e.document) pushDoc(e.document);
+    hist.forEach((h) => {
+      (Array.isArray(h.documents) ? h.documents : []).forEach(pushDoc);
+      if (h.document) pushDoc(h.document);
+    });
     return {
       ...e,
       _status: st.status, _reason: st.reason, _daysLeft: st.daysLeft, _alertDate: st.alertDate,
+      _dueDate: st.dueDate || '', _expiryDate: st.expiryDate || '', _certificateNumber: st.certificateNumber || '',
       _lastResult: hist[0]?.result || '', _lastDate: (hist[0]?.inspectionDate || '').slice(0, 10),
       _certNo: hist[0]?.certificateNumber || '', _agency: hist[0]?.agency || hist[0]?.inspector || '',
       _hasDoc: !!(hist[0]?.document || e.document),
       _history: hist,
+      _documents: docs,
     };
   }), [scoped, inspectionsByEq]);
 
@@ -344,18 +366,23 @@ export default function Compliance() {
   };
 
   const handleDeleteEquipment = async (eq) => {
-    if (!canDelete(user?.role)) { setErr('Only admins can delete compliance records.'); return; }
-    if (!window.confirm(`Delete ${eq.equipmentCode} and its full inspection history?`)) return;
+    if (!canDelete(user?.role)) { setErr('Only admins can retire compliance equipment.'); return; }
+    if (!window.confirm(`Retire ${eq.equipmentCode}? Historical inspections and certificates are retained.`)) return;
     setErr('');
-    try { await deleteComplianceEquipment(eq.id, userName); if (detailEq?.id === eq.id) setDetailEq(null); pushToast({ type: 'success', message: 'Equipment deleted' }); }
-    catch (e) { setErr(e.message || 'Delete failed'); }
+    try {
+      await deleteComplianceEquipment(eq.id, userName);
+      if (detailEq?.id === eq.id) setDetailEq(null);
+      pushToast({ type: 'success', message: 'Equipment retired — history retained' });
+    } catch (e) { setErr(e.message || 'Retire failed'); }
   };
 
   const handleLinkCert = async (eq, certId) => {
     if (!guardWrite()) return;
     const cert = linkableCerts.find((c) => c.id === certId) || null;
-    await linkMachineCertificate(eq.id, cert, userName);
-    pushToast({ type: 'success', message: cert ? 'Machine certificate linked (reference only)' : 'Link removed' });
+    try {
+      await linkMachineCertificate(eq.id, cert, userName);
+      pushToast({ type: 'success', message: cert ? 'Machine certificate linked (reference only)' : 'Link removed' });
+    } catch (e) { setErr(e.message || 'Certificate link failed'); }
   };
 
   const exportRows = (rows, name) => {
@@ -363,7 +390,184 @@ export default function Compliance() {
     pushToast({ type: 'success', message: `Exported ${rows.length} rows` });
   };
 
+  const exportExcel = async (rows) => {
+    if (!rows.length) { setErr('Nothing to export yet.'); return; }
+    setExcelBusy(true); setErr('');
+    try {
+      const { downloadComplianceWorkbook } = await import('../lib/complianceExcel.js');
+      await downloadComplianceWorkbook({
+        equipment: rows.map((r) => ({ ...r, categoryLabel: categoryLabel(r.category, r.customCategory) })),
+        historyByEquipment: inspectionsByEq,
+        plantNameOf,
+        settings,
+        generatedBy: userName,
+      });
+      pushToast({ type: 'success', message: `Excel workbook exported (${rows.length} equipment)` });
+    } catch (e) { setErr(e.message || 'Excel export failed'); }
+    finally { setExcelBusy(false); }
+  };
+
+  // ── Import wizard: parse first for review, then commit ─────────────────────
+  const previewImport = async (file) => {
+    if (!file) return;
+    setImportFile(file); setImportParsed(null); setImportDone(null); setErr('');
+    try {
+      const { parseComplianceWorkbook } = await import('../lib/complianceExcel.js');
+      const parsed = await parseComplianceWorkbook(await file.arrayBuffer());
+      setImportParsed(parsed);
+      if (!parsed.errors.length && !parsed.equipment.length && !parsed.inspections.length) {
+        setErr('Import file has no equipment or history rows.');
+      }
+    } catch (e) { setErr(e.message || 'Could not read the Excel file'); }
+  };
+
+  const commitImport = async (parsed) => {
+    if (!canWrite) { setErr('Your role is read-only for compliance records.'); return; }
+    const targetPlantId = currentPlantId;
+    if (!targetPlantId) { setErr('Select a target plant before importing.'); return; }
+    if (parsed.errors.length) { setErr('Fix the problems listed above before importing.'); return; }
+    if (!parsed.equipment.length && !parsed.inspections.length) {
+      setErr('Import file has no equipment or history rows.');
+      return;
+    }
+    setExcelBusy(true); setErr('');
+    try {
+      // Equipment is matched plant-scoped by Equipment Code (never by name).
+      // The map stays fresh as rows are added so history rows can target
+      // equipment created earlier in the same file.
+      const codeToId = new Map();
+      (rawStore.complianceEquipment || []).forEach((e) => {
+        if ((e.plant_id || e.plantId) === targetPlantId) codeToId.set(String(e.equipmentCode || '').toLowerCase(), e);
+      });
+      const resolveEquipment = (code, recordId) =>
+        (recordId && (rawStore.complianceEquipment || []).find((e) => e.id === recordId)) ||
+        codeToId.get(String(code || '').toLowerCase()) || null;
+      let added = 0; let updated = 0; let historyAdded = 0; let historyCorrected = 0; const rowErrors = [];
+      for (const row of parsed.equipment) {
+        try {
+          const existing = resolveEquipment(row.equipmentCode, row.recordId);
+          const patch = {
+            ...row,
+            plantId: targetPlantId,
+            category: row.category || undefined,
+          };
+          delete patch.recordId; delete patch.plantName;
+          if (existing) {
+            const { plantId: _ignoredPlant, ...updatePatch } = patch;
+            await updateComplianceEquipment(existing.id, updatePatch, userName);
+            updated += 1;
+          } else {
+            const created = await addComplianceEquipment(patch, userName);
+            if (created?.id) codeToId.set(String(created.equipmentCode || '').toLowerCase(), created);
+            added += 1;
+          }
+        } catch (e) { rowErrors.push(`${row.equipmentCode}: ${e.message || 'failed'}`); }
+      }
+      for (const row of parsed.inspections) {
+        try {
+          const equipment = resolveEquipment(row.equipmentCode, row.plantId);
+          if (!equipment) { rowErrors.push(`${row.equipmentCode}: equipment not found in target plant`); continue; }
+          const fields = {
+            inspectionType: row.inspectionType,
+            inspectionDate: row.inspectionDate,
+            certificateNumber: row.certificateNumber,
+            agency: row.agency,
+            competentPerson: row.competentPerson,
+            result: row.result,
+            issueDate: row.issueDate,
+            expiryDate: row.expiryDate,
+            expirySource: row.expirySource,
+            expiryOverrideReason: row.expiryOverrideReason,
+            validityMonths: row.validityMonths,
+            validityDays: row.validityDays,
+            nextDueDate: row.nextDueDate,
+            nextDueOverrideReason: row.nextDueOverrideReason,
+            observations: row.observations,
+            defects: row.defects,
+            correctiveAction: row.correctiveAction,
+            correctiveActionOwner: row.correctiveActionOwner,
+            correctiveActionDueDate: row.correctiveActionDueDate,
+            correctiveActionClosureDate: row.correctiveActionClosureDate,
+            closureRemarks: row.closureRemarks,
+            uploadedBy: row.uploadedBy || userName,
+          };
+          const existingHist = row.recordId ? (rawStore.complianceInspections || []).find((h) => h.id === row.recordId || h.inspectionRecordId === row.recordId) : null;
+          if (existingHist) {
+            await updateComplianceInspection(existingHist.id, fields, userName);
+            historyCorrected += 1;
+          } else {
+            await addComplianceInspection(equipment.id, fields, userName);
+            historyAdded += 1;
+          }
+        } catch (e) { rowErrors.push(`${row.equipmentCode} (${row.inspectionDate}): ${e.message || 'failed'}`); }
+      }
+      setImportDone({ added, updated, historyAdded, historyCorrected, rowErrors, fileName: importFile?.name || '' });
+      if (rowErrors.length) {
+        setErr(`Import completed with ${rowErrors.length} row error(s):\n${rowErrors.slice(0, 8).join('\n')}${rowErrors.length > 8 ? '\n…' : ''}`);
+      } else {
+        setErr('');
+      }
+      pushToast({ type: 'success', message: `Import finished — ${added} added, ${updated} updated, ${historyAdded} history appended, ${historyCorrected} corrected.` });
+    } catch (e) { setErr(e.message || 'Excel import failed'); }
+    finally { setExcelBusy(false); }
+  };
+
   const saveConfig = (patch) => { saveCfg({ ...loadCfg(), ...patch }); setCfgTick((t) => t + 1); };
+
+  // ── History tab: flat append-only inspection log across scoped equipment ───
+  const historyRows = useMemo(() => {
+    const rows = enriched.flatMap((e) => (inspectionsByEq[e.id] || []).map((h) => ({ ...h, _eq: e })));
+    const qn = hQuery.trim().toLowerCase();
+    return rows.filter((h) => {
+      if (hResult && String(h.result || '') !== hResult) return false;
+      if (hFrom && String(h.inspectionDate || '').slice(0, 10) < hFrom) return false;
+      if (hTo && String(h.inspectionDate || '').slice(0, 10) > hTo) return false;
+      if (qn) {
+        const hay = [h._eq?.equipmentCode, h._eq?.equipmentName, h.certificateNumber, h.agency, h.inspector, h.competentPerson, h.inspectionType, h.inspectionRecordId, h.recordId].filter(Boolean).join(' ').toLowerCase();
+        if (!hay.includes(qn)) return false;
+      }
+      return true;
+    }).sort((a, b) => String(b.inspectionDate || '').localeCompare(String(a.inspectionDate || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  }, [enriched, inspectionsByEq, hQuery, hResult, hFrom, hTo]);
+
+  const openCorrectiveOf = (h) => {
+    if (h.correctiveActionClosureDate) return <span className="text-emerald-400">Closed {fmtDate(h.correctiveActionClosureDate)}</span>;
+    if (String(h.defects || '').trim() || String(h.correctiveAction || '').trim() || String(h.correctiveActionOwner || '').trim()) return <span className="text-amber-400 font-semibold">Open</span>;
+    return <span className="text-slate-600">—</span>;
+  };
+
+  // Import preview: how many rows will be added vs updated in the target plant.
+  const importPreview = useMemo(() => {
+    if (!importParsed) return null;
+    const byCode = (code) => (rawStore.complianceEquipment || []).find((e) =>
+      (e.plant_id || e.plantId) === currentPlantId &&
+      String(e.equipmentCode || '').toLowerCase() === String(code).toLowerCase());
+    let eqNew = 0; let eqUpd = 0; let histNew = 0; let histUpd = 0; let histMissing = 0;
+    importParsed.equipment.forEach((row) => {
+      const existing = (row.recordId && (rawStore.complianceEquipment || []).find((e) => e.id === row.recordId)) || byCode(row.equipmentCode);
+      if (existing) eqUpd += 1; else eqNew += 1;
+    });
+    importParsed.inspections.forEach((row) => {
+      const equipment = byCode(row.equipmentCode);
+      if (!equipment) { histMissing += 1; return; }
+      const existingHist = row.recordId ? (rawStore.complianceInspections || []).find((h) => h.id === row.recordId || h.inspectionRecordId === row.recordId) : null;
+      if (existingHist) histUpd += 1; else histNew += 1;
+    });
+    return { eqNew, eqUpd, histNew, histUpd, histMissing };
+  }, [importParsed, rawStore, currentPlantId]);
+
+  const downloadTemplate = async () => {
+    setExcelBusy(true); setErr('');
+    try {
+      const { downloadComplianceWorkbook } = await import('../lib/complianceExcel.js');
+      await downloadComplianceWorkbook({
+        equipment: [], historyByEquipment: {},
+        plantNameOf, settings, generatedBy: userName,
+      });
+      pushToast({ type: 'success', message: 'Blank compliance template downloaded (includes instructions sheet)' });
+    } catch (e) { setErr(e.message || 'Template download failed'); }
+    finally { setExcelBusy(false); }
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -379,6 +583,10 @@ export default function Compliance() {
               {authorizedPlants.map((p) => <option key={p.id} value={p.id}>{p.plant_name}</option>)}
             </select>
           )}
+          {canWrite && (
+            <button onClick={() => setTab('import')} className="btn-ghost inline-flex items-center gap-1.5 text-xs"><Upload size={13} /> Import Excel</button>
+          )}
+          <button onClick={() => exportExcel(filtered)} disabled={excelBusy} className="btn-ghost inline-flex items-center gap-1.5 text-xs disabled:opacity-60"><FileSpreadsheet size={13} /> Export Excel</button>
           {canWrite && <button onClick={() => { setEditingEq(null); setShowEqForm(true); }} className="btn-primary inline-flex items-center gap-1.5 text-xs"><Plus size={13} /> Register Equipment</button>}
         </div>
       </div>
@@ -386,7 +594,7 @@ export default function Compliance() {
       {err && <div role="alert" className="rounded-control border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{err}</div>}
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Compliance views">
-        {[['dashboard', 'Dashboard'], ['register', 'Register'], ['reports', 'Reports'], ['settings', 'Settings']].map(([id, label]) => (
+        {[['dashboard', 'Dashboard'], ['register', 'Register'], ['history', 'History'], ['reports', 'Reports'], ['settings', 'Settings'], ['import', 'Import']].map(([id, label]) => (
           <button key={id} role="tab" aria-selected={tab === id} onClick={() => { setTab(id); setPage(0); }} className={`text-xs px-3 py-1.5 rounded-control border transition-colors ${tab === id ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' : 'bg-white/[0.03] text-slate-400 border-white/[0.06]'}`}>{label}</button>
         ))}
       </div>
@@ -441,7 +649,6 @@ export default function Compliance() {
           <div className="flex justify-end"><button onClick={() => exportRows(filtered, 'compliance-register')} className="btn-ghost inline-flex items-center gap-1.5 text-xs"><Download size={13} /> Export CSV ({filtered.length})</button></div>
           {showEqForm && <EquipmentForm plants={plants} currentPlantId={currentPlantId} machineCerts={linkableCerts} onSave={handleSaveEquipment} onCancel={() => setShowEqForm(false)} saving={saving} />}
           {editingEq && <EquipmentForm initial={editingEq} plants={plants} currentPlantId={currentPlantId} machineCerts={linkableCerts} onSave={handleSaveEquipment} onCancel={() => setEditingEq(null)} saving={saving} />}
-          {inspectEq && <InspectionForm equipment={inspectEq} onSave={(f) => handleSaveInspection(inspectEq, f)} onCancel={() => setInspectEq(null)} saving={saving} />}
           {filtered.length === 0 && !showEqForm ? (
             <EmptyState title="No equipment yet" description="Register pressure gauges, lifting tackles, vessels, harnesses and other inspectable items for this plant." actionLabel={canWrite ? 'Register First Equipment' : undefined} onAction={canWrite ? () => setShowEqForm(true) : undefined} />
           ) : (
@@ -477,7 +684,7 @@ export default function Compliance() {
           )}
           {detailEq && (
             <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDetailEq(null)} role="dialog" aria-modal="true" aria-label="Equipment detail">
-              <div className="modal-content glass-card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="modal-content glass-card p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
                 <div className="flex items-start justify-between mb-3">
                   <div><h3 className="text-card-title">{detailEq.equipmentCode} · {detailEq.equipmentName}</h3>
                   <p className="text-meta mt-0.5">{categoryLabel(detailEq.category, detailEq.customCategory)} · {plantNameOf(detailEq.plant_id || detailEq.plantId)}</p></div>
@@ -497,6 +704,15 @@ export default function Compliance() {
                     </select>
                   </div>
                 )}
+                <h4 className="text-sm font-semibold text-white mb-2 flex items-center gap-2"><FileText size={14} className="text-cyan-400" /> Documents ({detailEq._documents.length})</h4>
+                {detailEq._documents.length === 0 ? <p className="text-xs text-slate-500 mb-3">No documents attached to this equipment or its inspections.</p> : (
+                  <ul className="space-y-1.5 mb-3">{detailEq._documents.map((d, i) => (
+                    <li key={d.storagePath || d.publicUrl || i} className="flex items-center gap-2 text-xs">
+                      <DocLink doc={d} />
+                      <span className="text-slate-500 text-[10px]">{d.uploadedBy ? `· ${d.uploadedBy}` : ''}{d.uploadedAt ? ` · ${new Date(d.uploadedAt).toLocaleDateString('en-GB')}` : ''}</span>
+                    </li>
+                  ))}</ul>
+                )}
                 <h4 className="text-sm font-semibold text-white mb-2 flex items-center gap-2"><CalendarDays size={14} className="text-cyan-400" /> Inspection History ({detailEq._history.length}) — renewals append, never overwrite</h4>
                 {detailEq._history.length === 0 ? <p className="text-xs text-slate-500">No inspections recorded yet.</p> : (
                   <ol className="space-y-2">{detailEq._history.map((h) => (
@@ -507,7 +723,12 @@ export default function Compliance() {
                       </div>
                       <p className="text-slate-400 mt-1">{h.agency || h.inspector || ''}{h.expiryDate ? ` · valid till ${fmtDate(h.expiryDate)}` : ''}{h.nextDueDate ? ` · next due ${fmtDate(h.nextDueDate)}` : ''}</p>
                       {(h.observations || h.defects || h.correctiveAction || h.closureDetails) && <p className="text-slate-500 mt-1">{[h.observations, h.defects, h.correctiveAction, h.closureDetails].filter(Boolean).join(' · ')}</p>}
-                      {(h.document?.publicUrl || h.documentUrl) && <a href={h.document?.publicUrl || h.documentUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-cyan-400 mt-1"><FileText size={12} /> {h.document?.filename || 'View document'}</a>}
+                      {(h.document || (Array.isArray(h.documents) && h.documents.length)) && (
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {h.document && <DocLink doc={h.document} />}
+                          {(Array.isArray(h.documents) ? h.documents : []).map((d, i) => <DocLink key={d.storagePath || d.publicUrl || i} doc={d} />)}
+                        </div>
+                      )}
                       <p className="text-[10px] text-slate-600 mt-1">By {h.uploadedBy || '—'} · {h.createdAt ? new Date(h.createdAt).toLocaleString('en-GB') : ''}</p>
                     </li>
                   ))}</ol>
@@ -557,8 +778,8 @@ export default function Compliance() {
 
       {tab === 'settings' && (
         <div className="glass-card p-5 space-y-4 max-w-xl">
-          <h4 className="text-card-title text-sm">Compliance Settings (this device)</h4>
-          <div><label className={lbl}>Due-soon threshold (days)</label><input type="number" min="1" defaultValue={dueSoonDays} id="cfg-due" className={inp} /></div>
+          <h4 className="text-card-title text-sm">Compliance Settings (this plant)</h4>
+          <div><label className={lbl}>Due-soon threshold (days) — synced to Supabase</label><input type="number" min="1" defaultValue={dueSoonDays} id="cfg-due" className={inp} /></div>
           <div>
             <label className={lbl}>Inspection frequency defaults (months per category)</label>
             {COMPLIANCE_CATEGORIES.filter((c) => c.id !== 'other').map((c) => (
@@ -583,14 +804,130 @@ export default function Compliance() {
             </div>
             {customCats.length > 0 && <p className="text-[11px] text-slate-500 mt-1">Custom: {customCats.join(', ')}</p>}
           </div>
-          <button onClick={() => {
+          <button onClick={async () => {
             const due = Number(document.getElementById('cfg-due')?.value);
             const freq = {};
             document.querySelectorAll('[data-freq]').forEach((el) => { const n = Number(el.value); if (Number.isFinite(n) && n > 0) freq[el.dataset.freq] = n; });
-            saveConfig({ dueSoonDays: due > 0 ? due : DUE_SOON_DAYS, freqOverrides: freq });
-            pushToast({ type: 'success', message: 'Compliance settings saved' });
+            saveConfig({ freqOverrides: freq });
+            try {
+              await saveComplianceSettings({ dueSoonDays: due > 0 ? due : settings.dueSoonDays }, userName);
+              pushToast({ type: 'success', message: 'Compliance settings saved' });
+            } catch (e) { setErr(e.message || 'Settings save failed'); }
           }} className="btn-primary text-xs">Save Settings</button>
           <p className="text-[11px] text-slate-500">Notifications: due/overdue/failed items surface in the Dashboard tab with date + reason; dismissing an alert is remembered per item+event so it is not shown twice. Email/WhatsApp push requires the Supabase Edge Function (`send-notification`), which is not deployed — see notificationService fallbacks.</p>
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs text-slate-400 flex items-center gap-2"><History size={14} className="text-cyan-400" /> Append-only inspection log — {historyRows.length} of {enriched.reduce((n, e) => n + (inspectionsByEq[e.id] || []).length, 0)} events · renewals never overwrite previous records.</p>
+            {canWrite && enriched.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => { const eq = enriched.find((x) => x.id === e.target.value); if (eq) setInspectEq(eq); }}
+                className={`${inpSelect} text-xs max-w-xs`} aria-label="Record inspection for equipment"
+              >
+                <option value="">Record inspection for…</option>
+                {[...enriched].sort((a, b) => String(a.equipmentCode).localeCompare(String(b.equipmentCode))).map((r) => (
+                  <option key={r.id} value={r.id}>{r.equipmentCode} · {r.equipmentName}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="glass-card p-4 grid grid-cols-2 md:grid-cols-5 gap-2">
+            <input value={hQuery} onChange={(e) => setHQuery(e.target.value)} placeholder="Search equipment, certificate, agency…" className={`${inp} col-span-2`} aria-label="Search history" />
+            <select value={hResult} onChange={(e) => setHResult(e.target.value)} className={inpSelect} aria-label="Result"><option value="">All results</option>{RESULT_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+            <input type="date" value={hFrom} onChange={(e) => setHFrom(e.target.value)} className={inp} aria-label="From date" />
+            <input type="date" value={hTo} onChange={(e) => setHTo(e.target.value)} className={inp} aria-label="To date" />
+          </div>
+          {historyRows.length === 0 ? (
+            <EmptyState title="No inspection records" description="Record an inspection or import historical certificates via the Import tab." />
+          ) : (
+            <div className="overflow-x-auto"><table className="enterprise-table w-full min-w-[1080px]">
+              <thead><tr><th>Date</th><th>Equipment</th><th>Type</th><th>Certificate</th><th>Agency / Person</th><th>Result</th><th>Expiry</th><th>Next Due</th><th>Corrective</th><th>Record ID</th><th>Document</th></tr></thead>
+              <tbody>{historyRows.map((h) => (
+                <tr key={h.id}>
+                  <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(h.inspectionDate)}</td>
+                  <td className="text-xs"><button onClick={() => setDetailEq(h._eq)} className="font-mono text-cyan-300 hover:underline">{h._eq?.equipmentCode}</button><span className="text-slate-400"> · {h._eq?.equipmentName}</span></td>
+                  <td className="text-slate-400 text-xs">{h.inspectionType || '—'}</td>
+                  <td className="font-mono text-xs text-cyan-300">{h.certificateNumber || '—'}</td>
+                  <td className="text-slate-400 text-xs">{h.agency || h.competentPerson || h.inspector || '—'}</td>
+                  <td><span className={`text-xs font-semibold ${h.result === 'Fail' ? 'text-red-400' : h.result === 'Conditional Pass' ? 'text-amber-400' : 'text-emerald-400'}`}>{h.result}</span></td>
+                  <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(h.expiryDate)}</td>
+                  <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(h.nextDueDate)}</td>
+                  <td className="text-xs">{openCorrectiveOf(h)}</td>
+                  <td className="font-mono text-[10px] text-slate-500">{h.inspectionRecordId || h.recordId || '—'}</td>
+                  <td className="text-xs">{(h.document || (Array.isArray(h.documents) && h.documents.length)) ? <DocLink doc={h.document || (h.documents || [])[0]} /> : <span className="text-slate-600">—</span>}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </div>
+      )}
+
+      {tab === 'import' && (
+        <div className="space-y-4 max-w-4xl">
+          {!canWrite && <div className="rounded-control border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">Your role is read-only — importing is disabled.</div>}
+          <div className="glass-card p-5">
+            <h4 className="text-card-title text-sm mb-2 flex items-center gap-2"><Info size={14} className="text-cyan-400" /> How import works</h4>
+            <ul className="text-xs text-slate-400 space-y-1 list-disc pl-4">
+              <li>Target plant is always your current plant — <span className="text-white">{currentPlant?.plant_name || '—'}</span>. Corporate users: switch plants before importing.</li>
+              <li>Equipment rows match by <span className="text-white">Equipment Code</span> within that plant (never by name). Rows with a Record ID update that record.</li>
+              <li>History rows without a Record ID are appended; rows with a Record ID correct the existing record (audited, original kept in history).</li>
+              <li>Nothing is committed until you review the preview below and press Import.</li>
+            </ul>
+            <button onClick={downloadTemplate} disabled={excelBusy} className="btn-ghost inline-flex items-center gap-1.5 text-xs mt-3 disabled:opacity-60"><Download size={13} /> Download blank template (.xlsx)</button>
+          </div>
+
+          <div className="glass-card p-5">
+            <h4 className="text-card-title text-sm mb-2 flex items-center gap-2"><FileSpreadsheet size={14} className="text-emerald-400" /> 1 · Select file</h4>
+            {canWrite && (
+              <label className={`btn-primary inline-flex items-center gap-1.5 text-xs cursor-pointer ${excelBusy ? 'opacity-60 pointer-events-none' : ''}`}>
+                <Upload size={13} /> {importFile ? 'Choose another file' : 'Choose Excel file'}
+                <input type="file" accept=".xlsx,.xlsm" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) previewImport(file); }} />
+              </label>
+            )}
+            {importFile && <p className="text-xs text-slate-400 mt-2">{importFile.name} · {(importFile.size / 1024).toFixed(0)} KB</p>}
+          </div>
+
+          {importParsed && (
+            <div className="glass-card p-5">
+              <h4 className="text-card-title text-sm mb-2 flex items-center gap-2"><Eye size={14} className="text-cyan-400" /> 2 · Review preview</h4>
+              {importParsed.errors.length > 0 ? (
+                <div className="rounded-control border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300 whitespace-pre-line">Import blocked — {importParsed.errors.length} problem(s):{'\n'}{importParsed.errors.slice(0, 10).join('\n')}{importParsed.errors.length > 10 ? '\n…' : ''}</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                    <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-3"><p className="text-[10px] text-slate-500 uppercase">Equipment — add</p><p className="text-xl font-bold text-emerald-400 tabular-nums">{importPreview.eqNew}</p></div>
+                    <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-3"><p className="text-[10px] text-slate-500 uppercase">Equipment — update</p><p className="text-xl font-bold text-cyan-400 tabular-nums">{importPreview.eqUpd}</p></div>
+                    <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-3"><p className="text-[10px] text-slate-500 uppercase">History — append</p><p className="text-xl font-bold text-emerald-400 tabular-nums">{importPreview.histNew}</p></div>
+                    <div className="rounded-control bg-white/[0.03] border border-white/[0.06] p-3"><p className="text-[10px] text-slate-500 uppercase">History — correct</p><p className="text-xl font-bold text-amber-400 tabular-nums">{importPreview.histUpd}</p></div>
+                  </div>
+                  {importPreview.histMissing > 0 && <p className="text-xs text-amber-300 mb-3">{importPreview.histMissing} history row(s) reference equipment codes not in this file or plant — register the equipment first or the rows will be reported as errors.</p>}
+                  <button onClick={() => commitImport(importParsed)} disabled={excelBusy} className="btn-primary inline-flex items-center gap-1.5 text-xs disabled:opacity-60">
+                    <Upload size={13} /> {excelBusy ? 'Importing…' : `Import ${importParsed.equipment.length + importParsed.inspections.length} rows`}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {importDone && (
+            <div className="glass-card p-5">
+              <h4 className="text-card-title text-sm mb-2 flex items-center gap-2"><ClipboardList size={14} className="text-emerald-400" /> 3 · Result</h4>
+              <p className="text-xs text-slate-300">{importDone.fileName} — {importDone.added} equipment added · {importDone.updated} updated · {importDone.historyAdded} history appended · {importDone.historyCorrected} corrected.</p>
+              {importDone.rowErrors.length > 0 && <p className="text-xs text-amber-300 mt-1 whitespace-pre-line">{importDone.rowErrors.slice(0, 8).join('\n')}{importDone.rowErrors.length > 8 ? '\n…' : ''}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {inspectEq && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setInspectEq(null)} role="dialog" aria-modal="true" aria-label="Record inspection">
+          <div className="modal-content glass-card p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <InspectionForm equipment={inspectEq} onSave={(f) => handleSaveInspection(inspectEq, f)} onCancel={() => setInspectEq(null)} saving={saving} />
+          </div>
         </div>
       )}
     </div>

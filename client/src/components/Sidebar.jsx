@@ -23,7 +23,7 @@ const NAV_GROUPS = [
       { label: 'KPI Status', icon: BarChart3, to: '/kpi', color: 'text-emerald-400' },
       { label: 'SOP Library', icon: BookOpen, to: '/sop', color: 'text-violet-400' },
       { label: 'Energy', icon: Zap, to: '/energy', color: 'text-amber-400' },
-      { label: 'Compliance', icon: ClipboardList, to: '/compliance', color: 'text-teal-400' },
+      { label: 'Inspection & Compliance', icon: ClipboardList, to: '/compliance', color: 'text-teal-400' },
       { label: 'ORM', icon: ShieldCheck, to: '/category/ORM%20Data%20(Operational%20Risk%20Management)', color: 'text-rose-400' },
       { label: 'Kaizen', icon: Lightbulb, to: '/category/Kaizen', color: 'text-indigo-400' },
       { label: 'Reports & Analytics', icon: FileBarChart2, to: '/reports', color: 'text-teal-400' },

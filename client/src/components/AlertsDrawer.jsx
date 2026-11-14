@@ -7,6 +7,7 @@ const TABS = [
   { id: 'all', label: 'All' },
   { id: 'amc', label: 'AMC Contracts' },
   { id: 'cert', label: 'Testing & Statutory Certificates' },
+  { id: 'compliance', label: 'Inspection & Compliance' },
   { id: 'service', label: 'Service Visits' },
 ];
 
@@ -95,18 +96,19 @@ export default function AlertsDrawer({ isOpen, onClose, alerts = [], machines = 
               const badge = daysLeftBadge(alert.daysLeft);
               const isCert = alert.category === 'cert';
               const isAmc = alert.category === 'amc';
+              const isCompliance = alert.category === 'compliance';
               return (
                 <div key={alert.id} className="rounded-control border border-white/[0.06] bg-white/[0.02] p-4 hover:bg-white/[0.03] transition-colors">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`w-7 h-7 rounded-lg flex items-center justify-center border text-[12px] ${alert.severity === 'critical' ? 'bg-red-500/10 border-red-500/20 text-red-400' : alert.severity === 'warning' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'}`}>
-                          {isCert ? '📜' : isAmc ? '🛡️' : '🔧'}
+                          {isCert ? '📜' : isAmc ? '🛡️' : isCompliance ? '✅' : '🔧'}
                         </span>
                         <p className="text-white text-sm font-semibold truncate">{alert.machineName || alert.asset || 'Unknown Machine'}</p>
                         <span className="text-slate-500 text-[11px] truncate">{alert.machineId || ''}</span>
                       </div>
-                      <p className="text-slate-400 text-xs mt-1 truncate">{isCert ? alert.certificateType || 'Testing Certificate' : isAmc ? 'Annual Maintenance Contract' : 'Service Visit'} • {alert.vendor || '—'}</p>
+                      <p className="text-slate-400 text-xs mt-1 truncate">{isCompliance ? (alert.detail || 'Inspection & Compliance alert') : isCert ? alert.certificateType || 'Testing Certificate' : isAmc ? 'Annual Maintenance Contract' : 'Service Visit'} • {alert.vendor || '—'}</p>
                       <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px]">
                         <span className="inline-flex items-center gap-1 text-slate-400"><CalendarDays size={11} /> {alert.expiryDate ? new Date(alert.expiryDate).toLocaleDateString('en-GB') : timeAgo(alert.ts)} <span className={`ml-1 px-1.5 py-0.5 rounded-full border text-[10px] ${badge.cls}`}>{badge.label}</span></span>
                         {alert.expectedVisits != null && (
@@ -124,6 +126,7 @@ export default function AlertsDrawer({ isOpen, onClose, alerts = [], machines = 
                   <div className="flex items-center gap-2 mt-3">
                     <button
                       onClick={() => {
+                        if (isCompliance) { navigate('/compliance'); return; }
                         if (alert.machineId) navigate(`/machines/${alert.machineId}`);
                         if (alert.category === 'cert') navigate(`/machines/${alert.machineId}?tab=certs`);
                         if (alert.category === 'amc') navigate(`/machines/${alert.machineId}?tab=amc`);
@@ -134,11 +137,12 @@ export default function AlertsDrawer({ isOpen, onClose, alerts = [], machines = 
                     </button>
                     <button
                       onClick={() => {
+                        if (isCompliance) { navigate('/compliance'); return; }
                         if (alert.machineId) navigate(`/machines/${alert.machineId}`);
                       }}
                       className="flex-1 py-1.5 rounded-control bg-white/[0.06] text-slate-300 border border-white/[0.08] text-xs font-medium hover:bg-white/[0.10] inline-flex items-center justify-center gap-1.5"
                     >
-                      <Upload size={12} /> Update Certificate
+                      <Upload size={12} /> {isCompliance ? 'Open Module' : 'Update Certificate'}
                     </button>
                   </div>
                 </div>

@@ -4,7 +4,11 @@ import { normalizeMachineStatus } from './bulkImport.js';
 import { SEED_MACHINES } from './equipmentData.js';
 import { MASTER_PLANT_SECTION } from './constants.js';
 import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js';
-import { getComplianceStatus, computeNextDue, defaultFreqFor } from './lib/complianceLogic.js';
+import {
+  computeNextDue, defaultFreqFor, deriveCompliance,
+  computeExpiry, normalizeSettings, normalizeDateInput, todayISO,
+  BUILTIN_CATEGORIES,
+} from './lib/complianceLogic.js';
 
 const KEYS = {
   machines: 'PLANT_EQUIPMENT_MASTER',
@@ -30,6 +34,9 @@ const KEYS = {
   kpiFySheet: 'CCPL_KPI_FY_SHEET_V1',
   complianceEquipment: 'CCPL_COMPLIANCE_EQUIPMENT_V1',
   complianceInspections: 'CCPL_COMPLIANCE_INSPECTIONS_V1',
+  complianceCategories: 'CCPL_COMPLIANCE_CATEGORIES_V1',
+  complianceSettings: 'CCPL_COMPLIANCE_SETTINGS_V1',
+  complianceAudit: 'CCPL_COMPLIANCE_AUDIT_V1',
 };
 
 const LEGACY_KEYS = {
@@ -56,6 +63,9 @@ const LEGACY_KEYS = {
   kpiFySheet: [],
   complianceEquipment: [],
   complianceInspections: [],
+  complianceCategories: [],
+  complianceSettings: [],
+  complianceAudit: [],
 };
 
 const CLOUD_SYNC_QUEUE_KEY = 'CCPL_CLOUD_SYNC_QUEUE';
@@ -86,7 +96,7 @@ const MONTHS = [
 
 const HOURS_PER_MONTH = 720;
 const MASTER_SECTION = MASTER_PLANT_SECTION;
-const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings', 'kpiFySheet', 'complianceEquipment', 'complianceInspections'];
+const SYNCED_ENTITIES = ['machines', 'breakdowns', 'pms', 'energy', 'amc', 'machineBreakdownLogs', 'machinePmRecords', 'plantSections', 'dailyUtilityLog', 'monthlyHerbicide', 'monthlyInsecticide', 'monthlyWater', 'monthlyAirCompressor', 'dailySolarGeneration', 'energySettings', 'testingCertificates', 'kpiRecords', 'kpiSettings', 'kpiFySheet', 'complianceEquipment', 'complianceInspections', 'complianceCategories', 'complianceSettings', 'complianceAudit'];
 
 const NATHUPUR_PLANT_ID = '00000000-0000-0000-0000-000000000001';
 const PLANT_LS_KEY = 'ccpl_current_plant_id';
@@ -1487,6 +1497,33 @@ function testingCertificateToCloudRow(record) {
 }
 
 // ── Compliance Equipment (Inspection / Calibration register) ───────────────
+function asJsonObject(value) {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+function asJsonArray(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+function asBoolean(value, fallback = false) {
+  if (value === true || value === false) return value;
+  if (value == null || value === '') return fallback;
+  const s = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'required'].includes(s)) return true;
+  if (['false', '0', 'no', 'n', 'not required', 'optional'].includes(s)) return false;
+  return fallback;
+}
+
 function normalizeComplianceEquipment(fields) {
   return {
     id: fields.id || uid('ceq'),
@@ -1495,16 +1532,20 @@ function normalizeComplianceEquipment(fields) {
     equipmentCode: String(fields.equipmentCode || fields.equipment_code || '').trim(),
     category: String(fields.category || 'other').trim() || 'other',
     customCategory: String(fields.customCategory || fields.custom_category || '').trim(),
+    subcategory: String(fields.subcategory || '').trim(),
     equipmentName: String(fields.equipmentName || fields.equipment_name || '').trim(),
     equipmentType: String(fields.equipmentType || fields.equipment_type || '').trim(),
     department: String(fields.department || '').trim(),
+    section: String(fields.section || '').trim(),
     area: String(fields.area || '').trim(),
+    exactLocation: String(fields.exactLocation || fields.exact_location || '').trim(),
+    description: String(fields.description || '').trim(),
     manufacturer: String(fields.manufacturer || '').trim(),
     model: String(fields.model || '').trim(),
     serialNumber: String(fields.serialNumber || fields.serial_number || '').trim(),
     assetTag: String(fields.assetTag || fields.asset_tag || '').trim(),
-    installDate: fields.installDate || fields.install_date || '',
-    purchaseDate: fields.purchaseDate || fields.purchase_date || '',
+    installDate: normalizeDateInput(fields.installDate || fields.install_date || ''),
+    purchaseDate: normalizeDateInput(fields.purchaseDate || fields.purchase_date || ''),
     rangeValue: String(fields.rangeValue || fields.range_value || '').trim(),
     accuracy: String(fields.accuracy || '').trim(),
     capacityValue: String(fields.capacityValue || fields.capacity_value || '').trim(),
@@ -1512,14 +1553,27 @@ function normalizeComplianceEquipment(fields) {
     swl: String(fields.swl || '').trim(),
     inspectionType: String(fields.inspectionType || fields.inspection_type || '').trim(),
     standard: String(fields.standard || '').trim(),
+    technicalSpecs: asJsonObject(fields.technicalSpecs || fields.technical_specs),
+    certificateRequired: asBoolean(fields.certificateRequired ?? fields.certificate_required, true),
+    lifecycleStatus: String(fields.lifecycleStatus || fields.lifecycle_status || 'active').trim().toLowerCase() || 'active',
     responsibleDepartment: String(fields.responsibleDepartment || fields.responsible_department || '').trim(),
     responsiblePerson: String(fields.responsiblePerson || fields.responsible_person || '').trim(),
     frequencyMonths: Math.max(1, Math.round(toNumber(fields.frequencyMonths ?? fields.frequency_months ?? 12))),
-    nextDueDate: fields.nextDueDate || fields.next_due_date || '',
-    status: String(fields.status || 'NO_CERTIFICATE').trim() || 'NO_CERTIFICATE',
+    nextDueDate: normalizeDateInput(fields.nextDueDate || fields.next_due_date || ''),
+    lastInspectionDate: normalizeDateInput(fields.lastInspectionDate || fields.last_inspection_date || ''),
+    currentInspectionId: String(fields.currentInspectionId || fields.current_inspection_id || '').trim(),
+    currentCertificateNumber: String(fields.currentCertificateNumber || fields.current_certificate_number || '').trim(),
+    currentIssueDate: normalizeDateInput(fields.currentIssueDate || fields.current_issue_date || ''),
+    currentExpiryDate: normalizeDateInput(fields.currentExpiryDate || fields.current_expiry_date || ''),
+    currentNextDueDate: normalizeDateInput(fields.currentNextDueDate || fields.current_next_due_date || ''),
+    currentResult: String(fields.currentResult || fields.current_result || '').trim(),
+    expirySource: String(fields.expirySource || fields.expiry_source || '').trim(),
+    correctiveActionPending: asBoolean(fields.correctiveActionPending ?? fields.corrective_action_pending, false),
+    status: String(fields.status || 'NOT_INSPECTED').trim() || 'NOT_INSPECTED',
     serviceability: String(fields.serviceability || 'Serviceable').trim() || 'Serviceable',
     remarks: String(fields.remarks || fields.notes || '').trim(),
     document: fields.document && typeof fields.document === 'object' ? fields.document : null,
+    documents: asJsonArray(fields.documents),
     linkedMachineId: String(fields.linkedMachineId || fields.linked_machine_id || '').trim(),
     linkedMachineName: String(fields.linkedMachineName || fields.linked_machine_name || '').trim(),
     linkedMachineCertId: String(fields.linkedMachineCertId || fields.linked_machine_cert_id || '').trim(),
@@ -1538,10 +1592,14 @@ function normalizeComplianceEquipmentCloudRow(row) {
     equipmentCode: row.equipment_code,
     category: row.category,
     customCategory: row.custom_category,
+    subcategory: row.subcategory,
     equipmentName: row.equipment_name,
     equipmentType: row.equipment_type,
     department: row.department,
+    section: row.section,
     area: row.area,
+    exactLocation: row.exact_location,
+    description: row.description,
     manufacturer: row.manufacturer,
     model: row.model,
     serialNumber: row.serial_number,
@@ -1555,14 +1613,27 @@ function normalizeComplianceEquipmentCloudRow(row) {
     swl: row.swl,
     inspectionType: row.inspection_type,
     standard: row.standard,
+    technicalSpecs: row.technical_specs,
+    certificateRequired: row.certificate_required,
+    lifecycleStatus: row.lifecycle_status,
     responsibleDepartment: row.responsible_department,
     responsiblePerson: row.responsible_person,
     frequencyMonths: row.frequency_months,
     nextDueDate: row.next_due_date,
+    lastInspectionDate: row.last_inspection_date,
+    currentInspectionId: row.current_inspection_id,
+    currentCertificateNumber: row.current_certificate_number,
+    currentIssueDate: row.current_issue_date,
+    currentExpiryDate: row.current_expiry_date,
+    currentNextDueDate: row.current_next_due_date,
+    currentResult: row.current_result,
+    expirySource: row.expiry_source,
+    correctiveActionPending: row.corrective_action_pending,
     status: row.status,
     serviceability: row.serviceability,
     remarks: row.remarks,
     document: row.document || null,
+    documents: row.documents,
     linkedMachineId: row.linked_machine_id,
     linkedMachineName: row.linked_machine_name,
     linkedMachineCertId: row.linked_machine_cert_id,
@@ -1582,10 +1653,14 @@ function complianceEquipmentToCloudRow(record) {
     equipment_code: record.equipmentCode,
     category: record.category,
     custom_category: record.customCategory || '',
+    subcategory: record.subcategory || '',
     equipment_name: record.equipmentName,
     equipment_type: record.equipmentType || '',
     department: record.department || '',
+    section: record.section || '',
     area: record.area || '',
+    exact_location: record.exactLocation || '',
+    description: record.description || '',
     manufacturer: record.manufacturer || '',
     model: record.model || '',
     serial_number: record.serialNumber || '',
@@ -1599,14 +1674,27 @@ function complianceEquipmentToCloudRow(record) {
     swl: record.swl || '',
     inspection_type: record.inspectionType || '',
     standard: record.standard || '',
+    technical_specs: record.technicalSpecs || {},
+    certificate_required: record.certificateRequired !== false,
+    lifecycle_status: record.lifecycleStatus || 'active',
     responsible_department: record.responsibleDepartment || '',
     responsible_person: record.responsiblePerson || '',
     frequency_months: record.frequencyMonths || 12,
     next_due_date: record.nextDueDate || null,
-    status: record.status || 'NO_CERTIFICATE',
+    last_inspection_date: record.lastInspectionDate || null,
+    current_inspection_id: record.currentInspectionId || '',
+    current_certificate_number: record.currentCertificateNumber || '',
+    current_issue_date: record.currentIssueDate || null,
+    current_expiry_date: record.currentExpiryDate || null,
+    current_next_due_date: record.currentNextDueDate || null,
+    current_result: record.currentResult || '',
+    expiry_source: record.expirySource || '',
+    corrective_action_pending: !!record.correctiveActionPending,
+    status: record.status || 'NOT_INSPECTED',
     serviceability: record.serviceability || 'Serviceable',
     remarks: record.remarks || '',
     document: record.document || null,
+    documents: record.documents || [],
     linked_machine_id: record.linkedMachineId || '',
     linked_machine_name: record.linkedMachineName || '',
     linked_machine_cert_id: record.linkedMachineCertId || '',
@@ -1622,28 +1710,58 @@ function complianceEquipmentToCloudRow(record) {
 const COMPLIANCE_RESULTS = ['Pass', 'Conditional Pass', 'Fail'];
 
 function normalizeComplianceInspection(fields) {
+  const id = fields.id || uid('cin');
+  const issueDate = normalizeDateInput(fields.issueDate || fields.issue_date || '');
+  const validityMonths = fields.validityMonths ?? fields.validity_months;
+  const validityDays = fields.validityDays ?? fields.validity_days;
+  const manualExpiryDate = normalizeDateInput(
+    fields.manualExpiryDate || fields.manual_expiry_date || fields.expiryDate || fields.expiry_date || ''
+  );
+  const expiry = computeExpiry({ issueDate, validityMonths, validityDays, manualExpiryDate, expirySource: fields.expirySource || fields.expiry_source });
+  const storedSource = String(fields.expirySource || fields.expiry_source || '').trim();
+  const expirySource = storedSource && storedSource === expiry.source
+    ? storedSource
+    : (storedSource === 'calculated' && expiry.calculatedExpiry && manualExpiryDate === expiry.calculatedExpiry
+      ? 'calculated'
+      : expiry.source);
   return {
-    id: fields.id || uid('cin'),
+    id,
     equipmentId: String(fields.equipmentId || fields.equipment_id || '').trim(),
     plant_id: fields.plant_id || fields.plantId || '',
     plantId: fields.plantId || fields.plant_id || '',
-    inspectionDate: fields.inspectionDate || fields.inspection_date || new Date().toISOString().slice(0, 10),
+    inspectionRecordId: String(fields.inspectionRecordId || fields.inspection_record_id || id).trim(),
+    inspectionType: String(fields.inspectionType || fields.inspection_type || '').trim(),
+    inspectionDate: normalizeDateInput(fields.inspectionDate || fields.inspection_date) || new Date().toISOString().slice(0, 10),
     certificateNumber: String(fields.certificateNumber || fields.certificate_number || '').trim(),
     agency: String(fields.agency || '').trim(),
     inspector: String(fields.inspector || '').trim(),
+    competentPerson: String(fields.competentPerson || fields.competent_person || '').trim(),
     result: String(fields.result || 'Pass').trim() || 'Pass',
-    issueDate: fields.issueDate || fields.issue_date || '',
-    expiryDate: fields.expiryDate || fields.expiry_date || '',
-    nextDueDate: fields.nextDueDate || fields.next_due_date || '',
+    issueDate,
+    expiryDate: expiry.effectiveExpiry || '',
+    manualExpiryDate: manualExpiryDate || '',
+    calculatedExpiryDate: normalizeDateInput(fields.calculatedExpiryDate || fields.calculated_expiry_date || expiry.calculatedExpiry || ''),
+    expirySource: String(expirySource || '').trim(),
+    expiryOverrideReason: String(fields.expiryOverrideReason || fields.expiry_override_reason || '').trim(),
+    validityMonths: Number.isFinite(Number(validityMonths)) && Number(validityMonths) > 0 ? Math.round(Number(validityMonths)) : null,
+    validityDays: Number.isFinite(Number(validityDays)) && Number(validityDays) > 0 ? Math.round(Number(validityDays)) : null,
+    nextDueDate: normalizeDateInput(fields.nextDueDate || fields.next_due_date || ''),
+    nextDueOverrideReason: String(fields.nextDueOverrideReason || fields.next_due_override_reason || '').trim(),
     observations: String(fields.observations || '').trim(),
     defects: String(fields.defects || '').trim(),
     correctiveAction: String(fields.correctiveAction || fields.corrective_action || '').trim(),
-    closureDetails: String(fields.closureDetails || fields.closure_details || '').trim(),
+    correctiveActionOwner: String(fields.correctiveActionOwner || fields.corrective_action_owner || '').trim(),
+    correctiveActionDueDate: normalizeDateInput(fields.correctiveActionDueDate || fields.corrective_action_due_date || ''),
+    correctiveActionClosureDate: normalizeDateInput(fields.correctiveActionClosureDate || fields.corrective_action_closure_date || ''),
+    closureRemarks: String(fields.closureRemarks || fields.closure_remarks || fields.closureDetails || fields.closure_details || '').trim(),
+    closureDetails: String(fields.closureDetails || fields.closure_details || fields.closureRemarks || fields.closure_remarks || '').trim(),
+    documents: asJsonArray(fields.documents),
     document: fields.document && typeof fields.document === 'object' ? fields.document : null,
     documentName: fields.documentName || fields.document?.filename || '',
     documentUrl: fields.documentUrl || fields.document?.publicUrl || '',
     documentPath: fields.documentPath || fields.document?.storagePath || '',
     uploadedBy: fields.uploadedBy || fields.uploaded_by || '',
+    updatedBy: fields.updatedBy || fields.updated_by || '',
     createdAt: fields.createdAt || fields.created_at || now(),
     updatedAt: fields.updatedAt || fields.updated_at || now(),
   };
@@ -1654,20 +1772,36 @@ function normalizeComplianceInspectionCloudRow(row) {
     id: row.id,
     equipmentId: row.equipment_id,
     plant_id: row.plant_id, plantId: row.plant_id,
+    inspectionRecordId: row.inspection_record_id,
+    inspectionType: row.inspection_type,
     inspectionDate: row.inspection_date,
     certificateNumber: row.certificate_number,
     agency: row.agency,
     inspector: row.inspector,
+    competentPerson: row.competent_person,
     result: row.result,
     issueDate: row.issue_date,
     expiryDate: row.expiry_date,
+    manualExpiryDate: row.expiry_date,
+    calculatedExpiryDate: row.calculated_expiry_date,
+    expirySource: row.expiry_source,
+    expiryOverrideReason: row.expiry_override_reason,
+    validityMonths: row.validity_months,
+    validityDays: row.validity_days,
     nextDueDate: row.next_due_date,
+    nextDueOverrideReason: row.next_due_override_reason,
     observations: row.observations,
     defects: row.defects,
     correctiveAction: row.corrective_action,
+    correctiveActionOwner: row.corrective_action_owner,
+    correctiveActionDueDate: row.corrective_action_due_date,
+    correctiveActionClosureDate: row.corrective_action_closure_date,
+    closureRemarks: row.closure_remarks,
     closureDetails: row.closure_details,
+    documents: row.documents,
     document: row.document || null,
     uploadedBy: row.uploaded_by,
+    updatedBy: row.updated_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });
@@ -1679,22 +1813,170 @@ function complianceInspectionToCloudRow(record) {
     id: record.id,
     equipment_id: record.equipmentId,
     plant_id: pidCI,
+    inspection_record_id: record.inspectionRecordId || record.id,
+    inspection_type: record.inspectionType || '',
     inspection_date: record.inspectionDate,
     certificate_number: record.certificateNumber || '',
     agency: record.agency || '',
     inspector: record.inspector || '',
+    competent_person: record.competentPerson || '',
     result: record.result || 'Pass',
     issue_date: record.issueDate || null,
     expiry_date: record.expiryDate || null,
+    calculated_expiry_date: record.calculatedExpiryDate || null,
+    expiry_source: record.expirySource || '',
+    expiry_override_reason: record.expiryOverrideReason || '',
+    validity_months: record.validityMonths || null,
+    validity_days: record.validityDays || null,
     next_due_date: record.nextDueDate || null,
+    next_due_override_reason: record.nextDueOverrideReason || '',
     observations: record.observations || '',
     defects: record.defects || '',
     corrective_action: record.correctiveAction || '',
-    closure_details: record.closureDetails || '',
+    corrective_action_owner: record.correctiveActionOwner || '',
+    corrective_action_due_date: record.correctiveActionDueDate || null,
+    corrective_action_closure_date: record.correctiveActionClosureDate || null,
+    closure_remarks: record.closureRemarks || '',
+    closure_details: record.closureDetails || record.closureRemarks || '',
+    documents: record.documents || [],
     document: record.document || null,
     uploaded_by: record.uploadedBy || '',
+    updated_by: record.updatedBy || '',
     created_at: record.createdAt,
     updated_at: now(),
+  };
+}
+
+function normalizeComplianceCategory(fields) {
+  const code = String(fields.code || fields.id || '').trim().toLowerCase();
+  return {
+    id: fields.id || `ccat-${code || uid('cat')}`,
+    code,
+    label: String(fields.label || fields.name || code).trim(),
+    defaultFrequencyMonths: Math.max(1, Math.round(toNumber(fields.defaultFrequencyMonths ?? fields.default_frequency_months ?? 12))),
+    technicalFields: asJsonArray(fields.technicalFields || fields.technical_fields),
+    active: fields.active === undefined ? true : !!fields.active,
+    sortOrder: Math.round(toNumber(fields.sortOrder ?? fields.sort_order ?? 100)),
+    createdBy: fields.createdBy || fields.created_by || '',
+    updatedBy: fields.updatedBy || fields.updated_by || '',
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeComplianceCategoryCloudRow(row) {
+  return normalizeComplianceCategory({
+    id: row.id, code: row.code, label: row.label,
+    defaultFrequencyMonths: row.default_frequency_months,
+    technicalFields: row.technical_fields,
+    active: row.active, sortOrder: row.sort_order,
+    createdBy: row.created_by, updatedBy: row.updated_by,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  });
+}
+
+function complianceCategoryToCloudRow(record) {
+  return {
+    id: record.id,
+    code: record.code,
+    label: record.label || record.code,
+    default_frequency_months: record.defaultFrequencyMonths || 12,
+    technical_fields: record.technicalFields || [],
+    active: record.active !== false,
+    sort_order: record.sortOrder || 100,
+    created_by: record.createdBy || '',
+    updated_by: record.updatedBy || '',
+    created_at: record.createdAt,
+    updated_at: now(),
+  };
+}
+
+function normalizeComplianceSettings(fields) {
+  const normalized = normalizeSettings(fields || {});
+  return {
+    id: fields.id || `cset-${fields.plant_id || fields.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID}`,
+    plant_id: fields.plant_id || fields.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID,
+    plantId: fields.plantId || fields.plant_id || getCurrentPlantId() || NATHUPUR_PLANT_ID,
+    ...normalized,
+    updatedBy: fields.updatedBy || fields.updated_by || '',
+    createdAt: fields.createdAt || fields.created_at || now(),
+    updatedAt: fields.updatedAt || fields.updated_at || now(),
+  };
+}
+
+function normalizeComplianceSettingsCloudRow(row) {
+  return normalizeComplianceSettings({
+    id: row.id, plant_id: row.plant_id,
+    dueSoonDays: row.due_soon_days,
+    dueSoonSecondaryDays: row.due_soon_secondary_days,
+    reportWindowDays: row.report_window_days,
+    notifyDays: row.notify_days,
+    notifyInApp: row.notify_in_app,
+    notifyEmails: row.notify_emails,
+    notifyWhatsApp: row.notify_whatsapp,
+    recipients: row.recipients,
+    asOfDate: row.as_of_date,
+    updatedBy: row.updated_by,
+    createdAt: row.created_at, updatedAt: row.updated_at,
+  });
+}
+
+function complianceSettingsToCloudRow(record) {
+  const pidCS = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  return {
+    id: record.id,
+    plant_id: pidCS,
+    due_soon_days: record.dueSoonDays,
+    due_soon_secondary_days: record.dueSoonSecondaryDays,
+    report_window_days: record.reportWindowDays,
+    notify_days: record.notifyDays,
+    notify_in_app: record.notifyInApp !== false,
+    notify_emails: record.notifyEmails || '',
+    notify_whatsapp: record.notifyWhatsApp || '',
+    recipients: record.recipients || {},
+    as_of_date: record.asOfDate || null,
+    updated_by: record.updatedBy || '',
+    created_at: record.createdAt,
+    updated_at: now(),
+  };
+}
+
+function normalizeComplianceAudit(fields) {
+  return {
+    id: fields.id || uid('caud'),
+    plant_id: fields.plant_id || fields.plantId || '',
+    plantId: fields.plantId || fields.plant_id || '',
+    equipmentId: String(fields.equipmentId || fields.equipment_id || '').trim(),
+    inspectionId: String(fields.inspectionId || fields.inspection_id || '').trim(),
+    action: String(fields.action || '').trim(),
+    detail: String(fields.detail || '').trim(),
+    changes: asJsonObject(fields.changes),
+    userName: String(fields.userName || fields.user_name || '').trim(),
+    createdAt: fields.createdAt || fields.created_at || now(),
+  };
+}
+
+function normalizeComplianceAuditCloudRow(row) {
+  return normalizeComplianceAudit({
+    id: row.id, plant_id: row.plant_id,
+    equipmentId: row.equipment_id, inspectionId: row.inspection_id,
+    action: row.action, detail: row.detail, changes: row.changes,
+    userName: row.user_name, createdAt: row.created_at,
+  });
+}
+
+function complianceAuditToCloudRow(record) {
+  const pidCA = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  return {
+    id: record.id,
+    plant_id: pidCA,
+    equipment_id: record.equipmentId || '',
+    inspection_id: record.inspectionId || '',
+    action: record.action || '',
+    detail: record.detail || '',
+    changes: record.changes || {},
+    user_name: record.userName || '',
+    created_at: record.createdAt,
   };
 }
 
@@ -2130,6 +2412,24 @@ const CLOUD_ENTITY_CONFIG = {
     toRow: complianceInspectionToCloudRow,
     orderBy: [{ column: 'inspection_date', ascending: false }],
   },
+  complianceCategories: {
+    table: 'compliance_categories',
+    fromRow: normalizeComplianceCategoryCloudRow,
+    toRow: complianceCategoryToCloudRow,
+    orderBy: [{ column: 'sort_order', ascending: true }, { column: 'code', ascending: true }],
+  },
+  complianceSettings: {
+    table: 'compliance_settings',
+    fromRow: normalizeComplianceSettingsCloudRow,
+    toRow: complianceSettingsToCloudRow,
+    orderBy: [{ column: 'id', ascending: true }],
+  },
+  complianceAudit: {
+    table: 'compliance_audit_log',
+    fromRow: normalizeComplianceAuditCloudRow,
+    toRow: complianceAuditToCloudRow,
+    orderBy: [{ column: 'created_at', ascending: false }],
+  },
 };
 
 let version = 0;
@@ -2218,6 +2518,9 @@ let state = {
   kpiFySheet: loadPersistedValue('kpiFySheet', [normalizeKpiFySheet({ fy: '2026-27' })]),
   complianceEquipment: loadPersistedValue('complianceEquipment', []).map(normalizeComplianceEquipment),
   complianceInspections: loadPersistedValue('complianceInspections', []).map(normalizeComplianceInspection),
+  complianceCategories: loadPersistedValue('complianceCategories', []).map(normalizeComplianceCategory),
+  complianceSettings: loadPersistedValue('complianceSettings', []).map(normalizeComplianceSettings),
+  complianceAudit: loadPersistedValue('complianceAudit', []).map(normalizeComplianceAudit),
   plantSections: loadPersistedValue('plantSections', []).map((s) =>
     typeof s === 'string' ? { id: `ps_${s.toLowerCase().replace(/\s+/g, '_')}`, name: s, createdBy: '' } : s
   ),
@@ -2261,6 +2564,9 @@ let state = {
     state.dailySolarGeneration = ensure(state.dailySolarGeneration);
     state.complianceEquipment = ensure(state.complianceEquipment);
     state.complianceInspections = ensure(state.complianceInspections);
+    state.complianceSettings = ensure(state.complianceSettings);
+    state.complianceAudit = ensure(state.complianceAudit);
+    state.complianceCategories = Array.isArray(state.complianceCategories) ? state.complianceCategories : [];
     if (state.energySettings && !state.energySettings.plant_id && !state.energySettings.plantId) {
       state.energySettings = { ...state.energySettings, plant_id: NATHUPUR_PLANT_ID, plantId: NATHUPUR_PLANT_ID };
       mutated = true;
@@ -2645,7 +2951,7 @@ async function fetchCloudEntity(entity) {
             const role = (u && u.role) ? String(u.role).toLowerCase() : '';
             isCorporateFetch = ['super_admin','corporate_head','admin'].includes(role);
           } catch {}
-          const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings']);
+          const plantScopedEntities = new Set(['machines','breakdowns','pms','energy','amc','machineBreakdownLogs','machinePmRecords','plantSections','dailyUtilityLog','monthlyHerbicide','monthlyInsecticide','monthlyWater','monthlyAirCompressor','dailySolarGeneration','energySettings','complianceEquipment','complianceInspections','complianceSettings','complianceAudit']);
           if (!isCorporateFetch && pid && plantScopedEntities.has(entity) && !plantFilterDisabled.has(entity)) {
             query = query.eq('plant_id', pid);
           }
@@ -3075,7 +3381,7 @@ async function initializeCloudSync() {
     }
 
     const [
-      remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet, remoteComplianceEquipment, remoteComplianceInspections
+      remoteMachines, remoteBreakdowns, remotePMs, remoteEnergy, remoteAmc, remoteBreakdownLogs, remotePmRecords, remotePlantSections, remoteDailyUtilityLog, remoteMonthlyHerbicide, remoteMonthlyInsecticide, remoteMonthlyWater, remoteMonthlyAirCompressor, remoteDailySolarGeneration, remoteEnergySettings, remoteTestingCertificates, remoteKpiRecords, remoteKpiSettings, remoteKpiFySheet, remoteComplianceEquipment, remoteComplianceInspections, remoteComplianceCategories, remoteComplianceSettings, remoteComplianceAudit
     ] = await Promise.all([
       safeFetch('machines'),
       safeFetch('breakdowns'),
@@ -3098,6 +3404,9 @@ async function initializeCloudSync() {
       safeFetch('kpiFySheet'),
       safeFetch('complianceEquipment'),
       safeFetch('complianceInspections'),
+      safeFetch('complianceCategories'),
+      safeFetch('complianceSettings'),
+      safeFetch('complianceAudit'),
     ]);
 
     const remoteSnapshots = {
@@ -3122,6 +3431,9 @@ async function initializeCloudSync() {
       kpiFySheet: remoteKpiFySheet,
       complianceEquipment: remoteComplianceEquipment,
       complianceInspections: remoteComplianceInspections,
+      complianceCategories: remoteComplianceCategories,
+      complianceSettings: remoteComplianceSettings,
+      complianceAudit: remoteComplianceAudit,
     };
 
     // Merge cloud machines with local state (instead of replacing)
@@ -3168,6 +3480,9 @@ async function initializeCloudSync() {
     if (remoteTestingCertificates?.length) replaceEntityState('testingCertificates', remoteTestingCertificates, false);
     if (remoteComplianceEquipment?.length) replaceEntityState('complianceEquipment', remoteComplianceEquipment, false);
     if (remoteComplianceInspections?.length) replaceEntityState('complianceInspections', remoteComplianceInspections, false);
+    if (remoteComplianceCategories?.length) replaceEntityState('complianceCategories', remoteComplianceCategories, false);
+    if (remoteComplianceSettings?.length) replaceEntityState('complianceSettings', remoteComplianceSettings, false);
+    if (remoteComplianceAudit?.length) replaceEntityState('complianceAudit', remoteComplianceAudit, false);
     if (remoteKpiRecords?.length) replaceEntityState('kpiRecords', remoteKpiRecords, false);
     if (remoteKpiSettings?.length) {
       state = { ...state, kpiSettings: normalizeKpiSettings(remoteKpiSettings[0] || {}) };
@@ -3304,6 +3619,9 @@ export function getPlantScopedData(plantId) {
     energySettings: scopedEnergySettings,
     complianceEquipment: filter(state.complianceEquipment),
     complianceInspections: filter(state.complianceInspections),
+    complianceCategories: state.complianceCategories || [],
+    complianceSettings: filter(state.complianceSettings),
+    complianceAudit: filter(state.complianceAudit),
   };
 }
 
@@ -3897,44 +4215,128 @@ export async function purgeTestingCertificatesByMachine(machineId, userName) {
 // never modified by renewal. Equipment.nextDueDate/status/document are
 // denormalized caches recomputed from the latest event on every change.
 
-function latestComplianceInspection(equipmentId) {
-  const rows = (state.complianceInspections || []).filter((r) => r.equipmentId === equipmentId);
-  rows.sort((a, b) => String(b.inspectionDate || '').localeCompare(String(a.inspectionDate || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  return rows[0] || null;
+export function getComplianceHistory(equipmentId) {
+  return (state.complianceInspections || [])
+    .filter((r) => r.equipmentId === equipmentId)
+    .sort((a, b) => String(b.inspectionDate || '').localeCompare(String(a.inspectionDate || '')) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export function getComplianceSettings(plantId) {
+  const pid = plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const row = (state.complianceSettings || []).find((s) => (s.plant_id || s.plantId) === pid);
+  return row ? normalizeComplianceSettings(row) : normalizeComplianceSettings({ id: `cset-${pid}`, plant_id: pid });
+}
+
+export function getComplianceCategories({ includeInactive = false } = {}) {
+  const stored = (state.complianceCategories || []).map(normalizeComplianceCategory);
+  const byCode = new Map(stored.map((c) => [c.code, c]));
+  const builtins = BUILTIN_CATEGORIES.map((c, i) => byCode.get(c.code) || normalizeComplianceCategory({
+    id: c.id || c.code,
+    code: c.code,
+    label: c.label,
+    defaultFrequencyMonths: c.defaultFreqMonths,
+    technicalFields: c.fields,
+    sortOrder: (i + 1) * 10,
+  }));
+  const extras = stored.filter((c) => !BUILTIN_CATEGORIES.some((b) => b.code === c.code));
+  return [...builtins, ...extras]
+    .filter((c) => includeInactive || c.active)
+    .sort((a, b) => (a.sortOrder || 100) - (b.sortOrder || 100) || a.code.localeCompare(b.code));
+}
+
+export function getComplianceAudit(equipmentId) {
+  return (state.complianceAudit || [])
+    .filter((r) => !equipmentId || r.equipmentId === equipmentId)
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
 export function getComplianceEquipmentStatus(equipment) {
-  const latest = equipment ? latestComplianceInspection(equipment.id) : null;
-  return getComplianceStatus(equipment, latest ? {
-    result: latest.result,
-    inspection_date: latest.inspectionDate,
-    next_due_date: latest.nextDueDate,
-  } : null);
+  if (!equipment) return { status: 'NOT_INSPECTED', reason: '', daysLeft: null, dueDate: '', alertDate: '' };
+  const history = getComplianceHistory(equipment.id);
+  const settings = getComplianceSettings(equipment.plant_id || equipment.plantId);
+  const derived = deriveCompliance(equipment, history, { dueSoonDays: settings.dueSoonDays, asOfDate: settings.asOfDate });
+  return {
+    status: derived._status,
+    reason: derived._reason,
+    daysLeft: derived._daysLeft,
+    nextDueDays: derived._nextDueDays,
+    expiryDays: derived._expiryDays,
+    dueDate: derived._dueDate,
+    expiryDate: derived._expiryDate,
+    alertDate: derived._alertDate,
+    certificateNumber: derived._certificateNumber,
+    lastInspectionDate: derived._lastInspectionDate,
+    lastResult: derived._lastResult,
+    correctiveOpen: derived._correctiveOpen,
+    hasCertificate: derived._hasCertificate,
+    expirySource: derived._expirySource,
+  };
+}
+
+function withComplianceCache(equipment, history, settings) {
+  const derived = deriveCompliance(equipment, history, { dueSoonDays: settings.dueSoonDays, asOfDate: settings.asOfDate });
+  const latest = derived._latest || null;
+  return {
+    ...equipment,
+    nextDueDate: derived._dueDate || equipment.nextDueDate || '',
+    lastInspectionDate: derived._lastInspectionDate || equipment.lastInspectionDate || '',
+    currentInspectionId: latest?.id || '',
+    currentCertificateNumber: derived._certificateNumber || equipment.currentCertificateNumber || '',
+    currentIssueDate: derived._issueDate || equipment.currentIssueDate || '',
+    currentExpiryDate: derived._expiryDate || equipment.currentExpiryDate || '',
+    currentNextDueDate: derived._dueDate || equipment.currentNextDueDate || '',
+    currentResult: derived._lastResult || equipment.currentResult || '',
+    expirySource: derived._expirySource || equipment.expirySource || '',
+    correctiveActionPending: !!derived._correctiveOpen,
+    status: derived._status,
+    document: derived._latestCertificateRecord?.document || latest?.document || equipment.document || null,
+    updatedAt: now(),
+  };
 }
 
 function refreshComplianceEquipmentFromHistory(equipmentId) {
   const equipment = (state.complianceEquipment || []).find((e) => e.id === equipmentId);
   if (!equipment) return null;
-  const latest = latestComplianceInspection(equipmentId);
-  const nextDue = latest
-    ? (latest.nextDueDate || computeNextDue(latest.inspectionDate, equipment.frequencyMonths, ''))
-    : (equipment.nextDueDate || '');
-  const computed = getComplianceStatus(equipment, latest ? {
-    result: latest.result,
-    inspection_date: latest.inspectionDate,
-    next_due_date: latest.nextDueDate,
-  } : null);
-  return {
-    ...equipment,
-    nextDueDate: nextDue,
-    status: computed.status,
-    document: latest?.document || equipment.document || null,
-    updatedAt: now(),
-  };
+  const history = getComplianceHistory(equipmentId);
+  const settings = getComplianceSettings(equipment.plant_id || equipment.plantId);
+  return withComplianceCache(equipment, history, settings);
 }
 
-export function addComplianceEquipment(fields, userName) {
-  const record = normalizeComplianceEquipment({ ...fields, createdAt: now(), updatedAt: now() });
+function diffFields(before, after, fields) {
+  const changes = {};
+  fields.forEach((key) => {
+    const from = before?.[key];
+    const to = after?.[key];
+    const a = typeof from === 'object' ? JSON.stringify(from || null) : String(from ?? '');
+    const b = typeof to === 'object' ? JSON.stringify(to || null) : String(to ?? '');
+    if (a !== b) changes[key] = { from: from ?? '', to: to ?? '' };
+  });
+  return changes;
+}
+
+async function recordComplianceAudit(action, detail, { equipmentId = '', inspectionId = '', changes = {}, userName = '' } = {}) {
+  const record = normalizeComplianceAudit({
+    plant_id: getCurrentPlantId() || NATHUPUR_PLANT_ID,
+    equipmentId,
+    inspectionId,
+    action,
+    detail,
+    changes,
+    userName: userName || 'System',
+    createdAt: now(),
+  });
+  state = { ...state, complianceAudit: [record, ...(state.complianceAudit || [])] };
+  commit('complianceAudit');
+  try {
+    await commitAndQueue('complianceAudit', 'upsert', record);
+  } catch (err) {
+    updateSyncState({ phase: 'degraded', lastError: err.message || 'Audit log sync failed' }, false);
+  }
+  return record;
+}
+
+export async function addComplianceEquipment(fields, userName) {
+  let record = normalizeComplianceEquipment({ ...fields, createdAt: now(), updatedAt: now() });
   if (!record.equipmentCode) throw new Error('Equipment code is required');
   if (!record.equipmentName) throw new Error('Equipment name is required');
   const plantId = record.plant_id || record.plantId || getCurrentPlantId() || NATHUPUR_PLANT_ID;
@@ -3942,14 +4344,18 @@ export function addComplianceEquipment(fields, userName) {
     (e.plant_id || e.plantId) === plantId &&
     String(e.equipmentCode || '').toLowerCase() === String(record.equipmentCode).toLowerCase());
   if (clash) throw new Error(`Equipment code "${record.equipmentCode}" already exists for this plant`);
-  state = { ...state, complianceEquipment: [{ ...record, plant_id: plantId, plantId }, ...(state.complianceEquipment || [])] };
+  record = withComplianceCache({ ...record, plant_id: plantId, plantId }, [], getComplianceSettings(plantId));
+  state = { ...state, complianceEquipment: [record, ...(state.complianceEquipment || [])] };
   const saved = state.complianceEquipment[0];
-  commitAndQueue('complianceEquipment', 'upsert', saved);
+  await commitAndQueue('complianceEquipment', 'upsert', saved);
+  await recordComplianceAudit('equipment.create', `Registered ${saved.equipmentCode} — ${saved.equipmentName}`, {
+    equipmentId: saved.id, userName, changes: diffFields({}, saved, ['equipmentCode', 'equipmentName', 'category', 'lifecycleStatus']),
+  });
   logActivity(userName, 'registered compliance equipment', `${saved.equipmentCode} · ${saved.equipmentName}`, 'compliance');
   return saved;
 }
 
-export function updateComplianceEquipment(id, patch, userName) {
+export async function updateComplianceEquipment(id, patch, userName) {
   const existing = (state.complianceEquipment || []).find((e) => e.id === id);
   if (!existing) return null;
   if (patch.equipmentCode) {
@@ -3959,27 +4365,62 @@ export function updateComplianceEquipment(id, patch, userName) {
       String(e.equipmentCode || '').toLowerCase() === String(patch.equipmentCode).toLowerCase());
     if (clash) throw new Error(`Equipment code "${patch.equipmentCode}" already exists for this plant`);
   }
-  const updated = normalizeComplianceEquipment({ ...existing, ...patch, id, updatedAt: now() });
+  let updated = normalizeComplianceEquipment({ ...existing, ...patch, id, updatedAt: now() });
+  updated = withComplianceCache(updated, getComplianceHistory(id), getComplianceSettings(updated.plant_id || updated.plantId));
   state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === id ? updated : e)) };
-  commitAndQueue('complianceEquipment', 'upsert', updated);
+  await commitAndQueue('complianceEquipment', 'upsert', updated);
+  await recordComplianceAudit('equipment.update', `Updated ${updated.equipmentCode} — ${updated.equipmentName}`, {
+    equipmentId: id, userName,
+    changes: diffFields(existing, updated, ['equipmentCode', 'equipmentName', 'category', 'subcategory', 'department', 'section', 'area', 'exactLocation', 'manufacturer', 'model', 'serialNumber', 'frequencyMonths', 'nextDueDate', 'lifecycleStatus', 'serviceability', 'certificateRequired', 'responsiblePerson', 'remarks']),
+  });
   logActivity(userName, 'updated compliance equipment', `${updated.equipmentCode} · ${updated.equipmentName}`, 'compliance');
   return updated;
 }
 
-export function deleteComplianceEquipment(id, userName) {
-  const rec = (state.complianceEquipment || []).find((e) => e.id === id);
-  const doomedEvents = (state.complianceInspections || []).filter((r) => r.equipmentId === id);
-  state = {
-    ...state,
-    complianceEquipment: (state.complianceEquipment || []).filter((e) => e.id !== id),
-    complianceInspections: (state.complianceInspections || []).filter((r) => r.equipmentId !== id),
-  };
-  commitAndQueue('complianceEquipment', 'delete', id);
-  doomedEvents.forEach((ev) => commitAndQueue('complianceInspections', 'delete', ev.id));
-  logActivity(userName, 'deleted compliance equipment', rec ? `${rec.equipmentCode} · ${rec.equipmentName} (+${doomedEvents.length} history rows)` : '', 'compliance');
+export async function retireComplianceEquipment(id, userName, reason = '') {
+  const existing = (state.complianceEquipment || []).find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = withComplianceCache(
+    normalizeComplianceEquipment({ ...existing, lifecycleStatus: 'retired', updatedAt: now() }),
+    getComplianceHistory(id),
+    getComplianceSettings(existing.plant_id || existing.plantId)
+  );
+  updated.status = 'RETIRED';
+  state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === id ? updated : e)) };
+  await commitAndQueue('complianceEquipment', 'upsert', updated);
+  await recordComplianceAudit('equipment.retire', `Retired ${updated.equipmentCode}${reason ? ` — ${reason}` : ''}`, {
+    equipmentId: id, userName, changes: { lifecycleStatus: { from: existing.lifecycleStatus, to: 'retired' } },
+  });
+  logActivity(userName, 'retired compliance equipment', `${updated.equipmentCode} · ${updated.equipmentName}`, 'compliance');
+  return updated;
 }
 
-export function linkMachineCertificate(equipmentId, cert, userName) {
+export async function restoreComplianceEquipment(id, userName) {
+  const existing = (state.complianceEquipment || []).find((e) => e.id === id);
+  if (!existing) return null;
+  const updated = withComplianceCache(
+    normalizeComplianceEquipment({ ...existing, lifecycleStatus: 'active', updatedAt: now() }),
+    getComplianceHistory(id),
+    getComplianceSettings(existing.plant_id || existing.plantId)
+  );
+  state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === id ? updated : e)) };
+  await commitAndQueue('complianceEquipment', 'upsert', updated);
+  await recordComplianceAudit('equipment.restore', `Restored ${updated.equipmentCode}`, {
+    equipmentId: id, userName, changes: { lifecycleStatus: { from: existing.lifecycleStatus, to: 'active' } },
+  });
+  logActivity(userName, 'restored compliance equipment', `${updated.equipmentCode} · ${updated.equipmentName}`, 'compliance');
+  return updated;
+}
+
+/**
+ * Retained for compatibility. Decommissioning is a soft retirement: historical
+ * inspections, certificates and documents are never deleted.
+ */
+export async function deleteComplianceEquipment(id, userName) {
+  return retireComplianceEquipment(id, userName, 'decommissioned');
+}
+
+export async function linkMachineCertificate(equipmentId, cert, userName) {
   const existing = (state.complianceEquipment || []).find((e) => e.id === equipmentId);
   if (!existing) return null;
   // Reference only — the machine certificate itself is never copied, moved or
@@ -3993,59 +4434,132 @@ export function linkMachineCertificate(equipmentId, cert, userName) {
   return updateComplianceEquipment(equipmentId, patch, userName || 'System');
 }
 
-export function addComplianceInspection(equipmentId, fields, userName) {
+export async function addComplianceInspection(equipmentId, fields, userName) {
   const equipment = (state.complianceEquipment || []).find((e) => e.id === equipmentId);
   if (!equipment) throw new Error('Equipment not found');
   const freq = equipment.frequencyMonths || defaultFreqFor(equipment.category) || 12;
+  const inspectionDate = normalizeDateInput(fields.inspectionDate || fields.inspection_date) || todayISO();
   const record = normalizeComplianceInspection({
     ...fields,
     equipmentId,
     plant_id: equipment.plant_id || equipment.plantId,
     plantId: equipment.plantId || equipment.plant_id,
-    nextDueDate: fields.nextDueDate || fields.next_due_date || computeNextDue(
-      fields.inspectionDate || fields.inspection_date || new Date().toISOString().slice(0, 10), freq, ''),
+    inspectionType: fields.inspectionType || equipment.inspectionType || 'Inspection',
+    validityMonths: fields.validityMonths || equipment.frequencyMonths || freq,
+    nextDueDate: fields.nextDueDate || fields.next_due_date || computeNextDue(inspectionDate, freq, ''),
     createdAt: now(),
     updatedAt: now(),
     uploadedBy: fields.uploadedBy || fields.uploaded_by || userName,
+    updatedBy: userName || '',
   });
   // Append-only: existing history rows are never touched by a renewal.
   state = { ...state, complianceInspections: [record, ...(state.complianceInspections || [])] };
-  commitAndQueue('complianceInspections', 'upsert', record);
+  await commitAndQueue('complianceInspections', 'upsert', record);
   const refreshed = refreshComplianceEquipmentFromHistory(equipmentId);
   if (refreshed) {
     state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === equipmentId ? refreshed : e)) };
-    commitAndQueue('complianceEquipment', 'upsert', refreshed);
+    await commitAndQueue('complianceEquipment', 'upsert', refreshed);
   }
+  await recordComplianceAudit('inspection.create', `${record.inspectionType || 'Inspection'} recorded — ${record.result}`, {
+    equipmentId, inspectionId: record.id, userName,
+    changes: diffFields({}, record, ['inspectionDate', 'inspectionType', 'certificateNumber', 'result', 'issueDate', 'expiryDate', 'nextDueDate']),
+  });
   logActivity(userName, 'added compliance inspection', `${equipment.equipmentCode} · ${record.result} · ${record.certificateNumber || record.inspectionDate}`, 'compliance');
   return record;
 }
 
-export function updateComplianceInspection(id, patch, userName) {
+export async function updateComplianceInspection(id, patch, userName) {
   const existing = (state.complianceInspections || []).find((r) => r.id === id);
   if (!existing) return null;
-  const updated = normalizeComplianceInspection({ ...existing, ...patch, id, equipmentId: existing.equipmentId, updatedAt: now() });
+  const nextPatch = { ...patch };
+  const validityChanged = ['issueDate', 'validityMonths', 'validityDays'].some((key) => key in patch && String(patch[key] ?? '') !== String(existing[key] ?? ''));
+  const expiryExplicitlySet = 'manualExpiryDate' in patch || 'expiryDate' in patch;
+  if (validityChanged && !expiryExplicitlySet) {
+    nextPatch.manualExpiryDate = '';
+    nextPatch.expiryDate = '';
+    if (!('expirySource' in patch)) nextPatch.expirySource = '';
+  }
+  const updated = normalizeComplianceInspection({ ...existing, ...nextPatch, id, equipmentId: existing.equipmentId, updatedAt: now(), updatedBy: userName || '' });
   state = { ...state, complianceInspections: (state.complianceInspections || []).map((r) => (r.id === id ? updated : r)) };
-  commitAndQueue('complianceInspections', 'upsert', updated);
+  await commitAndQueue('complianceInspections', 'upsert', updated);
   const refreshed = refreshComplianceEquipmentFromHistory(existing.equipmentId);
   if (refreshed) {
     state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === existing.equipmentId ? refreshed : e)) };
-    commitAndQueue('complianceEquipment', 'upsert', refreshed);
+    await commitAndQueue('complianceEquipment', 'upsert', refreshed);
   }
+  await recordComplianceAudit('inspection.update', `Updated inspection record ${updated.inspectionRecordId || updated.id}`, {
+    equipmentId: existing.equipmentId, inspectionId: id, userName,
+    changes: diffFields(existing, updated, ['inspectionDate', 'inspectionType', 'certificateNumber', 'result', 'issueDate', 'expiryDate', 'nextDueDate', 'defects', 'correctiveAction', 'correctiveActionOwner', 'correctiveActionDueDate', 'correctiveActionClosureDate', 'closureRemarks']),
+  });
   logActivity(userName, 'updated compliance inspection', `${updated.certificateNumber || updated.inspectionDate}`, 'compliance');
   return updated;
 }
 
-export function deleteComplianceInspection(id, userName) {
-  const rec = (state.complianceInspections || []).find((r) => r.id === id);
-  if (!rec) return;
-  state = { ...state, complianceInspections: (state.complianceInspections || []).filter((r) => r.id !== id) };
-  commitAndQueue('complianceInspections', 'delete', id);
-  const refreshed = refreshComplianceEquipmentFromHistory(rec.equipmentId);
-  if (refreshed) {
-    state = { ...state, complianceEquipment: (state.complianceEquipment || []).map((e) => (e.id === rec.equipmentId ? refreshed : e)) };
-    commitAndQueue('complianceEquipment', 'upsert', refreshed);
-  }
-  logActivity(userName, 'deleted compliance inspection', rec ? `${rec.certificateNumber || rec.inspectionDate}` : '', 'compliance');
+export async function closeComplianceCorrectiveAction(inspectionId, fields = {}, userName) {
+  const existing = (state.complianceInspections || []).find((r) => r.id === inspectionId);
+  if (!existing) throw new Error('Inspection record not found');
+  const closureDate = normalizeDateInput(fields.correctiveActionClosureDate || fields.closureDate) || todayISO();
+  const closureRemarks = fields.closureRemarks || fields.closureDetails || fields.remarks || '';
+  return updateComplianceInspection(inspectionId, {
+    correctiveActionClosureDate: closureDate,
+    closureRemarks,
+    closureDetails: closureRemarks,
+    correctiveActionOwner: fields.correctiveActionOwner || existing.correctiveActionOwner || '',
+  }, userName);
+}
+
+/**
+ * Inspection and certificate history is append-only. Corrections must be made
+ * via an audited update or a new renewal record; deletion is not permitted.
+ */
+export async function deleteComplianceInspection() {
+  throw new Error('Inspection and certificate history is permanent and cannot be deleted. Record a renewal or an audited correction instead.');
+}
+
+export async function saveComplianceSettings(patch, userName) {
+  const plantId = getCurrentPlantId() || NATHUPUR_PLANT_ID;
+  const existing = (state.complianceSettings || []).find((s) => (s.plant_id || s.plantId) === plantId);
+  const previous = existing || normalizeComplianceSettings({ id: `cset-${plantId}`, plant_id: plantId });
+  const updated = normalizeComplianceSettings({ ...previous, ...patch, id: previous.id, plant_id: plantId, updatedBy: userName || '', updatedAt: now() });
+  state = {
+    ...state,
+    complianceSettings: existing
+      ? (state.complianceSettings || []).map((s) => (s.id === existing.id ? updated : s))
+      : [...(state.complianceSettings || []), updated],
+  };
+  await commitAndQueue('complianceSettings', 'upsert', updated);
+  await recordComplianceAudit('settings.update', 'Updated compliance thresholds and notification settings', {
+    userName, changes: diffFields(previous, updated, ['dueSoonDays', 'dueSoonSecondaryDays', 'reportWindowDays', 'notifyDays', 'notifyInApp', 'notifyEmails', 'notifyWhatsApp', 'asOfDate']),
+  });
+  logActivity(userName, 'updated compliance settings', `Due-soon window ${updated.dueSoonDays} days`, 'compliance');
+  return updated;
+}
+
+export async function saveComplianceCategory(fields, userName) {
+  const incoming = normalizeComplianceCategory(fields);
+  if (!incoming.code) throw new Error('Category code is required');
+  const existing = (state.complianceCategories || []).find((c) => c.id === incoming.id || c.code === incoming.code);
+  const mergedFields = { ...(existing || {}), ...fields };
+  if (existing && fields.active === undefined) mergedFields.active = existing.active;
+  if (existing && fields.defaultFrequencyMonths === undefined) mergedFields.defaultFrequencyMonths = existing.defaultFrequencyMonths;
+  if (existing && fields.technicalFields === undefined) mergedFields.technicalFields = existing.technicalFields;
+  if (existing && fields.sortOrder === undefined) mergedFields.sortOrder = existing.sortOrder;
+  const record = normalizeComplianceCategory({
+    ...mergedFields, id: existing?.id || incoming.id,
+    createdBy: existing?.createdBy || userName || '', updatedBy: userName || '', updatedAt: now(),
+    createdAt: existing?.createdAt || now(),
+  });
+  state = {
+    ...state,
+    complianceCategories: existing
+      ? (state.complianceCategories || []).map((c) => (c.id === existing.id ? record : c))
+      : [...(state.complianceCategories || []), record],
+  };
+  await commitAndQueue('complianceCategories', 'upsert', record);
+  await recordComplianceAudit(existing ? 'category.update' : 'category.create', `${existing ? 'Updated' : 'Created'} category ${record.label}`, {
+    userName, changes: diffFields(existing || {}, record, ['code', 'label', 'defaultFrequencyMonths', 'active', 'sortOrder']),
+  });
+  return record;
 }
 
 export function getTestingCertificateAlertCount(certificates, machineId) {

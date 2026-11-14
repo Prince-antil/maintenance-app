@@ -28,6 +28,11 @@ export const SUPABASE_CERT_BUCKET =
   import.meta.env.NEXT_PUBLIC_SUPABASE_CERT_BUCKET ||
   'testing-certificates';
 
+export const SUPABASE_COMPLIANCE_BUCKET =
+  import.meta.env.VITE_SUPABASE_COMPLIANCE_BUCKET ||
+  import.meta.env.NEXT_PUBLIC_SUPABASE_COMPLIANCE_BUCKET ||
+  'compliance-documents';
+
 const hasRealSupabaseConfig =
   Boolean(import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL) &&
   Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) &&

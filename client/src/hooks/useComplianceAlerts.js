@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from 'react';
-import { useStore } from '../store.js';
+import { useStore, getComplianceEquipmentStatus } from '../store.js';
 import { buildAMCNotifications, buildTestingCertificateNotifications, aggregatePMRecords, summaryMonthKey } from '../analytics.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
 
@@ -217,10 +217,33 @@ export function useComplianceAlerts() {
     });
   }, [pms]);
 
+  const complianceAlerts = useMemo(() => {
+    const equipment = store.complianceEquipment || [];
+    return equipment.map((eq) => {
+      const st = getComplianceEquipmentStatus(eq);
+      if (!['OVERDUE', 'FAILED', 'EXPIRED', 'DUE_SOON', 'ACTION_REQUIRED'].includes(st.status)) return null;
+      const daysLeft = st.daysLeft ?? st.nextDueDays ?? st.expiryDays ?? null;
+      const critical = ['OVERDUE', 'FAILED', 'EXPIRED'].includes(st.status);
+      return {
+        id: `ceq-${eq.id}-${st.status}-${st.alertDate || st.dueDate || st.expiryDate || ''}`,
+        category: 'compliance',
+        type: critical ? 'danger' : 'warning',
+        severity: critical ? 'critical' : 'warning',
+        title: `Compliance ${st.status === 'FAILED' ? 'Failure' : st.status === 'OVERDUE' ? 'Overdue' : st.status === 'EXPIRED' ? 'Expired' : st.status === 'ACTION_REQUIRED' ? 'Action Required' : 'Due Soon'}: ${eq.equipmentCode || ''}`,
+        detail: `${eq.equipmentName || ''}${st.reason ? ` — ${st.reason}` : ''}`,
+        asset: `${eq.equipmentCode || ''} ${eq.equipmentName || ''}`.trim(),
+        vendor: '',
+        expiryDate: st.alertDate || st.dueDate || st.expiryDate || '',
+        daysLeft,
+        ts: eq.updatedAt || eq.createdAt || '',
+      };
+    }).filter(Boolean);
+  }, [store.complianceEquipment, store.complianceInspections]);
+
   const allAlerts = useMemo(() => {
-    const combined = [...amcAlerts, ...certAlerts, ...pmAlerts, ...machineAlerts];
+    const combined = [...amcAlerts, ...certAlerts, ...pmAlerts, ...complianceAlerts, ...machineAlerts];
     return combined.sort((a, b) => (a.daysLeft ?? a.daysUntilExpiry ?? 999) - (b.daysLeft ?? b.daysUntilExpiry ?? 999) || new Date(b.ts) - new Date(a.ts));
-  }, [amcAlerts, certAlerts, pmAlerts, machineAlerts]);
+  }, [amcAlerts, certAlerts, pmAlerts, complianceAlerts, machineAlerts]);
 
   // Bell shows every time if 45 or less (including expired) — universal
   const bellAlerts = useMemo(() => allAlerts.filter((a) => isBellVisible(a.daysLeft ?? a.daysUntilExpiry)), [allAlerts]);
@@ -232,6 +255,7 @@ export function useComplianceAlerts() {
     amc: bellAlerts.filter((a) => a.category === 'amc' || a.type === 'AMC').length,
     cert: bellAlerts.filter((a) => a.category === 'cert').length,
     pm: bellAlerts.filter((a) => a.category === 'pm').length,
+    compliance: bellAlerts.filter((a) => a.category === 'compliance').length,
     critical: bellAlerts.filter((a) => (a.daysLeft ?? a.daysUntilExpiry) != null && (a.daysLeft ?? a.daysUntilExpiry) < 7).length,
     intervalTotal: intervalAlerts.length,
   }), [bellAlerts, intervalAlerts]);
@@ -244,6 +268,7 @@ export function useComplianceAlerts() {
     amcAlerts,
     certAlerts,
     pmAlerts,
+    complianceAlerts,
     counts,
     activeCount: bellAlerts.length,
     intervalCount: intervalAlerts.length,

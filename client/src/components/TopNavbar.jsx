@@ -377,7 +377,8 @@ export default function TopNavbar() {
                   onSettings={() => { setNotifOpen(false); navigate('/settings'); }}
                   onViewDetails={(alert) => {
                     setNotifOpen(false);
-                    if (alert.machineId) navigate(`/machines/${alert.machineId}`);
+                    if (alert.category === 'compliance') navigate('/compliance');
+                    else if (alert.machineId) navigate(`/machines/${alert.machineId}`);
                     else if (alert.category === 'cert') navigate('/machines');
                     else if (alert.category === 'amc') navigate('/reports');
                   }}

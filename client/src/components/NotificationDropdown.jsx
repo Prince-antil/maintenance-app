@@ -5,6 +5,7 @@ const FILTERS = [
   { id: 'all', label: 'All Alerts' },
   { id: 'amc', label: 'AMC Expiries' },
   { id: 'cert', label: 'Testing Certificates' },
+  { id: 'compliance', label: 'Inspection & Compliance' },
   { id: 'pm', label: 'PM Overdue' },
 ];
 
@@ -51,7 +52,7 @@ export default function NotificationDropdown({
       <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-white/[0.06] overflow-x-auto">
         {FILTERS.map((f) => {
           const isActive = activeFilter === f.id;
-          const count = f.id === 'all' ? counts.total : f.id === 'amc' ? counts.amc : f.id === 'cert' ? counts.cert : counts.pm;
+          const count = f.id === 'all' ? counts.total : f.id === 'amc' ? counts.amc : f.id === 'cert' ? counts.cert : f.id === 'compliance' ? counts.compliance : counts.pm;
           return (
             <button
               key={f.id}
