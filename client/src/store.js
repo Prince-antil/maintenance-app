@@ -6,7 +6,7 @@ import { MASTER_PLANT_SECTION } from './constants.js';
 import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js';
 import {
   computeNextDue, defaultFreqFor, deriveCompliance,
-  computeExpiry, normalizeSettings, normalizeDateInput, todayISO,
+  computeExpiry, suggestExpiryFromStart, normalizeSettings, normalizeDateInput, todayISO,
   BUILTIN_CATEGORIES,
 } from './lib/complianceLogic.js';
 
@@ -1525,6 +1525,22 @@ function asBoolean(value, fallback = false) {
 }
 
 function normalizeComplianceEquipment(fields) {
+  // Inspection & certification validity. The printed/manual certificate expiry
+  // always wins; when none is stated, a suggested expiry is calculated from the
+  // validity start date + period (valid until the day before the start's
+  // anniversary). An existing expiry value is never overwritten, and no
+  // calculation happens when the caller did not provide a validity period.
+  let currentExpiryDate = normalizeDateInput(fields.currentExpiryDate || fields.current_expiry_date || fields.validityExpiryDate || '');
+  const currentValidityStartDate = normalizeDateInput(fields.currentValidityStartDate || fields.current_validity_start_date || fields.validityStartDate || fields.validity_start_date || '');
+  let expirySource = String(fields.expirySource || fields.expiry_source || '').trim();
+  const explicitMonths = toNumber(fields.frequencyMonths ?? fields.frequency_months);
+  if (!currentExpiryDate && currentValidityStartDate && Number.isFinite(explicitMonths) && explicitMonths > 0) {
+    const suggested = suggestExpiryFromStart(currentValidityStartDate, explicitMonths);
+    if (suggested) {
+      currentExpiryDate = suggested;
+      if (!expirySource) expirySource = 'calculated';
+    }
+  }
   return {
     id: fields.id || uid('ceq'),
     plant_id: fields.plant_id || fields.plantId || '',
@@ -1564,10 +1580,11 @@ function normalizeComplianceEquipment(fields) {
     currentInspectionId: String(fields.currentInspectionId || fields.current_inspection_id || '').trim(),
     currentCertificateNumber: String(fields.currentCertificateNumber || fields.current_certificate_number || '').trim(),
     currentIssueDate: normalizeDateInput(fields.currentIssueDate || fields.current_issue_date || ''),
-    currentExpiryDate: normalizeDateInput(fields.currentExpiryDate || fields.current_expiry_date || ''),
+    currentExpiryDate,
+    currentValidityStartDate,
     currentNextDueDate: normalizeDateInput(fields.currentNextDueDate || fields.current_next_due_date || ''),
     currentResult: String(fields.currentResult || fields.current_result || '').trim(),
-    expirySource: String(fields.expirySource || fields.expiry_source || '').trim(),
+    expirySource,
     correctiveActionPending: asBoolean(fields.correctiveActionPending ?? fields.corrective_action_pending, false),
     status: String(fields.status || 'NOT_INSPECTED').trim() || 'NOT_INSPECTED',
     serviceability: String(fields.serviceability || 'Serviceable').trim() || 'Serviceable',
@@ -1625,6 +1642,7 @@ function normalizeComplianceEquipmentCloudRow(row) {
     currentCertificateNumber: row.current_certificate_number,
     currentIssueDate: row.current_issue_date,
     currentExpiryDate: row.current_expiry_date,
+    currentValidityStartDate: row.current_validity_start_date,
     currentNextDueDate: row.current_next_due_date,
     currentResult: row.current_result,
     expirySource: row.expiry_source,
@@ -1686,6 +1704,7 @@ function complianceEquipmentToCloudRow(record) {
     current_certificate_number: record.currentCertificateNumber || '',
     current_issue_date: record.currentIssueDate || null,
     current_expiry_date: record.currentExpiryDate || null,
+    current_validity_start_date: record.currentValidityStartDate || null,
     current_next_due_date: record.currentNextDueDate || null,
     current_result: record.currentResult || '',
     expiry_source: record.expirySource || '',
@@ -1712,12 +1731,13 @@ const COMPLIANCE_RESULTS = ['Pass', 'Conditional Pass', 'Fail'];
 function normalizeComplianceInspection(fields) {
   const id = fields.id || uid('cin');
   const issueDate = normalizeDateInput(fields.issueDate || fields.issue_date || '');
+  const validityStartDate = normalizeDateInput(fields.validityStartDate || fields.validity_start_date || '');
   const validityMonths = fields.validityMonths ?? fields.validity_months;
   const validityDays = fields.validityDays ?? fields.validity_days;
   const manualExpiryDate = normalizeDateInput(
     fields.manualExpiryDate || fields.manual_expiry_date || fields.expiryDate || fields.expiry_date || ''
   );
-  const expiry = computeExpiry({ issueDate, validityMonths, validityDays, manualExpiryDate, expirySource: fields.expirySource || fields.expiry_source });
+  const expiry = computeExpiry({ startDate: validityStartDate, issueDate, validityMonths, validityDays, manualExpiryDate, expirySource: fields.expirySource || fields.expiry_source });
   const storedSource = String(fields.expirySource || fields.expiry_source || '').trim();
   const expirySource = storedSource && storedSource === expiry.source
     ? storedSource
@@ -1738,6 +1758,7 @@ function normalizeComplianceInspection(fields) {
     competentPerson: String(fields.competentPerson || fields.competent_person || '').trim(),
     result: String(fields.result || 'Pass').trim() || 'Pass',
     issueDate,
+    validityStartDate,
     expiryDate: expiry.effectiveExpiry || '',
     manualExpiryDate: manualExpiryDate || '',
     calculatedExpiryDate: normalizeDateInput(fields.calculatedExpiryDate || fields.calculated_expiry_date || expiry.calculatedExpiry || ''),
@@ -1781,6 +1802,7 @@ function normalizeComplianceInspectionCloudRow(row) {
     competentPerson: row.competent_person,
     result: row.result,
     issueDate: row.issue_date,
+    validityStartDate: row.validity_start_date,
     expiryDate: row.expiry_date,
     manualExpiryDate: row.expiry_date,
     calculatedExpiryDate: row.calculated_expiry_date,
@@ -1822,6 +1844,7 @@ function complianceInspectionToCloudRow(record) {
     competent_person: record.competentPerson || '',
     result: record.result || 'Pass',
     issue_date: record.issueDate || null,
+    validity_start_date: record.validityStartDate || null,
     expiry_date: record.expiryDate || null,
     calculated_expiry_date: record.calculatedExpiryDate || null,
     expiry_source: record.expirySource || '',
@@ -4263,6 +4286,7 @@ export function getComplianceEquipmentStatus(equipment) {
     expiryDays: derived._expiryDays,
     dueDate: derived._dueDate,
     expiryDate: derived._expiryDate,
+    validityStartDate: derived._validityStartDate,
     alertDate: derived._alertDate,
     certificateNumber: derived._certificateNumber,
     lastInspectionDate: derived._lastInspectionDate,
@@ -4284,6 +4308,7 @@ function withComplianceCache(equipment, history, settings) {
     currentCertificateNumber: derived._certificateNumber || equipment.currentCertificateNumber || '',
     currentIssueDate: derived._issueDate || equipment.currentIssueDate || '',
     currentExpiryDate: derived._expiryDate || equipment.currentExpiryDate || '',
+    currentValidityStartDate: derived._validityStartDate || equipment.currentValidityStartDate || '',
     currentNextDueDate: derived._dueDate || equipment.currentNextDueDate || '',
     currentResult: derived._lastResult || equipment.currentResult || '',
     expirySource: derived._expirySource || equipment.expirySource || '',
@@ -4371,7 +4396,7 @@ export async function updateComplianceEquipment(id, patch, userName) {
   await commitAndQueue('complianceEquipment', 'upsert', updated);
   await recordComplianceAudit('equipment.update', `Updated ${updated.equipmentCode} — ${updated.equipmentName}`, {
     equipmentId: id, userName,
-    changes: diffFields(existing, updated, ['equipmentCode', 'equipmentName', 'category', 'subcategory', 'department', 'section', 'area', 'exactLocation', 'manufacturer', 'model', 'serialNumber', 'frequencyMonths', 'nextDueDate', 'lifecycleStatus', 'serviceability', 'certificateRequired', 'responsiblePerson', 'remarks']),
+    changes: diffFields(existing, updated, ['equipmentCode', 'equipmentName', 'category', 'subcategory', 'department', 'section', 'area', 'exactLocation', 'manufacturer', 'model', 'serialNumber', 'frequencyMonths', 'nextDueDate', 'lifecycleStatus', 'serviceability', 'certificateRequired', 'responsiblePerson', 'currentValidityStartDate', 'currentExpiryDate', 'expirySource', 'remarks']),
   });
   logActivity(userName, 'updated compliance equipment', `${updated.equipmentCode} · ${updated.equipmentName}`, 'compliance');
   return updated;

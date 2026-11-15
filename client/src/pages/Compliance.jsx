@@ -21,6 +21,7 @@ import {
   COMPLIANCE_CATEGORIES, COMPLIANCE_STATUS_META, RESULT_OPTIONS,
   DUE_SOON_DAYS, categoryLabel, defaultFreqFor,
   filterCompliance, summarizeCompliance, buildComplianceCsv,
+  normalizeDateInput, computeExpiry, suggestExpiryFromStart, daysRemainingLabel, formatDateDMY,
 } from '../lib/complianceLogic.js';
 import { uploadComplianceDoc, resolveComplianceDocumentUrl } from '../lib/complianceDocs.js';
 import EmptyState from '../components/EmptyState.jsx';
@@ -116,15 +117,74 @@ function EquipmentForm({ initial, plants, currentPlantId, machineCerts, onSave, 
     installDate: '', purchaseDate: '', range_value: '', accuracy: '', capacity_value: '', unit: '',
     swl: '', inspectionType: 'Calibration', standard: '', responsibleDepartment: '', responsiblePerson: '',
     frequencyMonths: '', linkedMachineCertId: '',
+    // Inspection & certification validity (current certificate)
+    currentValidityStartDate: '', currentExpiryDate: '', expirySource: '', nextDueDate: '',
     ...initial,
   }));
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const cat = COMPLIANCE_CATEGORIES.find((c) => c.id === form.category) || COMPLIANCE_CATEGORIES[5];
   const visible = CATEGORY_FIELD_SETS[form.category] || CATEGORY_FIELD_SETS.other;
   const plantName = (plants.find((p) => p.id === currentPlantId) || {}).plant_name || '';
+
+  // Live validity preview — recomputed on every date/period change. The
+  // certificate's entered expiry always wins; the suggestion is advisory.
+  const startISO = normalizeDateInput(form.currentValidityStartDate);
+  const expiryISO = normalizeDateInput(form.currentExpiryDate);
+  const months = Number(form.frequencyMonths) > 0 ? Number(form.frequencyMonths) : Number(cat.defaultFreqMonths);
+  const calc = computeExpiry({ startDate: startISO, validityMonths: months, manualExpiryDate: expiryISO });
+  const daysLeft = daysRemainingLabel(expiryISO);
+
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSave(form); }} className="space-y-4 p-5 rounded-control bg-white/[0.03] border border-white/[0.08]">
       <h4 className="text-sm font-semibold text-white flex items-center gap-2"><ClipboardList size={14} className="text-cyan-400" />{initial?.id ? 'Edit Equipment' : 'Register Equipment'} — {plantName}</h4>
+
+      <div className="rounded-control border border-cyan-500/20 bg-cyan-500/[0.04] p-4">
+        <h5 className="text-xs font-bold text-cyan-300 uppercase tracking-wider mb-3 flex items-center gap-2"><CalendarDays size={13} /> Inspection &amp; Certification Validity</h5>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={lbl}>Inspection Start Date</label>
+            <input type="date" value={form.currentValidityStartDate} onChange={set('currentValidityStartDate')} className={inp} />
+            <p className="text-[10px] text-slate-500 mt-1">Validity start date as recorded for this inspection/certificate.</p>
+          </div>
+          <div>
+            <label className={lbl}>Inspection Expiry Date / Valid Until</label>
+            <input type="date" value={form.currentExpiryDate} onChange={set('currentExpiryDate')} className={inp} />
+            <p className="text-[10px] text-slate-500 mt-1">Date until which this inspection/certificate remains valid.</p>
+          </div>
+          <div>
+            <label className={lbl}>Expiry Date Source</label>
+            <select value={form.expirySource || ''} onChange={set('expirySource')} className={inpSelect}>
+              <option value="" className="bg-slate-900">Auto (from data)</option>
+              <option value="certificate" className="bg-slate-900">Taken from Certificate</option>
+              <option value="calculated" className="bg-slate-900">Calculated</option>
+              <option value="manual_verified" className="bg-slate-900">Manually Verified</option>
+            </select>
+            <p className="text-[10px] text-slate-500 mt-1">A printed certificate expiry always wins over the calculated suggestion.</p>
+          </div>
+          <div>
+            <label className={lbl}>Validity Period (Months)</label>
+            <input type="number" min="1" value={form.frequencyMonths} onChange={set('frequencyMonths')} className={inp} placeholder={String(cat.defaultFreqMonths)} />
+            <p className="text-[10px] text-slate-500 mt-1">Also the default inspection frequency — default {cat.defaultFreqMonths} months.</p>
+          </div>
+          <div>
+            <label className={lbl}>Next Inspection Due Date</label>
+            <input type="date" value={form.nextDueDate} onChange={set('nextDueDate')} className={inp} />
+            <p className="text-[10px] text-slate-500 mt-1">Independent of certificate expiry — an inspection may be required before the certificate expires.</p>
+          </div>
+          <div className="rounded-control bg-white/[0.04] border border-white/[0.08] px-3 py-2">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Days Remaining</p>
+            <p className={`text-sm font-bold ${daysLeft.tone === 'danger' ? 'text-red-400' : daysLeft.tone === 'warning' ? 'text-amber-400' : daysLeft.tone === 'ok' ? 'text-emerald-400' : 'text-slate-400'}`}>{daysLeft.text}</p>
+            {calc.calculatedExpiry && <p className="text-[10px] text-slate-500 mt-1">Suggested expiry: {formatDateDMY(calc.calculatedExpiry)} (start {formatDateDMY(startISO)} + {months} months − 1 day)</p>}
+            {calc.differs && (
+              <p className="text-[10px] text-amber-300 mt-1 flex items-start gap-1">
+                <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                Entered expiry differs from the calculated date ({formatDateDMY(calc.calculatedExpiry)}). The entered certificate date is kept — it is never silently overwritten.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div><label className={lbl}>Category *</label><select value={form.category} onChange={set('category')} className={inpSelect} required>{COMPLIANCE_CATEGORIES.map((c) => <option key={c.id} value={c.id} className="bg-slate-900">{c.label}</option>)}</select></div>
         {form.category === 'other' && <div><label className={lbl}>Custom Category *</label><input value={form.customCategory} onChange={set('customCategory')} className={inp} placeholder="e.g. Torque Tools" required /></div>}
@@ -137,10 +197,7 @@ function EquipmentForm({ initial, plants, currentPlantId, machineCerts, onSave, 
         {visible.map((k) => (
           <div key={k}><label className={lbl}>{FIELD_DEFS[k].label}</label><input value={form[k] || ''} onChange={set(k)} className={inp} /></div>
         ))}
-        <div><label className={lbl}>Install Date</label><input type="date" value={form.installDate} onChange={set('installDate')} className={inp} /></div>
-        <div><label className={lbl}>Purchase Date</label><input type="date" value={form.purchaseDate} onChange={set('purchaseDate')} className={inp} /></div>
         <div><label className={lbl}>Inspection Type</label><input value={form.inspectionType} onChange={set('inspectionType')} className={inp} placeholder="Calibration / Inspection / Test" /></div>
-        <div><label className={lbl}>Frequency (months) — default {cat.defaultFreqMonths}</label><input type="number" min="1" value={form.frequencyMonths} onChange={set('frequencyMonths')} className={inp} placeholder={String(cat.defaultFreqMonths)} /></div>
         <div><label className={lbl}>Responsible Dept</label><input value={form.responsibleDepartment} onChange={set('responsibleDepartment')} className={inp} /></div>
         <div><label className={lbl}>Responsible Person</label><input value={form.responsiblePerson} onChange={set('responsiblePerson')} className={inp} /></div>
         <div><label className={lbl}>Serviceability</label><select value={form.serviceability || 'Serviceable'} onChange={set('serviceability')} className={inpSelect}>{['Serviceable', 'Under Maintenance', 'Quarantined', 'Scrapped'].map((s) => <option key={s} value={s} className="bg-slate-900">{s}</option>)}</select></div>
@@ -153,6 +210,16 @@ function EquipmentForm({ initial, plants, currentPlantId, machineCerts, onSave, 
         </div>
         <div className="sm:col-span-2"><label className={lbl}>Remarks</label><textarea rows={2} value={form.remarks || ''} onChange={set('remarks')} className={inp} /></div>
       </div>
+
+      <details className="rounded-control border border-white/[0.06] bg-white/[0.02] px-4 py-2">
+        <summary className="text-xs text-slate-400 cursor-pointer select-none">Optional historical dates (equipment record — not compliance dates)</summary>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 mb-1">
+          <div><label className={lbl}>Install Date (historical)</label><input type="date" value={form.installDate} onChange={set('installDate')} className={inp} /></div>
+          <div><label className={lbl}>Purchase Date (historical)</label><input type="date" value={form.purchaseDate} onChange={set('purchaseDate')} className={inp} /></div>
+        </div>
+        <p className="text-[10px] text-slate-500 mb-1">Retained for equipment history only. These dates are never used as inspection or certificate validity dates.</p>
+      </details>
+
       <div className="flex justify-end gap-2">
         {onCancel && <button type="button" onClick={onCancel} className="btn-ghost text-xs">Cancel</button>}
         <button type="submit" disabled={saving} className="btn-primary text-xs inline-flex items-center gap-1.5 disabled:opacity-50"><Save size={12} /> {saving ? 'Saving...' : (initial?.id ? 'Save Changes' : 'Register')}</button>
@@ -164,23 +231,64 @@ function EquipmentForm({ initial, plants, currentPlantId, machineCerts, onSave, 
 function InspectionForm({ equipment, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
     inspectionDate: new Date().toISOString().slice(0, 10), certificateNumber: '', agency: '', inspector: '',
-    result: 'Pass', issueDate: '', expiryDate: '', nextDueDate: '', observations: '', defects: '',
-    correctiveAction: '', closureDetails: '',
+    result: 'Pass', issueDate: '', validityStartDate: '', validityMonths: '', expiryDate: '', nextDueDate: '',
+    observations: '', defects: '', correctiveAction: '', closureDetails: '',
   });
   const [docFile, setDocFile] = useState(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Live validity preview. Validity start + period → suggested expiry (day
+  // before the start anniversary). A printed/manual expiry always wins and any
+  // difference is warned, never silently overwritten.
+  const startISO = normalizeDateInput(form.validityStartDate);
+  const months = Number(form.validityMonths) > 0
+    ? Number(form.validityMonths)
+    : (Number(equipment.frequencyMonths) > 0 ? Number(equipment.frequencyMonths) : 0);
+  const calc = computeExpiry({
+    startDate: startISO,
+    issueDate: normalizeDateInput(form.issueDate),
+    validityMonths: months || undefined,
+    manualExpiryDate: normalizeDateInput(form.expiryDate),
+  });
+  const dr = daysRemainingLabel(calc.effectiveExpiry);
+
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, _docFile: docFile }); }} className="space-y-4 p-5 rounded-control bg-white/[0.03] border border-white/[0.08]">
       <h4 className="text-sm font-semibold text-white flex items-center gap-2"><Award size={14} className="text-emerald-400" /> New Inspection — {equipment.equipmentCode} (appends to history; old records kept)</h4>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div><label className={lbl}>Inspection Date *</label><input type="date" value={form.inspectionDate} onChange={set('inspectionDate')} className={inp} required /></div>
+        <div><label className={lbl}>Actual Inspection / Test Date *</label><input type="date" value={form.inspectionDate} onChange={set('inspectionDate')} className={inp} required /></div>
         <div><label className={lbl}>Certificate No.</label><input value={form.certificateNumber} onChange={set('certificateNumber')} className={inp} /></div>
         <div><label className={lbl}>Agency / Laboratory</label><input value={form.agency} onChange={set('agency')} className={inp} /></div>
         <div><label className={lbl}>Inspector / Competent Person</label><input value={form.inspector} onChange={set('inspector')} className={inp} /></div>
         <div><label className={lbl}>Result *</label><select value={form.result} onChange={set('result')} className={inpSelect}>{RESULT_OPTIONS.map((r) => <option key={r} value={r} className="bg-slate-900">{r}</option>)}</select></div>
-        <div><label className={lbl}>Issue Date</label><input type="date" value={form.issueDate} onChange={set('issueDate')} className={inp} /></div>
-        <div><label className={lbl}>Expiry Date</label><input type="date" value={form.expiryDate} onChange={set('expiryDate')} className={inp} /></div>
-        <div><label className={lbl}>Next Due (blank = auto from frequency)</label><input type="date" value={form.nextDueDate} onChange={set('nextDueDate')} className={inp} /></div>
+        <div><label className={lbl}>Certificate Issue Date</label><input type="date" value={form.issueDate} onChange={set('issueDate')} className={inp} /></div>
+        <div>
+          <label className={lbl}>Inspection Start Date</label>
+          <input type="date" value={form.validityStartDate} onChange={set('validityStartDate')} className={inp} />
+          <p className="text-[10px] text-slate-500 mt-1">Validity start date as recorded for this inspection/certificate.</p>
+        </div>
+        <div>
+          <label className={lbl}>Validity Period (Months)</label>
+          <input type="number" min="1" value={form.validityMonths} onChange={set('validityMonths')} className={inp} placeholder={String(equipment.frequencyMonths || '')} />
+          <p className="text-[10px] text-slate-500 mt-1">Blank = use the equipment's period ({months || '—'} months).</p>
+        </div>
+        <div>
+          <label className={lbl}>Inspection Expiry Date / Valid Until</label>
+          <input type="date" value={form.expiryDate} onChange={set('expiryDate')} className={inp} />
+          <p className="text-[10px] text-slate-500 mt-1">Date until which this inspection/certificate remains valid.</p>
+        </div>
+        <div><label className={lbl}>Next Inspection Due (blank = auto from frequency)</label><input type="date" value={form.nextDueDate} onChange={set('nextDueDate')} className={inp} /></div>
+        <div className="sm:col-span-2 rounded-control bg-white/[0.04] border border-white/[0.08] px-3 py-2 text-xs">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Validity preview</p>
+          {calc.calculatedExpiry ? (
+            <p className="text-slate-300">Suggested expiry {formatDateDMY(calc.calculatedExpiry)} · current read-out: <span className={dr.tone === 'danger' ? 'text-red-400 font-semibold' : dr.tone === 'warning' ? 'text-amber-400 font-semibold' : 'text-emerald-400 font-semibold'}>{dr.text}</span></p>
+          ) : (
+            <p className="text-slate-500">Enter the Inspection Start Date (+ period) to preview the suggested expiry.</p>
+          )}
+          {calc.differs && (
+            <p className="text-amber-300 mt-1 flex items-start gap-1"><AlertTriangle size={11} className="mt-0.5 shrink-0" /> Entered expiry {formatDateDMY(form.expiryDate)} differs from the calculated {formatDateDMY(calc.calculatedExpiry)} — the printed certificate date is kept.</p>
+          )}
+        </div>
         <div><label className={lbl}>Certificate Document</label><input type="file" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" onChange={(e) => setDocFile(e.target.files?.[0] || null)} className="w-full text-xs text-slate-400 file:mr-3 file:rounded-control file:border-0 file:bg-cyan-500 file:text-white file:px-3 file:py-1.5 file:text-xs" />{docFile && <p className="text-[10px] text-emerald-400 mt-1">{docFile.name}</p>}</div>
         <div className="sm:col-span-2"><label className={lbl}>Observations</label><textarea rows={2} value={form.observations} onChange={set('observations')} className={inp} /></div>
         <div className="sm:col-span-2"><label className={lbl}>Defects (required on Fail)</label><textarea rows={2} value={form.defects} onChange={set('defects')} className={inp} /></div>
@@ -283,7 +391,8 @@ export default function Compliance() {
     return {
       ...e,
       _status: st.status, _reason: st.reason, _daysLeft: st.daysLeft, _alertDate: st.alertDate,
-      _dueDate: st.dueDate || '', _expiryDate: st.expiryDate || '', _certificateNumber: st.certificateNumber || '',
+      _dueDate: st.dueDate || '', _expiryDate: st.expiryDate || '', _validityStartDate: st.validityStartDate || '',
+      _certificateNumber: st.certificateNumber || '',
       _lastResult: hist[0]?.result || '', _lastDate: (hist[0]?.inspectionDate || '').slice(0, 10),
       _certNo: hist[0]?.certificateNumber || '', _agency: hist[0]?.agency || hist[0]?.inspector || '',
       _hasDoc: !!(hist[0]?.document || e.document),
@@ -607,8 +716,8 @@ export default function Compliance() {
               ['Valid', summary.valid, 'text-emerald-400'],
               [`Due Soon (≤${dueSoonDays}d)`, summary.dueSoon, 'text-amber-400'],
               ['Overdue', summary.overdue, 'text-red-400'],
+              ['Expired', summary.expired, 'text-red-400'],
               ['Failed / Unsafe', summary.failed, 'text-red-400'],
-              ['No Certificate', summary.noCert, 'text-slate-400'],
             ].map(([label, value, cls]) => (
               <div key={label} className="glass-card p-4"><p className="text-[10px] text-slate-500 uppercase tracking-wider">{label}</p><p className={`text-2xl font-bold tabular-nums ${cls}`}>{value}</p></div>
             ))}
@@ -652,25 +761,30 @@ export default function Compliance() {
           {filtered.length === 0 && !showEqForm ? (
             <EmptyState title="No equipment yet" description="Register pressure gauges, lifting tackles, vessels, harnesses and other inspectable items for this plant." actionLabel={canWrite ? 'Register First Equipment' : undefined} onAction={canWrite ? () => setShowEqForm(true) : undefined} />
           ) : (
-            <div className="overflow-x-auto"><table className="enterprise-table w-full min-w-[1080px]">
-              <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Plant</th><th>Next Due</th><th>Status</th><th>Last Result</th><th className="w-40">Actions</th></tr></thead>
-              <tbody>{pageData.map((r) => (
-                <tr key={r.id}>
-                  <td className="font-mono text-xs text-cyan-300">{r.equipmentCode}</td>
-                  <td className="text-white text-xs">{r.equipmentName}</td>
-                  <td className="text-slate-400 text-xs">{categoryLabel(r.category, r.customCategory)}</td>
-                  <td className="text-slate-400 text-xs">{plantNameOf(r.plant_id || r.plantId)}</td>
-                  <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(r.nextDueDate)}</td>
-                  <td><StatusBadge status={r._status} /></td>
-                  <td className="text-slate-400 text-xs">{r._lastResult || '—'}</td>
-                  <td><div className="flex items-center gap-1">
-                    <button onClick={() => setDetailEq(r)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="View history"><Eye size={12} /></button>
-                    {canWrite && <button onClick={() => setInspectEq(r)} className="btn-ghost !p-1.5 text-emerald-400 hover:text-emerald-300" aria-label="Add inspection"><Plus size={12} /></button>}
-                    {canWrite && <button onClick={() => setEditingEq(r)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit"><Pencil size={12} /></button>}
-                    {canDelete(user?.role) && <button onClick={() => handleDeleteEquipment(r)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete"><Trash2 size={12} /></button>}
-                  </div></td>
-                </tr>
-              ))}</tbody>
+            <div className="overflow-x-auto"><table className="enterprise-table w-full min-w-[1280px]">
+              <thead><tr><th>Code</th><th>Name</th><th>Category</th><th>Plant</th><th>Start</th><th>Expiry</th><th>Days Remaining</th><th>Next Due</th><th>Status</th><th className="w-40">Actions</th></tr></thead>
+              <tbody>{pageData.map((r) => {
+                const dr = daysRemainingLabel(r._expiryDate);
+                return (
+                  <tr key={r.id}>
+                    <td className="font-mono text-xs text-cyan-300">{r.equipmentCode}</td>
+                    <td className="text-white text-xs">{r.equipmentName}</td>
+                    <td className="text-slate-400 text-xs">{categoryLabel(r.category, r.customCategory)}</td>
+                    <td className="text-slate-400 text-xs">{plantNameOf(r.plant_id || r.plantId)}</td>
+                    <td className="text-slate-300 text-xs whitespace-nowrap">{r._validityStartDate ? formatDateDMY(r._validityStartDate) : <span className="text-slate-600">—</span>}</td>
+                    <td className="text-slate-300 text-xs whitespace-nowrap">{r._expiryDate ? formatDateDMY(r._expiryDate) : <span className="text-slate-600">—</span>}</td>
+                    <td className={`text-xs whitespace-nowrap ${dr.tone === 'danger' ? 'text-red-400 font-semibold' : dr.tone === 'warning' ? 'text-amber-400' : dr.tone === 'ok' ? 'text-emerald-400' : 'text-slate-600'}`}>{dr.text}</td>
+                    <td className="text-slate-300 text-xs whitespace-nowrap">{r._dueDate ? formatDateDMY(r._dueDate) : '—'}</td>
+                    <td><StatusBadge status={r._status} /></td>
+                    <td><div className="flex items-center gap-1">
+                      <button onClick={() => setDetailEq(r)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="View history"><Eye size={12} /></button>
+                      {canWrite && <button onClick={() => setInspectEq(r)} className="btn-ghost !p-1.5 text-emerald-400 hover:text-emerald-300" aria-label="Add inspection"><Plus size={12} /></button>}
+                      {canWrite && <button onClick={() => setEditingEq(r)} className="btn-ghost !p-1.5 text-slate-400 hover:text-cyan-400" aria-label="Edit"><Pencil size={12} /></button>}
+                      {canDelete(user?.role) && <button onClick={() => handleDeleteEquipment(r)} className="btn-ghost !p-1.5 text-red-400 hover:text-red-300" aria-label="Delete"><Trash2 size={12} /></button>}
+                    </div></td>
+                  </tr>
+                );
+              })}</tbody>
             </table></div>
           )}
           {filtered.length > PAGE_SIZE && (
@@ -690,10 +804,28 @@ export default function Compliance() {
                   <p className="text-meta mt-0.5">{categoryLabel(detailEq.category, detailEq.customCategory)} · {plantNameOf(detailEq.plant_id || detailEq.plantId)}</p></div>
                   <button onClick={() => setDetailEq(null)} className="btn-ghost p-1.5" aria-label="Close"><X size={16} /></button>
                 </div>
+                <div className="rounded-control border border-cyan-500/20 bg-cyan-500/[0.04] p-3 mb-3">
+                  <p className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider mb-2">Inspection &amp; Certification Validity</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                    {(() => {
+                      const dr = daysRemainingLabel(detailEq._expiryDate);
+                      return (
+                        <>
+                          <div><p className="text-[10px] text-slate-500 uppercase">Inspection Start</p><p className="text-slate-200">{detailEq._validityStartDate ? formatDateDMY(detailEq._validityStartDate) : <span className="text-slate-500">Not recorded — verify</span>}</p></div>
+                          <div><p className="text-[10px] text-slate-500 uppercase">Inspection Expiry</p><p className="text-slate-200">{detailEq._expiryDate ? formatDateDMY(detailEq._expiryDate) : <span className="text-slate-500">No Expiry Date</span>}</p></div>
+                          <div><p className="text-[10px] text-slate-500 uppercase">Days Remaining</p><p className={dr.tone === 'danger' ? 'text-red-400 font-semibold' : dr.tone === 'warning' ? 'text-amber-400' : dr.tone === 'ok' ? 'text-emerald-400' : 'text-slate-400'}>{dr.text}</p></div>
+                          <div><p className="text-[10px] text-slate-500 uppercase">Next Inspection Due</p><p className="text-slate-200">{detailEq._dueDate ? formatDateDMY(detailEq._dueDate) : '—'}</p></div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs mb-4">
-                  {[['Department', detailEq.department], ['Area', detailEq.area], ['Make / Model', [detailEq.manufacturer, detailEq.model].filter(Boolean).join(' ')], ['Serial', detailEq.serialNumber], ['Asset/Tag', detailEq.assetTag], ['Range', detailEq.rangeValue], ['Accuracy', detailEq.accuracy], ['Capacity', detailEq.capacityValue], ['Unit', detailEq.unit], ['SWL', detailEq.swl], ['Type', detailEq.inspectionType], ['Standard', detailEq.standard], ['Resp. Dept', detailEq.responsibleDepartment], ['Resp. Person', detailEq.responsiblePerson], ['Frequency', `${detailEq.frequencyMonths} mo`], ['Serviceability', detailEq.serviceability]].map(([k, v]) => (
+                  {[['Department', detailEq.department], ['Area', detailEq.area], ['Make / Model', [detailEq.manufacturer, detailEq.model].filter(Boolean).join(' ')], ['Serial', detailEq.serialNumber], ['Asset/Tag', detailEq.assetTag], ['Range', detailEq.rangeValue], ['Accuracy', detailEq.accuracy], ['Capacity', detailEq.capacityValue], ['Unit', detailEq.unit], ['SWL', detailEq.swl], ['Type', detailEq.inspectionType], ['Standard', detailEq.standard], ['Resp. Dept', detailEq.responsibleDepartment], ['Resp. Person', detailEq.responsiblePerson], ['Validity Period', `${detailEq.frequencyMonths} mo`], ['Serviceability', detailEq.serviceability]].map(([k, v]) => (
                     <div key={k} className="rounded-control bg-white/[0.03] border border-white/[0.06] px-2.5 py-1.5"><p className="text-[10px] text-slate-500 uppercase">{k}</p><p className="text-slate-200">{v || '—'}</p></div>
                   ))}
+                  <div className="rounded-control bg-white/[0.03] border border-white/[0.06] px-2.5 py-1.5"><p className="text-[10px] text-slate-500 uppercase">Install Date (historical)</p><p className="text-slate-400">{detailEq.installDate ? formatDateDMY(detailEq.installDate) : '—'}</p></div>
+                  <div className="rounded-control bg-white/[0.03] border border-white/[0.06] px-2.5 py-1.5"><p className="text-[10px] text-slate-500 uppercase">Purchase Date (historical)</p><p className="text-slate-400">{detailEq.purchaseDate ? formatDateDMY(detailEq.purchaseDate) : '—'}</p></div>
                 </div>
                 {detailEq.linkedMachineCertNumber && <p className="text-xs text-slate-400 mb-3">Linked machine certificate (reference): <span className="text-cyan-300 font-mono">{detailEq.linkedMachineCertNumber}</span> {detailEq.linkedMachineName && <span>· {detailEq.linkedMachineName}</span>}</p>}
                 {canWrite && (
@@ -721,7 +853,7 @@ export default function Compliance() {
                         <span className="text-white font-semibold">{fmtDate(h.inspectionDate)} · <span className={h.result === 'Fail' ? 'text-red-400' : 'text-emerald-400'}>{h.result}</span></span>
                         <span className="font-mono text-cyan-300">{h.certificateNumber || '—'}</span>
                       </div>
-                      <p className="text-slate-400 mt-1">{h.agency || h.inspector || ''}{h.expiryDate ? ` · valid till ${fmtDate(h.expiryDate)}` : ''}{h.nextDueDate ? ` · next due ${fmtDate(h.nextDueDate)}` : ''}</p>
+                      <p className="text-slate-400 mt-1">{h.agency || h.inspector || ''}{h.validityStartDate ? ` · start ${fmtDate(h.validityStartDate)}` : ''}{h.expiryDate ? ` · valid till ${fmtDate(h.expiryDate)}` : ''}{h.nextDueDate ? ` · next due ${fmtDate(h.nextDueDate)}` : ''}</p>
                       {(h.observations || h.defects || h.correctiveAction || h.closureDetails) && <p className="text-slate-500 mt-1">{[h.observations, h.defects, h.correctiveAction, h.closureDetails].filter(Boolean).join(' · ')}</p>}
                       {(h.document || (Array.isArray(h.documents) && h.documents.length)) && (
                         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -845,13 +977,14 @@ export default function Compliance() {
             <EmptyState title="No inspection records" description="Record an inspection or import historical certificates via the Import tab." />
           ) : (
             <div className="overflow-x-auto"><table className="enterprise-table w-full min-w-[1080px]">
-              <thead><tr><th>Date</th><th>Equipment</th><th>Type</th><th>Certificate</th><th>Agency / Person</th><th>Result</th><th>Expiry</th><th>Next Due</th><th>Corrective</th><th>Record ID</th><th>Document</th></tr></thead>
+              <thead><tr><th>Date</th><th>Equipment</th><th>Type</th><th>Certificate</th><th>Start</th><th>Agency / Person</th><th>Result</th><th>Expiry</th><th>Next Due</th><th>Corrective</th><th>Record ID</th><th>Document</th></tr></thead>
               <tbody>{historyRows.map((h) => (
                 <tr key={h.id}>
                   <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(h.inspectionDate)}</td>
                   <td className="text-xs"><button onClick={() => setDetailEq(h._eq)} className="font-mono text-cyan-300 hover:underline">{h._eq?.equipmentCode}</button><span className="text-slate-400"> · {h._eq?.equipmentName}</span></td>
                   <td className="text-slate-400 text-xs">{h.inspectionType || '—'}</td>
                   <td className="font-mono text-xs text-cyan-300">{h.certificateNumber || '—'}</td>
+                  <td className="text-slate-300 text-xs whitespace-nowrap">{h.validityStartDate ? formatDateDMY(h.validityStartDate) : <span className="text-slate-600">—</span>}</td>
                   <td className="text-slate-400 text-xs">{h.agency || h.competentPerson || h.inspector || '—'}</td>
                   <td><span className={`text-xs font-semibold ${h.result === 'Fail' ? 'text-red-400' : h.result === 'Conditional Pass' ? 'text-amber-400' : 'text-emerald-400'}`}>{h.result}</span></td>
                   <td className="text-slate-300 text-xs whitespace-nowrap">{fmtDate(h.expiryDate)}</td>

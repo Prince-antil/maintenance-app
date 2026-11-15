@@ -358,24 +358,36 @@ export function daysBetween(fromDate, toDate) {
 }
 
 // ── Expiry + next-due engine ────────────────────────────────────────────────
+// Two expiry conventions coexist by design:
+//   • Start-based (primary): validity START date + period → the certificate is
+//     valid until the day BEFORE the start's next anniversary.
+//     e.g. start 01-04-2026 + 12 months → valid until 31-03-2027.
+//   • Issue-based (legacy, no validity start recorded): issue date + period →
+//     same-day anniversary, kept for records entered before validity start
+//     dates existed. Never silently rewritten.
+// A printed/manual certificate expiry ALWAYS wins over either calculation.
 export function computeExpiry({
+  startDate,
   issueDate,
   validityMonths,
   validityDays,
   manualExpiryDate,
   expirySource,
 } = {}) {
+  const start = normalizeDateInput(startDate);
   const issue = normalizeDateInput(issueDate);
   const manual = normalizeDateInput(manualExpiryDate);
   const months = Number(validityMonths);
   const days = Number(validityDays);
   const hasValidity = (Number.isFinite(months) && months > 0) || (Number.isFinite(days) && days > 0);
   let calculated = '';
-  if (issue && hasValidity) {
+  if (start && hasValidity) {
+    calculated = addMonths(start, Number.isFinite(months) ? months : 0);
+    if (Number.isFinite(days) && days > 0) calculated = addDays(calculated, days);
+    calculated = addDays(calculated, -1);
+  } else if (issue && hasValidity) {
     calculated = addMonths(issue, Number.isFinite(months) ? months : 0);
     if (Number.isFinite(days) && days > 0) calculated = addDays(calculated, days);
-  } else if (issue && !manual && !hasValidity) {
-    calculated = '';
   }
   const manualWins = !!manual;
   const effective = manualWins ? manual : calculated;
@@ -390,6 +402,38 @@ export function computeExpiry({
     differs: !!(manual && calculated && manual !== calculated),
     differenceDays: manual && calculated ? daysUntil(manual, calculated) : null,
   };
+}
+
+/**
+ * Suggested Inspection Expiry Date from a validity start date + period.
+ * Month-end and leap-year safe (addMonths clamps), minus one day so validity
+ * covers the start anniversary day itself. Blank start yields ''.
+ */
+export function suggestExpiryFromStart(startDate, validityMonths = 0, validityDays = 0) {
+  const start = normalizeDateInput(startDate);
+  if (!start) return '';
+  const months = Number(validityMonths);
+  const days = Number(validityDays);
+  if (!((Number.isFinite(months) && months > 0) || (Number.isFinite(days) && days > 0))) return '';
+  let exp = addMonths(start, Number.isFinite(months) && months > 0 ? months : 0);
+  if (Number.isFinite(days) && days > 0) exp = addDays(exp, days);
+  return addDays(exp, -1);
+}
+
+/**
+ * Human "Days Remaining" read-out for a certificate expiry date.
+ * Never returns a fake zero for a missing date.
+ */
+export function daysRemainingLabel(expiryDate, todayStr) {
+  const iso = normalizeDateInput(expiryDate);
+  if (!iso) return { text: 'No Expiry Date', tone: 'muted', days: null };
+  const days = daysUntil(iso, todayStr);
+  if (days === 0) return { text: 'Expires Today', tone: 'danger', days: 0 };
+  if (days < 0) {
+    const n = Math.abs(days);
+    return { text: `${n} day${n === 1 ? '' : 's'} overdue`, tone: 'danger', days };
+  }
+  return { text: `${days} day${days === 1 ? '' : 's'} remaining`, tone: days <= DUE_SOON_DAYS ? 'warning' : 'ok', days };
 }
 
 export function computeNextDue(inspectionDate, frequencyMonths, explicitNextDue, frequencyDays = 0) {
@@ -420,12 +464,20 @@ export function validateInspectionDates(form = {}, { allowExpiryException = fals
   const warnings = [];
   const inspectionDate = normalizeDateInput(form.inspectionDate);
   const issueDate = normalizeDateInput(form.issueDate);
+  const validityStart = normalizeDateInput(form.validityStartDate || form.startDate);
   const manualExpiry = normalizeDateInput(form.manualExpiryDate || form.expiryDate);
   const exceptionalReason = String(form.expiryOverrideReason || '').trim();
 
   if (!inspectionDate) errors.push('Inspection / test date is required.');
   if ((form.issueDate && !issueDate) || (form.manualExpiryDate || form.expiryDate) && !manualExpiry) {
     errors.push('One or more dates are invalid. Use the date picker or DD-MM-YYYY format.');
+  }
+  if (validityStart && manualExpiry && manualExpiry < validityStart) {
+    if (allowExpiryException && exceptionalReason) {
+      warnings.push('Expiry date precedes the validity start date under an authorised exception.');
+    } else {
+      errors.push('Inspection expiry date cannot precede the inspection start date without an authorised exception reason.');
+    }
   }
   if (inspectionDate && issueDate && inspectionDate > issueDate) {
     warnings.push('Inspection date is after the certificate issue date. Confirm this is correct.');
@@ -438,6 +490,7 @@ export function validateInspectionDates(form = {}, { allowExpiryException = fals
     }
   }
   const calc = computeExpiry({
+    startDate: validityStart,
     issueDate,
     validityMonths: form.validityMonths,
     validityDays: form.validityDays,
@@ -550,6 +603,11 @@ export function deriveCompliance(equipment, history = [], options = {}) {
     fieldOf(latestCert, 'issueDate', 'issue_date') ||
     fieldOf(eq, 'currentIssueDate', 'current_issue_date')
   );
+  const currentValidityStart = normalizeDateInput(
+    fieldOf(latestCert, 'validityStartDate', 'validity_start_date') ||
+    fieldOf(latest, 'validityStartDate', 'validity_start_date') ||
+    fieldOf(eq, 'currentValidityStartDate', 'current_validity_start_date')
+  );
   const currentCertNumber = String(
     fieldOf(latestCert, 'certificateNumber', 'certificate_number') ||
     fieldOf(eq, 'currentCertificateNumber', 'current_certificate_number') ||
@@ -608,6 +666,7 @@ export function deriveCompliance(equipment, history = [], options = {}) {
     _dueDate: nextDue,
     _expiryDate: currentExpiry,
     _issueDate: currentIssue,
+    _validityStartDate: currentValidityStart,
     _certificateNumber: currentCertNumber,
     _lastInspectionDate: lastInspectionDate,
     _lastResult: lastResult,
@@ -653,6 +712,11 @@ export function getComplianceStatus(equipment, latest, dueSoonDays = DUE_SOON_DA
   const certificateRequired = !(eq.certificateRequired === false || eq.certificate_required === false);
   const certNumber = String(fieldOf(cert, 'certificateNumber', 'certificate_number') || fieldOf(eq, 'currentCertificateNumber', 'current_certificate_number') || '').trim();
   const issue = normalizeDateInput(fieldOf(cert, 'issueDate', 'issue_date') || fieldOf(eq, 'currentIssueDate', 'current_issue_date'));
+  const validityStart = normalizeDateInput(
+    fieldOf(cert, 'validityStartDate', 'validity_start_date') ||
+    fieldOf(latest, 'validityStartDate', 'validity_start_date') ||
+    fieldOf(eq, 'currentValidityStartDate', 'current_validity_start_date')
+  );
   const hasCert = !!(certNumber || expiry || issue);
   const defects = String(fieldOf(latest, 'defects', 'defects') || '').trim();
   const action = String(fieldOf(latest, 'correctiveAction', 'corrective_action') || '').trim();
@@ -666,6 +730,7 @@ export function getComplianceStatus(equipment, latest, dueSoonDays = DUE_SOON_DA
     expiryDays,
     dueDate: nextDue,
     expiryDate: expiry,
+    validityStartDate: validityStart,
     certificateNumber: certNumber,
     issueDate: issue,
     lastInspectionDate: lastDate,
@@ -974,6 +1039,8 @@ export default {
   deriveCompliance,
   getComplianceStatus,
   computeExpiry,
+  suggestExpiryFromStart,
+  daysRemainingLabel,
   computeNextDue,
   addMonths,
   daysUntil,

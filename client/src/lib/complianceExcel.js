@@ -17,6 +17,7 @@
 // All dates are stored as ISO strings (YYYY-MM-DD) internally and rendered as
 // DD-MM-YYYY on export.
 // =============================================================================
+import { daysUntil } from './complianceLogic.js';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}/;
 const DMY_DATE = /^(\d{2})-(\d{2})-(\d{4})$/;
@@ -103,21 +104,27 @@ function findSheet(wb, ...names) {
   return wb.worksheets.find((ws) => wanted.includes(ws.name.toLowerCase().replace(/\s+/g, ''))) || null;
 }
 
+// Equipment Register — required column order per the CCPL compliance spec.
+// Supplementary detail columns follow 'Remarks' so maker/serial/spec data is
+// preserved in exports and round-trips through import without polluting the
+// required layout. Install/Purchase Date are historical equipment fields and
+// are NEVER mapped into inspection dates on import.
 const EQUIPMENT_HEADERS = [
-  'Record ID', 'Plant ID', 'Plant Name', 'Equipment Code', 'Equipment Name', 'Category Code', 'Category Name',
-  'Subcategory', 'Equipment Type', 'Department', 'Section', 'Area', 'Exact Location', 'Description',
-  'Manufacturer', 'Model', 'Serial Number', 'Asset Tag', 'Install Date', 'Purchase Date', 'Range',
-  'Accuracy', 'Capacity', 'Unit', 'SWL / Rated Load', 'Inspection Type', 'Standard / Requirement',
-  'Responsible Dept', 'Responsible Person', 'Frequency (Months)', 'Certificate Required', 'Lifecycle Status',
-  'Serviceability', 'Next Due Date', 'Current Certificate No', 'Current Issue Date', 'Current Expiry Date',
-  'Current Next Due Date', 'Current Result', 'Expiry Source', 'Corrective Action Pending',
-  'Linked Machine Cert No', 'Remarks', 'Compliance Status', 'Last Inspection Date',
+  'Equipment ID', 'Equipment Code', 'Equipment Name', 'Category', 'Plant', 'Department', 'Area',
+  'Actual Inspection/Test Date', 'Certificate Issue Date', 'Inspection Start Date', 'Inspection Expiry Date',
+  'Validity Period', 'Next Inspection Due Date', 'Days Remaining', 'Compliance Status', 'Responsible Person', 'Remarks',
+  // ── supplementary detail columns ──
+  'Category Code', 'Subcategory', 'Equipment Type', 'Section', 'Exact Location', 'Description',
+  'Manufacturer', 'Model', 'Serial Number', 'Asset Tag', 'Install Date (Historical)', 'Purchase Date (Historical)',
+  'Range', 'Accuracy', 'Capacity', 'Unit', 'SWL / Rated Load', 'Inspection Type', 'Standard / Requirement',
+  'Responsible Dept', 'Certificate Required', 'Lifecycle Status', 'Serviceability',
+  'Current Certificate No', 'Current Result', 'Expiry Source', 'Corrective Action Pending', 'Linked Machine Cert No',
 ];
 
 const HISTORY_HEADERS = [
   'Record ID', 'Plant ID', 'Plant Name', 'Equipment Code', 'Equipment Name', 'Inspection Type',
   'Inspection Date', 'Certificate Number', 'Agency / Laboratory', 'Inspector / Competent Person', 'Result',
-  'Issue Date', 'Calculated Expiry Date', 'Expiry Date', 'Expiry Source', 'Expiry Override Reason',
+  'Issue Date', 'Validity Start Date', 'Calculated Expiry Date', 'Expiry Date', 'Expiry Source', 'Expiry Override Reason',
   'Validity (Months)', 'Validity (Days)', 'Next Due Date', 'Next Due Override Reason', 'Observations',
   'Defects', 'Corrective Action', 'Corrective Action Owner', 'Corrective Action Due Date',
   'Corrective Action Closure Date', 'Closure Remarks', 'Document Filename', 'Document Storage Path',
@@ -209,19 +216,32 @@ export async function exportComplianceWorkbook({
   const wsEquip = wb.addWorksheet('Equipment Register', { views: [{ state: 'frozen', ySplit: 1 }] });
   wsEquip.addRow(EQUIPMENT_HEADERS);
   equipment.forEach((r) => {
+    const expiryISO = r._expiryDate || r.currentExpiryDate || '';
+    const daysLeft = expiryISO ? daysUntil(expiryISO) : null;
     wsEquip.addRow([
+      // Required columns (spec order)
       r.id || '',
-      r.plant_id || r.plantId || '',
-      plantNameOf(r.plant_id || r.plantId),
       r.equipmentCode || '',
       r.equipmentName || '',
+      r.categoryLabel || r.category || '',
+      plantNameOf(r.plant_id || r.plantId),
+      r.department || '',
+      r.area || '',
+      fmtDateDMY(r._lastInspectionDate || r.lastInspectionDate),
+      fmtDateDMY(r._issueDate || r.currentIssueDate),
+      fmtDateDMY(r._validityStartDate || r.currentValidityStartDate),
+      fmtDateDMY(expiryISO),
+      r.frequencyMonths || '',
+      fmtDateDMY(r._dueDate || r.nextDueDate || r.currentNextDueDate),
+      Number.isFinite(daysLeft) ? daysLeft : '',
+      r._status || r.status || '',
+      r.responsiblePerson || '',
+      r.remarks || '',
+      // Supplementary detail columns
       r.category || '',
-      r.categoryLabel || '',
       r.subcategory || '',
       r.equipmentType || '',
-      r.department || '',
       r.section || '',
-      r.area || '',
       r.exactLocation || '',
       r.description || '',
       r.manufacturer || '',
@@ -238,23 +258,14 @@ export async function exportComplianceWorkbook({
       r.inspectionType || '',
       r.standard || '',
       r.responsibleDepartment || '',
-      r.responsiblePerson || '',
-      r.frequencyMonths || '',
       r.certificateRequired === false ? 'No' : 'Yes',
       r.lifecycleStatus || 'active',
       r.serviceability || '',
-      fmtDateDMY(r.nextDueDate || r._dueDate),
       r.currentCertificateNumber || r._certificateNumber || '',
-      fmtDateDMY(r.currentIssueDate || r._issueDate),
-      fmtDateDMY(r.currentExpiryDate || r._expiryDate),
-      fmtDateDMY(r.currentNextDueDate || r._dueDate),
       r.currentResult || r._lastResult || '',
       r.expirySource || r._expirySource || '',
       r.correctiveActionPending ? 'Yes' : 'No',
       r.linkedMachineCertNumber || '',
-      r.remarks || '',
-      r._status || r.status || '',
-      fmtDateDMY(r.lastInspectionDate || r._lastInspectionDate),
     ]).eachCell((cell, col) => {
       if (col === EQUIPMENT_HEADERS.indexOf('Compliance Status') + 1) {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusFill(r._status) } };
@@ -283,6 +294,7 @@ export async function exportComplianceWorkbook({
         h.competentPerson || h.inspector || '',
         h.result || '',
         fmtDateDMY(h.issueDate),
+        fmtDateDMY(h.validityStartDate),
         fmtDateDMY(h.calculatedExpiryDate),
         fmtDateDMY(h.expiryDate),
         h.expirySource || '',
@@ -374,13 +386,19 @@ export async function exportComplianceWorkbook({
   const instructions = [
     ['Workbook purpose', mode === 'template' ? 'Import template — fill the Equipment Register and optional History sheets, then import via Inspection & Compliance → Import.' : 'Live export of the plant-scoped compliance register, certificate history and compliance position.'],
     ['Date format', 'All dates are DD-MM-YYYY. Excel date cells are accepted as-is.'],
+    ['Inspection Start Date', 'Date from which the current certificate/inspection validity period starts. Left blank for existing records until verified.'],
+    ['Inspection Expiry Date', 'Date until which the certificate remains valid. A printed certificate expiry always wins over any calculated date.'],
+    ['Expiry calculation', 'Validity Period (months) from the Inspection Start Date → suggested expiry is the day before the start anniversary (start 01-04-2026 + 12 months = valid until 31-03-2027). Month-end and leap-year safe.'],
+    ['Days Remaining', 'Inspection Expiry Date − today. Blank when no expiry is recorded (never shown as 0).'],
+    ['Install / Purchase Date', 'Historical equipment fields only. They are NOT inspection or validity dates and are never auto-mapped on import.'],
     ['Matching rule', 'Equipment is matched by Equipment Code within the target plant. Names are never used for matching.'],
-    ['Adding equipment', 'Leave Record ID blank on the Equipment Register sheet. Codes must be unique per plant.'],
-    ['Updating equipment', 'Enter the existing Record ID or reuse the Equipment Code to update master fields.'],
-    ['Appending history', 'Add rows to Certificate & Inspection History without a Record ID. Old certificates are never overwritten.'],
+    ['Adding equipment', 'Leave Equipment ID blank on the Equipment Register sheet. Codes must be unique per plant.'],
+    ['Updating equipment', 'Enter the existing Equipment ID or reuse the Equipment Code to update master fields.'],
+    ['Appending history', 'Add rows to the Inspection History sheet without a Record ID. Old certificates are never overwritten.'],
     ['Correcting history', 'Reuse the exact Record ID to correct an existing certificate record. Every correction is audit-logged.'],
     ['Failures', 'Result = Fail keeps the item FAILED until a newer passing inspection is recorded. Closure alone does not clear the failure.'],
-    ['Expiry source', 'certificate = printed on the certificate; calculated = issue date + validity; manual_verified = manually entered & verified override.'],
+    ['Expiry source', 'certificate = printed on the certificate; calculated = validity start + period; manual_verified = manually entered & verified override.'],
+    ['Next Inspection Due Date', 'Independent of certificate expiry — the next inspection may be required before the certificate expires.'],
     ['Certificate required', 'Yes = item needs a certificate to be VALID. No = inspection due dates still apply but a certificate is not mandatory.'],
     ['Lifecycle status', 'active = in service; retired = decommissioned (history retained); under_repair = compliance cannot be considered valid.'],
     ['Due-soon threshold', `${settings?.dueSoonDays || 30} days (configurable in module settings).`],
@@ -407,20 +425,58 @@ export async function downloadComplianceWorkbook(options) {
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 500);
 }
 
+// Category labels used in the Equipment Register 'Category' column map back to
+// their codes on import; unknown labels become custom 'other' categories.
+const CATEGORY_LABEL_TO_CODE = {
+  'pressure instruments & gauges': 'pressure',
+  'temperature instruments': 'temperature',
+  'weighing scales, balances & load cells': 'weighing',
+  'pressure vessels & air receivers': 'vessels',
+  'safety & relief valves': 'valves',
+  'lifting tools, tackles & slings': 'lifting',
+  'ppe & safety equipment (harnesses, lanyards)': 'ppe',
+  'electrical testing & earthing equipment': 'electrical',
+  'other inspection-controlled equipment': 'other',
+};
+
+function categoryFromLabel(label) {
+  const key = String(label || '').trim().toLowerCase();
+  if (!key) return null;
+  if (CATEGORY_LABEL_TO_CODE[key]) return { code: CATEGORY_LABEL_TO_CODE[key], custom: '' };
+  // Partial match for renamed labels, e.g. "Pressure Gauges".
+  for (const [labelKey, code] of Object.entries(CATEGORY_LABEL_TO_CODE)) {
+    if (key.includes(labelKey) || labelKey.includes(key)) return { code, custom: '' };
+  }
+  return { code: 'other', custom: String(label).trim() };
+}
+
+// Validity Period cells may be "12", 12 or "12 months".
+function parseValidityPeriod(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(String(value).replace(/months?/i, '').replace(/[,\s]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 function normalizeEquipmentRow(raw) {
   const obj = raw;
   const code = cellText(obj.equipment_code || obj['Equipment Code']);
   if (!code) return { _error: 'Equipment Code is required' };
   const name = cellText(obj.equipment_name || obj['Equipment Name']);
   if (!name) return { _error: 'Equipment Name is required' };
-  const categoryCode = cellText(obj.category_code || obj['Category Code']);
-  const categoryName = cellText(obj['Category Name'] || obj.category_name);
-  const category = categoryCode || (categoryName ? 'other' : undefined);
-  const customCategory = (!categoryCode && categoryName) || (categoryCode === 'other' ? categoryName : '') || '';
+  // Category resolution: explicit code wins; the human-readable 'Category'
+  // column (new layout) maps to its builtin code; anything unknown becomes a
+  // custom 'other' category. Legacy 'Category Name' behaves the same way.
+  const categoryCode = cellText(obj.category_code);
+  const categoryLabelRaw = cellText(obj.category !== undefined ? obj.category : obj.category_name);
+  const fromLabel = categoryFromLabel(categoryLabelRaw);
+  const category = categoryCode || (fromLabel ? fromLabel.code : undefined);
+  const customCategory = categoryCode === 'other'
+    ? (categoryLabelRaw || '')
+    : (fromLabel ? fromLabel.custom : (categoryLabelRaw || ''));
   return {
-    recordId: cellText(obj.record_id || obj['Record ID']),
+    recordId: cellText(obj.equipment_id || obj.record_id || obj['Equipment ID'] || obj['Record ID']),
     plantId: cellText(obj.plant_id || obj['Plant ID']),
-    plantName: cellText(obj.plant_name || obj['Plant Name']),
+    plantName: cellText(obj.plant_name || obj['Plant Name'] || obj.plant || obj['Plant']),
     equipmentCode: code,
     equipmentName: name,
     category,
@@ -436,8 +492,9 @@ function normalizeEquipmentRow(raw) {
     model: cellText(obj.model || obj['Model']),
     serialNumber: cellText(obj.serial_number || obj['Serial Number']),
     assetTag: cellText(obj.asset_tag || obj['Asset Tag']),
-    installDate: cellDate(obj.install_date || obj['Install Date']),
-    purchaseDate: cellDate(obj.purchase_date || obj['Purchase Date']),
+    // Historical equipment dates only — never treated as inspection dates.
+    installDate: cellDate(obj.install_date || obj.install_date_historical || obj['Install Date'] || obj['Install Date (Historical)']),
+    purchaseDate: cellDate(obj.purchase_date || obj.purchase_date_historical || obj['Purchase Date'] || obj['Purchase Date (Historical)']),
     rangeValue: cellText(obj.range_value || obj['Range']),
     accuracy: cellText(obj.accuracy || obj['Accuracy']),
     capacityValue: cellText(obj.capacity_value || obj['Capacity']),
@@ -447,11 +504,19 @@ function normalizeEquipmentRow(raw) {
     standard: cellText(obj.standard || obj['Standard / Requirement']),
     responsibleDepartment: cellText(obj.responsible_dept || obj['Responsible Dept']),
     responsiblePerson: cellText(obj.responsible_person || obj['Responsible Person']),
-    frequencyMonths: cellNum(obj.frequency_months || obj['Frequency (Months)'], 0) || undefined,
+    frequencyMonths: parseValidityPeriod(obj.frequency_months || obj.validity_period || obj['Frequency (Months)'] || obj['Validity Period']),
+    // Inspection & certification validity dates (current certificate).
+    currentValidityStartDate: cellDate(obj.current_validity_start_date || obj.inspection_start_date || obj['Inspection Start Date']),
+    currentExpiryDate: cellDate(obj.current_expiry_date || obj.inspection_expiry_date || obj['Inspection Expiry Date']),
+    currentIssueDate: cellDate(obj.current_issue_date || obj.certificate_issue_date || obj['Certificate Issue Date']),
+    lastInspectionDate: cellDate(obj.last_inspection_date || obj.actual_inspection_test_date || obj['Last Inspection Date'] || obj['Actual Inspection/Test Date']),
+    nextDueDate: cellDate(obj.next_due_date || obj.next_inspection_due_date || obj['Next Due Date'] || obj['Next Inspection Due Date']),
+    expirySource: cellText(obj.expiry_source || obj['Expiry Source']),
     certificateRequired: cellBool(obj.certificate_required || obj['Certificate Required'], true),
     lifecycleStatus: (cellText(obj.lifecycle_status || obj['Lifecycle Status']) || 'active').toLowerCase(),
     serviceability: cellText(obj.serviceability || obj['Serviceability']),
     remarks: cellText(obj.remarks || obj['Remarks']),
+    // 'Days Remaining' and 'Compliance Status' are derived — intentionally ignored.
   };
 }
 
@@ -476,6 +541,7 @@ function normalizeHistoryRow(raw) {
     competentPerson: cellText(raw.inspector || raw['Inspector / Competent Person']),
     result: result || 'Pass',
     issueDate: cellDate(raw.issue_date || raw['Issue Date']),
+    validityStartDate: cellDate(raw.validity_start_date || raw['Validity Start Date']),
     calculatedExpiryDate: cellDate(raw.calculated_expiry_date || raw['Calculated Expiry Date']),
     expiryDate: cellDate(raw.expiry_date || raw['Expiry Date']),
     expirySource: cellText(raw.expiry_source || raw['Expiry Source']),
