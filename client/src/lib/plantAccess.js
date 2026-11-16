@@ -67,6 +67,18 @@ export function canDelete(role) {
   return isSuperAdmin(role) || isPlantAdmin(role);
 }
 
+// Archive / restore a machine — plant admins and above, within their plant.
+export function canArchiveMachine(role) {
+  return canDelete(role);
+}
+
+// Permanent purge is restricted to Super Admin (and legacy 'admin' accounts).
+// Plant Admin may archive but never purge; Corporate Head / Plant User / Viewer
+// get view-only destructive permissions (none granted).
+export function canPurgeMachine(role) {
+  return isSuperAdmin(role);
+}
+
 export function canViewCorporateDashboard(role) {
   return isCorporate(role);
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useUI } from '../context/UIContext.jsx';
@@ -7,7 +7,9 @@ import {
   useStore, updateMachine, addMachineDoc, removeMachineDoc,
   addSparePart, removeSparePart, addMachinePhoto, removeMachinePhoto, syncMachineRecordNow,
   addMachineBreakdownLog, deleteMachineBreakdownLog,
-  addMachinePmRecord, deleteMachinePmRecord, importMachinePmRecordsBulk, getPlantScopedData } from '../store.js';
+  addMachinePmRecord, deleteMachinePmRecord, importMachinePmRecordsBulk, getPlantScopedData,
+  restoreMachine } from '../store.js';
+import { MachineActionsMenu, ArchiveMachineModal, PurgeMachineModal, MachineArchivedBanner } from '../components/MachineActions.jsx';
 import { usePlant } from '../context/PlantContext.jsx';
 import { machineHealth, aggregateBreakdownRecords, aggregatePMRecords, summaryMonthKey, formatPeriodKey, lastNMonths, monthKey } from '../analytics.js';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -106,18 +108,22 @@ function EditSpecsModal({ machine, userName, onClose }) {
 export default function MachineProfile() {
   const { machineId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { currentPlant, currentPlantId } = usePlant();
   const rawStore = useStore();
   const store = getPlantScopedData(currentPlantId);
   const { openPreview, pushToast } = useUI();
 
-  const machine = store.machines.find((m) => m.id === machineId) || null;
+  const machine = store.machines.find((m) => m.id === machineId) ||
+    store.archivedMachines.find((m) => m.id === machineId) || null;
   const [tab, setTab] = useState('sop');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(() => Boolean(location.state?.autoEdit));
   const [showQR, setShowQR] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [purgeOpen, setPurgeOpen] = useState(false);
   const [spareForm, setSpareForm] = useState({ name: '', partCode: '', qty: '', remarks: '' });
   // History tab filters
   const [histMonthFilter, setHistMonthFilter] = useState('');
@@ -247,6 +253,7 @@ export default function MachineProfile() {
 
   const userName = user?.full_name || 'Admin';
   const isAdmin = user?.role === 'admin';
+  const isArchivedMachine = machine.archived === true;
   const docs = (machine.docs || []).filter((d) => d.tab === tab);
 
   // AMC alert count — drives the badge on the AMC tab
@@ -376,28 +383,50 @@ export default function MachineProfile() {
           <button onClick={() => setShowQR((v) => !v)} className="btn-ghost inline-flex items-center gap-1.5 text-xs" aria-expanded={showQR}>
             <QrCode size={13} aria-hidden="true" /> QR
           </button>
-          {isAdmin && (
+          {isAdmin && !isArchivedMachine && (
             <button onClick={() => setEditing(true)} className="btn-ghost inline-flex items-center gap-1.5 text-xs">
               <Pencil size={13} aria-hidden="true" /> Edit
             </button>
           )}
+          <MachineActionsMenu
+            machine={machine}
+            user={user}
+            onView={() => navigate(`/machines/${machine.id}`)}
+            onEdit={() => setEditing(true)}
+            onArchive={() => setArchiveOpen(true)}
+            onPurge={() => setPurgeOpen(true)}
+          />
           {isAdmin ? (
-            <select
-              className="select-field !w-auto text-xs"
-              value={machine.status}
-              onChange={(e) => updateMachine(machine.id, { status: e.target.value }, userName)}
-              aria-label="Machine status"
-            >
-              <option value="running">Running</option>
-              <option value="maintenance">Under Maintenance</option>
-              <option value="breakdown">Breakdown</option>
-              <option value="standby">Standby</option>
-            </select>
+            !isArchivedMachine && (
+              <select
+                className="select-field !w-auto text-xs"
+                value={machine.status}
+                onChange={(e) => updateMachine(machine.id, { status: e.target.value }, userName)}
+                aria-label="Machine status"
+              >
+                <option value="running">Running</option>
+                <option value="maintenance">Under Maintenance</option>
+                <option value="breakdown">Breakdown</option>
+                <option value="standby">Standby</option>
+              </select>
+            )
           ) : (
             <StatusBadge status={machine.status} pulse={machine.status === 'breakdown'} />
           )}
         </div>
       </div>
+
+      {/* Archived banner */}
+      {isArchivedMachine && (
+        <MachineArchivedBanner
+          machine={machine}
+          user={user}
+          onRestore={() => {
+            restoreMachine(machine.id, userName);
+            pushToast({ type: 'success', title: 'Machine restored', message: `${machine.name} is back in the active register. All records preserved.` });
+          }}
+        />
+      )}
 
       {/* Live stats + spec sheet + QR */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -1162,6 +1191,36 @@ export default function MachineProfile() {
       </div>
 
       {editing && <EditSpecsModal machine={machine} userName={userName} onClose={() => setEditing(false)} />}
+      {archiveOpen && (
+        <ArchiveMachineModal
+          machine={machine}
+          userName={userName}
+          onClose={() => setArchiveOpen(false)}
+          onDone={(updated, action) => pushToast({
+            type: 'success',
+            title: action === 'restored' ? 'Machine restored' : 'Machine archived',
+            message: updated?.name
+              ? `${updated.name} ${action === 'restored' ? 'is back in the active register' : 'was moved to the archived view'}. All records preserved.`
+              : undefined,
+          })}
+        />
+      )}
+      {purgeOpen && (
+        <PurgeMachineModal
+          machine={machine}
+          userName={userName}
+          plantId={currentPlantId}
+          onClose={() => setPurgeOpen(false)}
+          onPurged={(res) => {
+            pushToast({
+              type: 'success',
+              title: 'Machine permanently purged',
+              message: `${res.machine?.name} (${res.machine?.machineCode}) deleted with ${res.counts?.pm_records || 0} PM · ${res.counts?.breakdown_logs || 0} breakdown · ${res.counts?.amc_records || 0} AMC · ${res.counts?.testing_certificates || 0} certificate records.`,
+            });
+            navigate('/machines', { replace: true });
+          }}
+        />
+      )}
     </div>
   );
 }

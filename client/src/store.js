@@ -3,7 +3,7 @@ import { loadLS, saveLS } from './utils.js';
 import { normalizeMachineStatus } from './bulkImport.js';
 import { SEED_MACHINES } from './equipmentData.js';
 import { MASTER_PLANT_SECTION } from './constants.js';
-import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js';
+import { isSupabaseConfigured, supabase, SUPABASE_DOCUMENT_BUCKET, SUPABASE_AMC_BUCKET, SUPABASE_CERT_BUCKET } from './lib/supabaseClient.js';
 import {
   computeNextDue, defaultFreqFor, deriveCompliance,
   computeExpiry, suggestExpiryFromStart, normalizeSettings, normalizeDateInput, todayISO,
@@ -84,10 +84,79 @@ const MACHINE_DEFAULTS = {
   runningHours: 0,
   criticality: '',
   status: 'running',
+  archived: false,
+  archivedAt: '',
+  archivedBy: '',
+  archiveReason: '',
   docs: [],
   spares: [],
   photos: [],
 };
+
+// ── Purged-machine tombstones (multi-PC purge safety) ───────────────────────
+// localStorage registry of permanently purged machine ids. Prevents:
+//  - seed machines from resurrecting after a purge (mergeSeedMachines)
+//  - old queued cloud upserts / Realtime replays from re-creating the row
+// Cross-PC: the machine_purge_audit table is fetched on boot and merged into
+// this registry, so a PC that was offline during a purge converges too.
+const PURGED_MACHINES_KEY = 'CCPL_PURGED_MACHINES';
+
+function loadMachineTombstones() {
+  const list = loadLS(PURGED_MACHINES_KEY, []);
+  return Array.isArray(list) ? list : [];
+}
+
+function saveMachineTombstones(list) {
+  saveLS(PURGED_MACHINES_KEY, list);
+}
+
+function addMachineTombstone(machine, meta = {}) {
+  const id = machine?.id || meta.id;
+  if (!id) return;
+  const list = loadMachineTombstones().filter((t) => t.id !== id);
+  list.push({
+    id,
+    machineCode: machine?.machineCode || meta.machineCode || '',
+    name: machine?.name || meta.name || '',
+    purgedAt: now(),
+    purgedBy: meta.purgedBy || 'System',
+  });
+  saveMachineTombstones(list);
+}
+
+function isMachinePurged(id) {
+  return loadMachineTombstones().some((t) => t.id === id);
+}
+
+/** Drop tombstoned machines from a merged machine list. */
+function applyMachineTombstones(machines) {
+  const tombstones = loadMachineTombstones();
+  if (!tombstones.length || !Array.isArray(machines)) return machines;
+  const purgedIds = new Set(tombstones.map((t) => t.id));
+  return machines.filter((m) => !purgedIds.has(m.id));
+}
+
+/** Remove local dependent records (history / AMC / certificates) of purged machines. */
+function sweepTombstonedMachineDependents() {
+  const tombstones = loadMachineTombstones();
+  if (!tombstones.length) return;
+  const purgedIds = new Set(tombstones.map((t) => t.id));
+  const sweep = (entity, matchKey) => {
+    const rows = state[entity];
+    if (!Array.isArray(rows)) return;
+    const orphans = rows.filter((r) => purgedIds.has(String(r[matchKey] || '')));
+    if (!orphans.length) return;
+    state = { ...state, [entity]: rows.filter((r) => !purgedIds.has(String(r[matchKey] || ''))) };
+    persistEntity(entity);
+    orphans.forEach((r) => {
+      if (isSupabaseConfigured && supabase) queueCloudMutation(entity, 'delete', r.id, { schedule: true });
+    });
+  };
+  sweep('machinePmRecords', 'machineId');
+  sweep('machineBreakdownLogs', 'machineId');
+  sweep('amc', 'machineId');
+  sweep('testingCertificates', 'machineId');
+}
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -795,6 +864,10 @@ function normalizeMachineRecord(machine) {
     section: source.section || '',
     department: source.department || source.section || '',
     status: normalizeMachineStatus(source.status || 'running'),
+    archived: source.archived === true || source.archived === 'true',
+    archivedAt: source.archivedAt || source.archived_at || '',
+    archivedBy: source.archivedBy || source.archived_by || '',
+    archiveReason: source.archiveReason || source.archive_reason || '',
     docs: docs.map((doc) => normalizeMachineDoc({ ...doc, machine_id: doc.machine_id || id, plant_section: doc.plant_section || source.section || '' })),
     spares: Array.isArray(source.spares) ? source.spares : [],
     photos: Array.isArray(source.photos) ? source.photos : [],
@@ -844,7 +917,7 @@ function mergeSeedMachines(storedMachines, seedMachines) {
       });
     });
 
-  return merged;
+  return applyMachineTombstones(merged);
 }
 
 function resolvePeriod(fields = {}) {
@@ -1003,6 +1076,10 @@ function machineToCloudRow(machine) {
       runningHours: machine.runningHours || 0,
       criticality: machine.criticality || '',
       status: machine.status || 'running',
+      archived: machine.archived === true,
+      archivedAt: machine.archivedAt || '',
+      archivedBy: machine.archivedBy || '',
+      archiveReason: machine.archiveReason || '',
       spares: Array.isArray(machine.spares) ? machine.spares : [],
       photos: Array.isArray(machine.photos) ? machine.photos : [],
       createdAt: machine.createdAt || now(),
@@ -2680,8 +2757,9 @@ function replaceEntityState(entity, records, notify = true) {
 }
 
 function sectionMachineCount(section) {
-  if (!section || section === MASTER_SECTION) return state.machines.length || 1;
-  return state.machines.filter((machine) => machine.section === section).length || 1;
+  const active = state.machines.filter((machine) => machine.archived !== true);
+  if (!section || section === MASTER_SECTION) return active.length || 1;
+  return active.filter((machine) => machine.section === section).length || 1;
 }
 
 function summaryIdentity(record) {
@@ -3184,6 +3262,10 @@ function applyRealtimePayload(entity, payload) {
       return;
     }
     if (entity === 'machines') {
+      // Tombstone the purge so seed machines / queue retries cannot
+      // resurrect it locally on this PC.
+      const purged = state.machines.find((m) => m.id === deletedId);
+      if (purged) addMachineTombstone(purged, { purgedBy: 'Realtime delete' });
       state = { ...state, machines: state.machines.filter((m) => m.id !== deletedId) };
     } else {
       state = { ...state, [entity]: state[entity].filter((r) => r.id !== deletedId) };
@@ -3204,6 +3286,13 @@ function applyRealtimePayload(entity, payload) {
   const normalized = config.fromRow(newRow);
 
   if (entity === 'machines') {
+    // Resurrection guard: another PC replaying a stale queued upsert for a
+    // purged machine must not restore it. Drop the row and re-queue a delete.
+    if (isMachinePurged(normalized.id)) {
+      rtLog('warn', `Blocked Realtime ${eventType} for purged machine ${normalized.id} — re-queuing delete`);
+      queueCloudMutation('machines', 'delete', normalized.id);
+      return;
+    }
     const exists = state.machines.some((m) => m.id === normalized.id);
     state = {
       ...state,
@@ -3459,6 +3548,34 @@ async function initializeCloudSync() {
       complianceAudit: remoteComplianceAudit,
     };
 
+    // Cross-PC purge tombstones: machines absent from the cloud but present
+    // in the purge audit were permanently deleted on another PC. Adopt them
+    // so seeds / local-only merge / queue retries cannot resurrect them here.
+    try {
+      const { data: purgeAudit, error: purgeAuditError } = await supabase
+        .from('machine_purge_audit')
+        .select('machine_id, machine_code, machine_name, created_at')
+        .order('created_at', { ascending: false })
+        .limit(500);
+      if (!purgeAuditError && Array.isArray(purgeAudit)) {
+        const remoteIds = new Set(remoteMachines.map((m) => m.id));
+        const known = new Set(loadMachineTombstones().map((t) => t.id));
+        purgeAudit.forEach((row) => {
+          if (row?.machine_id && !remoteIds.has(row.machine_id) && !known.has(row.machine_id)) {
+            addMachineTombstone(null, {
+              id: row.machine_id,
+              machineCode: row.machine_code || '',
+              name: row.machine_name || '',
+              purgedBy: 'Purge audit sync',
+            });
+            known.add(row.machine_id);
+          }
+        });
+      }
+    } catch {
+      // machine_purge_audit table not deployed yet — tombstones stay local-only
+    }
+
     // Merge cloud machines with local state (instead of replacing)
     // This preserves local-only machines that haven't been synced to Supabase yet
     if (remoteMachines.length) {
@@ -3482,6 +3599,8 @@ async function initializeCloudSync() {
       const finalMachines = mergeSeedMachines(merged, SEED_MACHINES);
       state = { ...state, machines: finalMachines };
       persistEntity('machines');
+      // Remove any local history/AMC/certificates that reference purged machines.
+      sweepTombstonedMachineDependents();
     }
     if (remoteBreakdowns.length) replaceEntityState('breakdowns', remoteBreakdowns, false);
     if (remotePMs.length) replaceEntityState('pms', remotePMs, false);
@@ -3623,9 +3742,12 @@ export function getPlantScopedData(plantId) {
     // This plant has no settings row yet — return plant-specific default (not Nathupur's)
     return normalizeEnergySettings({ id: 'default', plant_id: pid });
   })();
+  // Archived machines stay out of the active register, counts and machine
+  // selection dropdowns; they remain available via archivedMachines.
   return {
     ...state,
-    machines: filter(state.machines),
+    machines: filter(state.machines).filter((m) => m.archived !== true),
+    archivedMachines: filter(state.machines).filter((m) => m.archived === true),
     breakdowns: filter(state.breakdowns),
     pms: filter(state.pms),
     energy: filter(state.energy),
@@ -3719,6 +3841,11 @@ export function addMachine(fields, userName) {
     id: fields.id || fields.machineCode || uid('m'),
     createdAt: now(),
   });
+  // Intentional re-creation: drop any tombstone for this id so the new
+  // machine is not filtered out of merges or resurrect-blocked.
+  if (isMachinePurged(machine.id)) {
+    saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machine.id));
+  }
   state = { ...state, machines: [machine, ...state.machines] };
   commitAndQueue('machines', 'upsert', machine);
   logActivity(userName, 'added machine', machine.name, 'machine');
@@ -3726,6 +3853,7 @@ export function addMachine(fields, userName) {
 }
 
 export function updateMachine(id, patch, userName, silent = false) {
+  if (isMachinePurged(id)) return null;
   let updatedMachine = null;
   state = {
     ...state,
@@ -3746,6 +3874,296 @@ export function deleteMachine(id, userName) {
   state = { ...state, machines: state.machines.filter((machine) => machine.id !== id) };
   commitAndQueue('machines', 'delete', id);
   logActivity(userName, 'deleted machine', name, 'machine');
+}
+
+// ── Machine archive / restore / purge ───────────────────────────────────────
+// Archive keeps every record (PM history, breakdowns, AMC, certificates,
+// documents) intact — the machine is only hidden from the active register.
+// Purge permanently deletes the machine AND its dependents via the
+// transactional purge_machine_v1 RPC (with a client-side fallback), records
+// a tombstone so seeds/queues/Realtime cannot resurrect it, and cleans up
+// machine-exclusive storage files.
+
+export function archiveMachine(id, userName, reason = '') {
+  let updated = null;
+  state = {
+    ...state,
+    machines: state.machines.map((machine) => {
+      if (machine.id !== id) return machine;
+      updated = normalizeMachineRecord({
+        ...machine,
+        archived: true,
+        archivedAt: now(),
+        archivedBy: userName || 'System',
+        archiveReason: reason || '',
+        status: machine.status === 'breakdown' ? 'standby' : machine.status,
+      });
+      return updated;
+    }),
+  };
+  if (!updated) return null;
+  commitAndQueue('machines', 'upsert', updated);
+  logActivity(userName, 'archived machine', updated.name || id, 'machine');
+  return updated;
+}
+
+export function restoreMachine(id, userName) {
+  let updated = null;
+  state = {
+    ...state,
+    machines: state.machines.map((machine) => {
+      if (machine.id !== id) return machine;
+      updated = normalizeMachineRecord({
+        ...machine,
+        archived: false,
+        archivedAt: '',
+        archivedBy: '',
+        archiveReason: '',
+      });
+      return updated;
+    }),
+  };
+  if (!updated) return null;
+  commitAndQueue('machines', 'upsert', updated);
+  logActivity(userName, 'restored archived machine', updated.name || id, 'machine');
+  return updated;
+}
+
+export const isMachineArchived = (id) => getMachine(id)?.archived === true;
+
+/** Active (non-archived) machines of a list — use for counts & dropdowns. */
+export const activeMachinesOf = (machines) =>
+  (Array.isArray(machines) ? machines : []).filter((m) => m.archived !== true);
+
+/**
+ * Dependency summary for a machine. Prefers the authoritative server-side
+ * probe RPC; falls back to local state when the RPC is not deployed yet.
+ */
+export async function getMachinePurgeSummary(machineId) {
+  const machine = getMachine(machineId);
+  if (!machine) return { found: false };
+
+  const localCounts = {
+    found: true,
+    machine_id: machine.id,
+    machine_code: machine.machineCode || machine.id,
+    machine_name: machine.name,
+    plant_id: machine.plant_id || machine.plantId || null,
+    pm_records: (state.machinePmRecords || []).filter((r) => r.machineId === machineId).length,
+    breakdown_logs: (state.machineBreakdownLogs || []).filter((r) => r.machineId === machineId).length,
+    amc_records: (state.amc || []).filter((r) => r.machineId === machineId).length,
+    testing_certificates: (state.testingCertificates || []).filter((r) => r.machineId === machineId).length,
+    machine_documents: (machine.docs || []).length,
+  };
+
+  if (supabase && isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase.rpc('purge_machine_probe_v1', { p_machine_id: machineId });
+      if (!error && data && data.found) return { ...localCounts, ...data, source: 'server' };
+      if (!error && data && !data.found) return { ...data, source: 'server' };
+    } catch {
+      // RPC not deployed — graceful fallback to local counts
+    }
+  }
+  return { ...localCounts, source: 'local' };
+}
+
+/** Best-effort storage cleanup for machine-exclusive files. Returns orphans on failure. */
+async function purgeMachineStorageFiles(machineId) {
+  const orphans = [];
+  let removed = 0;
+  if (!supabase || !isSupabaseConfigured) return { removed, orphans };
+
+  // Every machine-owned file lives under one of these bucket/prefix pairs.
+  // AMC documents, testing certificates and machine documents are uploaded
+  // from the machine's own profile — never shared with other records.
+  const prefixes = [
+    { bucket: SUPABASE_DOCUMENT_BUCKET, prefix: `machines/${machineId}/` },
+    { bucket: SUPABASE_AMC_BUCKET, prefix: `amc/${machineId}/` },
+    { bucket: SUPABASE_CERT_BUCKET, prefix: `certs/${machineId}/` },
+    { bucket: SUPABASE_DOCUMENT_BUCKET, prefix: `certs/${machineId}/` },
+  ];
+  const seen = new Set();
+  for (const { bucket, prefix } of prefixes) {
+    if (!bucket || seen.has(`${bucket}::${prefix}`)) continue;
+    seen.add(`${bucket}::${prefix}`);
+    try {
+      const { data: files, error } = await supabase.storage.from(bucket).list(prefix, { limit: 1000 });
+      if (error || !Array.isArray(files) || !files.length) continue;
+      const paths = files.filter((f) => f.name && !f.id?.endsWith('/')).map((f) => `${prefix}${f.name}`);
+      if (!paths.length) continue;
+      const { error: rmError } = await supabase.storage.from(bucket).remove(paths);
+      if (rmError) orphans.push(...paths.map((p) => ({ bucket, path: p })));
+      else removed += paths.length;
+    } catch {
+      // Storage cleanup failure must not block the purge — record orphans
+      orphans.push({ bucket, prefix });
+    }
+  }
+  return { removed, orphans };
+}
+
+/**
+ * Permanently purge a machine and its dependents.
+ * - Waits for the database to confirm (RPC or fallback deletes) before any
+ *   local removal — failure keeps the machine untouched and returns the error.
+ * - Requires `force: true` when the machine has operational history
+ *   (elevated confirmation in the UI).
+ */
+export async function purgeMachine(machineId, options = {}) {
+  const { reason = '', userName = 'System', plantId = null, force = false } = options;
+  const machine = getMachine(machineId);
+  if (!machine) {
+    return { success: false, error: `Machine not found: ${machineId}` };
+  }
+
+  const summary = await getMachinePurgeSummary(machineId);
+  const counts = {
+    pm_records: Number(summary.pm_records) || 0,
+    breakdown_logs: Number(summary.breakdown_logs) || 0,
+    amc_records: Number(summary.amc_records) || 0,
+    testing_certificates: Number(summary.testing_certificates) || 0,
+    machine_documents: Number(summary.machine_documents) || (machine.docs || []).length,
+  };
+  const historyCount =
+    counts.pm_records + counts.breakdown_logs + counts.amc_records + counts.testing_certificates;
+
+  // Case B guard — never silently delete machines with operational history.
+  if (historyCount > 0 && !force) {
+    return {
+      success: false,
+      blocked: 'history',
+      counts,
+      error:
+        'This machine has operational history. Use Archive instead, or confirm the elevated purge.',
+    };
+  }
+
+  // Tombstone FIRST so nothing (queue flush, realtime replay, reload)
+  // resurrects the machine while the purge is in flight.
+  addMachineTombstone(machine, { purgedBy: userName });
+  // Remove from local state now that the tombstone protects it.
+  state = { ...state, machines: state.machines.filter((m) => m.id !== machineId) };
+  persistEntity('machines');
+
+  let dbResult = null;
+  let method = 'rpc';
+  let dbError = null;
+
+  if (supabase && isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase.rpc('purge_machine_v1', {
+        p_machine_id: machineId,
+        p_plant_id: plantId || getCurrentPlantId() || null,
+        p_actor: userName,
+        p_reason: reason,
+      });
+      if (error) {
+        dbError = error;
+        // Only fall back when the RPC itself is not deployed. Errors raised by
+        // the function (machine_not_found / plant_mismatch) are authoritative.
+        if (/function .* does not exist|Could not find the function/i.test(error.message || '')) {
+          method = 'fallback';
+          dbResult = null;
+        } else {
+          // Undo the local tombstone — the machine still exists in the DB.
+          saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
+          state = { ...state, machines: [machine, ...state.machines] };
+          persistEntity('machines');
+          notifyStoreUpdate();
+          return {
+            success: false,
+            error: error.message || 'Database purge failed',
+            counts,
+          };
+        }
+      } else {
+        dbResult = data;
+      }
+    } catch (err) {
+      dbError = err;
+      method = 'fallback';
+    }
+
+    if (method === 'fallback') {
+      try {
+        // Client-side fallback: explicit deletes for dependents (no FK on
+        // testing_certificates) + the machine row, awaited for confirmation.
+        for (const [entity, rows, key] of [
+          ['testingCertificates', state.testingCertificates, 'machineId'],
+          ['machineBreakdownLogs', state.machineBreakdownLogs, 'machineId'],
+          ['machinePmRecords', state.machinePmRecords, 'machineId'],
+          ['amc', state.amc, 'machineId'],
+        ]) {
+          (rows || [])
+            .filter((r) => r[key] === machineId)
+            .forEach((r) => queueCloudMutation(entity, 'delete', r.id, { schedule: false }));
+        }
+        queueCloudMutation('machines', 'delete', machineId, { schedule: false });
+        await flushPendingCloudOps();
+        dbResult = { success: true, fallback: true };
+      } catch (err) {
+        saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
+        state = { ...state, machines: [machine, ...state.machines] };
+        persistEntity('machines');
+        notifyStoreUpdate();
+        return {
+          success: false,
+          error: err?.message || 'Database purge failed (offline fallback)',
+          counts,
+        };
+      }
+    }
+  } else {
+    // Local-only workspace (no Supabase) — purge is local; tombstone stands.
+    method = 'local-only';
+  }
+
+  // Remove dependents from local state.
+  const removeDependents = (entity, key) => {
+    const rows = state[entity];
+    if (!Array.isArray(rows)) return 0;
+    const orphans = rows.filter((r) => r[key] === machineId);
+    if (orphans.length) {
+      state = { ...state, [entity]: rows.filter((r) => r[key] !== machineId) };
+      persistEntity(entity);
+    }
+    return orphans.length;
+  };
+  const localRemoved = {
+    testingCertificates: removeDependents('testingCertificates', 'machineId'),
+    machineBreakdownLogs: removeDependents('machineBreakdownLogs', 'machineId'),
+    machinePmRecords: removeDependents('machinePmRecords', 'machineId'),
+    amc: removeDependents('amc', 'machineId'),
+  };
+  // Any queued upsert for the purged machine / its dependents is superseded
+  // by delete ops (queueCloudMutation dedupes by entity+recordId).
+  notifyStoreUpdate();
+
+  // Storage cleanup — machine-exclusive files only.
+  let storage = { removed: 0, orphans: [] };
+  try {
+    storage = await purgeMachineStorageFiles(machineId);
+  } catch (err) {
+    storage = { removed: 0, orphans: [{ error: err?.message || 'storage cleanup failed' }] };
+  }
+
+  logActivity(
+    userName,
+    'permanently purged machine',
+    `${machine.name} (${machine.machineCode || machine.id}) · PM ${counts.pm_records} · BD ${counts.breakdown_logs} · AMC ${counts.amc_records} · Certs ${counts.testing_certificates}${reason ? ` · Reason: ${reason}` : ''}`,
+    'machine'
+  );
+
+  return {
+    success: true,
+    method,
+    machine: { id: machine.id, machineCode: machine.machineCode || machine.id, name: machine.name },
+    counts: { ...counts, localRemoved },
+    storage,
+    dbError: dbError && method !== 'fallback' ? dbError.message || String(dbError) : null,
+    orphans: storage.orphans,
+  };
 }
 
 export function addMachineDoc(machineId, doc, userName) {
