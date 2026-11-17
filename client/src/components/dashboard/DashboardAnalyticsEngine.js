@@ -3,14 +3,9 @@
  * Single source of truth for Solar Performance & Renewable Energy metrics
  */
 
-import { 
-  getSolarDerived, 
-  getUtilityDerived, 
-  getCurrentMonthSolarTotal,
-  computeSolarSummary,
-  getUtilityDerived as getUtilityDerivedFromEngine,
-} from '../../lib/energyCalculations.js';
+import { getSolarDerived } from '../../lib/energyCalculations.js';
 import { formatEnergy } from '../../lib/energyCalculations.js';
+import { computeDailyDeltas } from '../../analytics.js';
 
 /**
  * Computes live Dashboard metrics from raw Solar and Utility records
@@ -21,26 +16,24 @@ export const computeDashboardMetrics = (solarRows = [], utilityRows = []) => {
   const normalizedSolar = solarRows.map(getSolarDerived);
   const inverterTotalKwh = normalizedSolar.reduce((sum, r) => sum + (r.grandTotal || 0), 0);
 
-  // 2. Process Utility Rows using Canonical Derivation
-  const normalizedUtility = utilityRows.map(getUtilityDerived);
+  // 2. Process Utility Rows via daily deltas (stored values are cumulative
+  //    meter registers — they must be diffed per day before summing).
+  const deltas = computeDailyDeltas(utilityRows || []);
+  const deltaSum = (key) => deltas.reduce((sum, row) => {
+    const value = row._delta?.[key];
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
 
-  // Extract Import/Export values using correct field names from getUtilityDerived
-  const totalU1Import = normalizedUtility.reduce((sum, r) => sum + (r.u1ImportKwh || 0), 0);
-  const totalU2Import = normalizedUtility.reduce((sum, r) => sum + (r.u2ImportKwh || 0), 0);
-  const totalU1Export = normalizedUtility.reduce((sum, r) => sum + (r.u1ExportKwh || 0), 0);
-  const totalU2Export = normalizedUtility.reduce((sum, r) => sum + (r.u2ExportKwh || 0), 0);
+  const totalU1Import = deltaSum('u1ImportKwhReading');
+  const totalU2Import = deltaSum('u2ImportKwhReading');
+  const totalU1Export = deltaSum('u1ExportKwhReading');
+  const totalU2Export = deltaSum('u2ExportKwhReading');
 
   const meterImportKwh = totalU1Import + totalU2Import;
   const meterExportKwh = totalU1Export + totalU2Export;
 
-  const meterSolarKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.u1SolarKwh || 0) + (r.u2SolarKwh || 0)),
-    0
-  );
-  const totalDgKwh = normalizedUtility.reduce(
-    (sum, r) => sum + ((r.dg380Kwh || 0) + (r.dg500Kwh || 0)),
-    0
-  );
+  const meterSolarKwh = deltaSum('u1SolarKwhReading') + deltaSum('u2SolarKwhReading');
+  const totalDgKwh = deltaSum('dg380KwhReading') + deltaSum('dg500KwhReading');
 
   // 3. Total Plant Consumption Calculation
   const netGridKwh = Math.max(0, meterImportKwh - meterExportKwh);

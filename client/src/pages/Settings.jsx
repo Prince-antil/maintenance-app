@@ -6,6 +6,7 @@ import { clearReportVault, listReportMetadata } from '../reportVault.js';
 import { APP_VERSION, COMPANY_NAME, UNIT_BADGE } from '../constants.js';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient.js';
 import { sendTestNotification } from '../lib/notificationService.js';
+import { normalizeRole, ROLE_META } from '../lib/plantAccess.js';
 import {
   Settings as SettingsIcon, Factory, User, Shield, Database,
   DownloadCloud, UploadCloud, CheckCircle2, AlertCircle, Info,
@@ -291,7 +292,7 @@ export default function Settings() {
               <p className="text-meta">Role</p>
               <p className="text-white text-sm font-semibold capitalize inline-flex items-center gap-1.5">
                 <Shield size={12} className="text-cyan-400" aria-hidden="true" />
-                {user?.role === 'admin' ? 'Administrator' : 'Viewer'}
+                {ROLE_META[normalizeRole(user?.role)]?.label || user?.role || '—'}
               </p>
             </div>
             <div>

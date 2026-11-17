@@ -18,8 +18,13 @@ import {
   listReports,
   updateReportRecord,
 } from '../server/lib/reportRepository.js';
+import { getSupabaseServerClient } from '../server/lib/supabase.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'agro-maint-secret-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  // eslint-disable-next-line no-console
+  console.error('[SECURITY] JWT_SECRET is not set — JWT signing/verification will fail until it is configured in Vercel project settings');
+}
 
 let db;
 
@@ -122,7 +127,22 @@ function reportErrorStatus(error) {
 }
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
+// CORS: pinned origins only. The API is same-origin with the app on Vercel;
+// localhost:5173 is allowed for local development against the deployed API.
+const CORS_ALLOWED = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+CORS_ALLOWED.push('http://localhost:5173');
+
+const corsOptions = {
+  credentials: true,
+  origin: (origin, callback) => {
+    if (!origin || CORS_ALLOWED.includes(origin)) return callback(null, true);
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
+};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
@@ -134,7 +154,7 @@ app.post('/api/auth/login', (req, res) => {
   const user = queryOne('SELECT * FROM users WHERE username = ?', [username]);
   if (!user || !bcrypt.compareSync(password, user.password)) return res.status(401).json({ error: 'Invalid credentials' });
   const token = generateToken(user);
-  res.cookie('token', token, { httpOnly: true, maxAge: 86400000, sameSite: 'none', secure: true });
+    res.cookie('token', token, { httpOnly: true, maxAge: 86400000, sameSite: 'lax', secure: true });
   res.json({ token, user: { id: user.id, username: user.username, role: user.role, full_name: user.full_name } });
 });
 
@@ -222,7 +242,51 @@ app.delete('/api/reports/:id', verifyToken, requireAdmin, async (req, res) => {
     await deleteReportRecord(req.params.id);
     res.json({ message: 'Report deleted successfully' });
   } catch (error) {
-    res.status(reportErrorStatus(error)).json({ error: error.message || 'Failed to delete report' });
+    return res.status(reportErrorStatus(error)).json({ error: error.message || 'Failed to delete report' });
+  }
+});
+
+// ── Machine purge (server-guarded, permanent destruction) ────────────────────
+// Called by the client instead of the Supabase RPC directly: JWT auth + admin
+// gate, server-side actor, and the machine's real plant_id validated inside the
+// SECURITY DEFINER purge_machine_v1 function.
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => resolve(body ? JSON.parse(body) : {}));
+    req.on('error', reject);
+  });
+}
+
+app.post('/api/machines/purge-probe', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const { machineId } = await readBody(req);
+    if (!machineId) return res.status(400).json({ error: 'machineId required' });
+    const sb = getSupabaseServerClient();
+    const { data, error } = await sb.rpc('purge_machine_probe_v1', { p_machine_id: machineId });
+    if (error) return res.status(400).json({ error: error.message || 'Probe failed' });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Probe failed' });
+  }
+});
+
+app.post('/api/machines/purge', verifyToken, requireAdmin, async (req, res) => {
+  try {
+    const { machineId, plantId, reason } = await readBody(req);
+    if (!machineId) return res.status(400).json({ error: 'machineId required' });
+    const sb = getSupabaseServerClient();
+    const { data, error } = await sb.rpc('purge_machine_v1', {
+      p_machine_id: machineId,
+      p_plant_id: plantId || null,
+      p_actor: (req.user && req.user.full_name) || (req.user && req.user.username) || 'System',
+      p_reason: reason || 'Permanent purge via CMMS admin API',
+    });
+    if (error) return res.status(400).json({ error: error.message || 'Purge failed' });
+    return res.json({ success: true, ...data });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Purge failed' });
   }
 });
 

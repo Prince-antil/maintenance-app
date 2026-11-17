@@ -2259,13 +2259,13 @@ function kpiSettingsToCloudRow(record) {
 
 // ── KPI FY Sheet (Plant-level PQSCDM Goal Cascade FY 2026-27) ─────────────────
 const KPI_FY_TEMPLATE_ROWS = [
-  { sn: 1, focusPillar: 'P – Productivity', kpiMetric: 'Asset / Equipment Availability – Plant', uom: '%', kpiWt: 12, pillarWt: 37, annualTarget: '>=95', rating4: '>=97', rating5: '>=99', parentTarget: '>=95% (Engg Head)' },
+  { sn: 1, focusPillar: 'P – Productivity', kpiMetric: 'Asset / Equipment Availability – Plant', uom: '%', kpiWt: 12, pillarWt: 34, annualTarget: '>=95', rating4: '>=97', rating5: '>=99', parentTarget: '>=95% (Engg Head)' },
   { sn: 2, focusPillar: 'P – Productivity', kpiMetric: 'PM Schedule Adherence – Plant', uom: '%', kpiWt: 10, pillarWt: '', annualTarget: '>=90', rating4: '>=95', rating5: '>=98', parentTarget: '>=90% (Engg Head)' },
   { sn: 3, focusPillar: 'P – Productivity', kpiMetric: 'Breakdown Frequency Reduction (MTBF improvement)', uom: '% improve', kpiWt: 7, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
   { sn: 4, focusPillar: 'P – Productivity', kpiMetric: 'MTTR – Mean Time to Repair Reduction', uom: '% improve', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10% (Engg Head)' },
   { sn: 5, focusPillar: 'Q – Quality', kpiMetric: 'Equipment Calibration Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: 12, annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98% (Engg Head)' },
   { sn: 6, focusPillar: 'Q – Quality', kpiMetric: 'Audit/ Regulatory NC – Engineering – Plant', uom: 'No. NCs', kpiWt: 5, pillarWt: '', annualTarget: '<=1', rating4: '0', rating5: '0', parentTarget: '<=2 consolidated' },
-  { sn: 7, focusPillar: 'S – Safety & Environment', kpiMetric: 'Zero LTI – Engineering / Maintenance – Plant', uom: 'No. LTI', kpiWt: 8, pillarWt: 20, annualTarget: '0', rating4: '0', rating5: '0', parentTarget: '0 (Engg Head)' },
+  { sn: 7, focusPillar: 'S – Safety & Environment', kpiMetric: 'Zero LTI – Engineering / Maintenance – Plant', uom: 'No. LTI', kpiWt: 8, pillarWt: 23, annualTarget: '0', rating4: '0', rating5: '0', parentTarget: '0 (Engg Head)' },
   { sn: 8, focusPillar: 'S – Safety & Environment', kpiMetric: 'Near Miss Reporting – Production Team', uom: 'No./Person/Mo', kpiWt: 3, pillarWt: '', annualTarget: '>=2', rating4: '>=2.5', rating5: '>=3', parentTarget: '>=2 (HSE Head)' },
   { sn: 9, focusPillar: 'S – Safety & Environment', kpiMetric: 'LOTO / PTW Compliance – Plant', uom: '%', kpiWt: 7, pillarWt: '', annualTarget: '>=98', rating4: '>=99', rating5: '100', parentTarget: '>=98%' },
   { sn: 10, focusPillar: 'S – Safety & Environment', kpiMetric: 'ETP / STP Efficiency – Plant', uom: '%', kpiWt: 5, pillarWt: '', annualTarget: '>=80', rating4: '>=85', rating5: '>=90', parentTarget: '>=80% (Engg Head)' },
@@ -2273,12 +2273,29 @@ const KPI_FY_TEMPLATE_ROWS = [
   { sn: 12, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Maintenance Cost vs Budget – Plant', uom: '%', kpiWt: 8, pillarWt: '', annualTarget: '<=100', rating4: '<=98', rating5: '<=95', parentTarget: '<=100%' },
   { sn: 13, focusPillar: 'C – Cost & OpEx', kpiMetric: 'Spare Parts Inventory Optimisation – Plant', uom: '% reduction', kpiWt: 5, pillarWt: '', annualTarget: '>=10', rating4: '>=15', rating5: '>=20', parentTarget: '>=10%' },
   { sn: 14, focusPillar: 'D – Delivery / OTIF', kpiMetric: 'Engineering Clearance for Production – On Time', uom: '% requests', kpiWt: 5, pillarWt: 5, annualTarget: '>=95', rating4: '>=97', rating5: '100', parentTarget: '>=95%' },
-  { sn: 15, focusPillar: 'M – Morale & People', kpiMetric: 'Engg Team Training Mandays – Plant', uom: 'Mandays/Yr', kpiWt: 2, pillarWt: 4, annualTarget: '>=2', rating4: '>=3', rating5: '>=4', parentTarget: '>=2%' },
+  { sn: 15, focusPillar: 'M – Morale & People', kpiMetric: 'Engg Team Training Mandays – Plant', uom: 'Mandays/Yr', kpiWt: 1, pillarWt: 3, annualTarget: '>=2', rating4: '>=3', rating5: '>=4', parentTarget: '>=2%' },
   { sn: 16, focusPillar: 'M – Morale & People', kpiMetric: '5S – Engineering Areas – Plant', uom: '%', kpiWt: 2, pillarWt: '', annualTarget: '>=75', rating4: '>=85', rating5: '>=95', parentTarget: '>=75%' },
 ];
 
 function getKpiFyTemplateRows() {
   return KPI_FY_TEMPLATE_ROWS.map((r) => ({ ...r }));
+}
+
+/** Parse a KPI monthly cell — blanks and 'NA' variants are null, never zero. */
+function parseKpiCell(v) {
+  if (v === '' || v == null) return null;
+  const s = String(v).trim();
+  if (s.toLowerCase() === 'na' || s.toLowerCase() === 'n/a' || s === '—' || s === '-') return null;
+  const n = Number(String(s).replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+/** YTD average of monthly KPI cells. Blank/'NA' months are excluded, never treated as zero.
+ *  Returns '' when nothing to average. */
+function kpiYtdAvg(months, row) {
+  const vals = months.map((m) => parseKpiCell(row[m])).filter((n) => n !== null);
+  if (vals.length === 0) return '';
+  return String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10);
 }
 
 function normalizeKpiFySheet(fields) {
@@ -2346,11 +2363,14 @@ function normalizeKpiFySheet(fields) {
   // Compute YTD Avg for each row if not manually set and monthly data exists
   data = data.map((row) => {
     const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
-    const vals = months.map((m) => row[m]).filter((v)=> v!=='' && v!=null && String(v).toLowerCase()!=='na' && String(v).trim()!=='' ).map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
-    const ytd = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : '';
-    const ytdAvg = vals.length ? (Math.round(ytd*10)/10) : '';
-    return { ...row, ytdAvg: row.ytdAvg!=='' && row.ytdAvg!=null ? row.ytdAvg : ytdAvg };
+    return { ...row, ytdAvg: row.ytdAvg!=='' && row.ytdAvg!=null ? row.ytdAvg : kpiYtdAvg(months, row) };
   });
+  // Sanity check: KPI weights should total exactly 100. Warn (never block) if
+  // they drift — imported sheets may have been edited externally.
+  const wtTotal = data.reduce((sum, row) => sum + Number(row.kpiWt || 0), 0);
+  if (wtTotal !== 100) {
+    console.warn(`[KPI] Pillar weights total ${wtTotal}, expected 100 — ratings will be off-proportion`);
+  }
   return {
     id,
     fy,
@@ -3956,14 +3976,28 @@ export async function getMachinePurgeSummary(machineId) {
     machine_documents: (machine.docs || []).length,
   };
 
-  if (supabase && isSupabaseConfigured) {
-    try {
-      const { data, error } = await supabase.rpc('purge_machine_probe_v1', { p_machine_id: machineId });
-      if (!error && data && data.found) return { ...localCounts, ...data, source: 'server' };
-      if (!error && data && !data.found) return { ...data, source: 'server' };
-    } catch {
-      // RPC not deployed — graceful fallback to local counts
+  // Authoritative dependency counts via the server-guarded probe endpoint.
+  // Falls back to local state when the server is unavailable.
+  try {
+    const res = await fetch('/api/machines/purge-probe', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId }),
+    });
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (data.found === false) return { ...data, source: 'server-api' };
+      if (data && data.pm_records !== undefined) {
+        return {
+          ...localCounts,
+          ...data,
+          source: 'server-api',
+        };
+      }
     }
+  } catch {
+    // Server unavailable — local counts are a best-effort preview only.
   }
   return { ...localCounts, source: 'local' };
 }
@@ -4005,10 +4039,14 @@ async function purgeMachineStorageFiles(machineId) {
 
 /**
  * Permanently purge a machine and its dependents.
- * - Waits for the database to confirm (RPC or fallback deletes) before any
- *   local removal — failure keeps the machine untouched and returns the error.
+ * - Waits for the database to confirm via the server-guarded
+ *   /api/machines/purge endpoint (transactional purge_machine_v1 function)
+ *   before any local removal — failure keeps the machine untouched and
+ *   returns the real error.
  * - Requires `force: true` when the machine has operational history
  *   (elevated confirmation in the UI).
+ * - Purge is unavailable without a deployed, JWT-protected API server; the
+ *   machine is always retained when confirmation cannot be obtained.
  */
 export async function purgeMachine(machineId, options = {}) {
   const { reason = '', userName = 'System', plantId = null, force = false } = options;
@@ -4047,76 +4085,49 @@ export async function purgeMachine(machineId, options = {}) {
   persistEntity('machines');
 
   let dbResult = null;
-  let method = 'rpc';
+  let method = 'api';
   let dbError = null;
 
-  if (supabase && isSupabaseConfigured) {
-    try {
-      const { data, error } = await supabase.rpc('purge_machine_v1', {
-        p_machine_id: machineId,
-        p_plant_id: plantId || getCurrentPlantId() || null,
-        p_actor: userName,
-        p_reason: reason,
-      });
-      if (error) {
-        dbError = error;
-        // Only fall back when the RPC itself is not deployed. Errors raised by
-        // the function (machine_not_found / plant_mismatch) are authoritative.
-        if (/function .* does not exist|Could not find the function/i.test(error.message || '')) {
-          method = 'fallback';
-          dbResult = null;
-        } else {
-          // Undo the local tombstone — the machine still exists in the DB.
-          saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
-          state = { ...state, machines: [machine, ...state.machines] };
-          persistEntity('machines');
-          notifyStoreUpdate();
-          return {
-            success: false,
-            error: error.message || 'Database purge failed',
-            counts,
-          };
-        }
-      } else {
-        dbResult = data;
-      }
-    } catch (err) {
-      dbError = err;
-      method = 'fallback';
+  try {
+    const res = await fetch('/api/machines/purge', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        machine_id: machineId,
+        plant_id: plantId || getCurrentPlantId() || null,
+        actor: userName,
+        reason,
+      }),
+    });
+    let body = {};
+    try { body = await res.json(); } catch {}
+    if (!res.ok) {
+      dbError = new Error(body?.error || `Purge failed (HTTP ${res.status})`);
+      // Undo the local tombstone — the machine still exists in the database.
+      saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
+      state = { ...state, machines: [machine, ...state.machines] };
+      persistEntity('machines');
+      notifyStoreUpdate();
+      return {
+        success: false,
+        error: dbError.message,
+        counts,
+      };
     }
-
-    if (method === 'fallback') {
-      try {
-        // Client-side fallback: explicit deletes for dependents (no FK on
-        // testing_certificates) + the machine row, awaited for confirmation.
-        for (const [entity, rows, key] of [
-          ['testingCertificates', state.testingCertificates, 'machineId'],
-          ['machineBreakdownLogs', state.machineBreakdownLogs, 'machineId'],
-          ['machinePmRecords', state.machinePmRecords, 'machineId'],
-          ['amc', state.amc, 'machineId'],
-        ]) {
-          (rows || [])
-            .filter((r) => r[key] === machineId)
-            .forEach((r) => queueCloudMutation(entity, 'delete', r.id, { schedule: false }));
-        }
-        queueCloudMutation('machines', 'delete', machineId, { schedule: false });
-        await flushPendingCloudOps();
-        dbResult = { success: true, fallback: true };
-      } catch (err) {
-        saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
-        state = { ...state, machines: [machine, ...state.machines] };
-        persistEntity('machines');
-        notifyStoreUpdate();
-        return {
-          success: false,
-          error: err?.message || 'Database purge failed (offline fallback)',
-          counts,
-        };
-      }
-    }
-  } else {
-    // Local-only workspace (no Supabase) — purge is local; tombstone stands.
-    method = 'local-only';
+    dbResult = { success: true, api: true, ...body };
+  } catch (err) {
+    // Network offline / server unavailable — destructive purge cannot be
+    // confirmed locally; keep the machine and report the real error.
+    saveMachineTombstones(loadMachineTombstones().filter((t) => t.id !== machineId));
+    state = { ...state, machines: [machine, ...state.machines] };
+    persistEntity('machines');
+    notifyStoreUpdate();
+    return {
+      success: false,
+      error: err?.message || 'Purge requires server connection',
+      counts,
+    };
   }
 
   // Remove dependents from local state.
@@ -5297,9 +5308,7 @@ export async function importKpiRecordsBulk(parsedRows, userName) {
         });
         // Recompute YTD Avg
         const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
-        const vals = months.map((m)=> merged[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
-        const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
-        merged.ytdAvg = ytd;
+        merged.ytdAvg = kpiYtdAvg(months, merged);
         data[idx] = merged;
         updatedCount++;
       } else {
@@ -5368,9 +5377,7 @@ export function updateKpiFyCell(fy, sn, monthKey, value, userName) {
     updated[manualKey] = value !== '';
     // Recompute YTD
     const months = ['apr','may','jun','jul','aug','sep','oct','nov','dec','jan','feb','mar'];
-    const vals = months.map((m)=> updated[m]).filter((v)=> v!=='' && String(v).toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
-    const ytd = vals.length ? String(Math.round((vals.reduce((a,b)=>a+b,0)/vals.length)*10)/10) : '';
-    updated.ytdAvg = ytd;
+    updated.ytdAvg = kpiYtdAvg(months, updated);
     updated.updatedAt = now();
     return updated;
   });
@@ -5706,6 +5713,7 @@ export async function importMachinePmRecordsBulk(rows, userName) {
       });
       state = { ...state, machines: [...state.machines, newMachine] };
       autoCreated.push({ name: row.machineName, code: row.machineCode });
+      unmatchedRows.push({ row: idx + 2, machine: row.machineName || row.machineCode, reason: 'machine not registered — auto-created under UNASSIGNED / PENDING SECTION' });
       record.machineId = newMachine.id;
       record.machineCode = newMachine.machineCode || newMachine.id;
       record.machineName = newMachine.name;
@@ -5715,48 +5723,56 @@ export async function importMachinePmRecordsBulk(rows, userName) {
     logs.push(record);
   });
 
-  // Dedup on machineId + pmDate + task within Excel
+  // Dedup on machineId + pmDate + task within Excel, then against records
+  // already in the register so re-importing the same workbook never doubles
+  // maintenance history.
   const seenInFile = new Map();
+  let dupWithinFile = 0;
   logs.forEach((r) => {
     const key = `${r.machineId}:${r.pmDate}:${r.task}`;
+    if (seenInFile.has(key)) { dupWithinFile += 1; return; }
     seenInFile.set(key, r);
   });
   const deduped = [...seenInFile.values()];
+  const existingKeys = new Set((state.machinePmRecords || []).map((r) => `${r.machineId}:${r.pmDate}:${r.task}`));
+  const skippedDuplicate = [];
+  const newRecords = deduped.filter((r) => {
+    const key = `${r.machineId}:${r.pmDate}:${r.task}`;
+    if (existingKeys.has(key)) { skippedDuplicate.push(r); return false; }
+    existingKeys.add(key);
+    return true;
+  });
 
-  state = { ...state, machinePmRecords: [...deduped, ...state.machinePmRecords] };
+  state = { ...state, machinePmRecords: [...newRecords, ...state.machinePmRecords] };
   commit('machinePmRecords');
 
-  // Write each deduped record to cloud and verify before considering success
-  const successfulPmRecords = [];
+  // Write each new record to cloud and verify. Cloud failures are collected
+  // and reported — one bad row never aborts the whole import or drifts the
+  // register out of sync with the queue.
   const failedPmRecords = [];
-
-  for (const r of deduped) {
+  for (const r of newRecords) {
     try {
       await commitAndQueue('machinePmRecords', 'upsert', r);
-      successfulPmRecords.push(r);
     } catch (err) {
-      failedPmRecords.push(r);
-      throw new Error(`Machine PM record import failure: ${err.message}`);
+      failedPmRecords.push({ ...r, error: err.message || String(err) });
     }
   }
 
-  if (autoCreated.length) {
-    commit('machines');
-    for (const m of autoCreated) {
-      try {
-        const machineToSync = state.machines.find((mc) => mc.name === m.name);
-        if (machineToSync) {
-          await commitAndQueue('machines', 'upsert', machineToSync);
-        }
-      } catch (err) {
-        throw new Error(`Machine auto-create import failure: ${err.message}`);
+  // Auto-created machines must reach the cloud too (failures collected, not fatal)
+  for (const m of autoCreated) {
+    try {
+      const machineToSync = state.machines.find((mc) => mc.id === m.id || mc.name === m.name);
+      if (machineToSync) {
+        await commitAndQueue('machines', 'upsert', machineToSync);
       }
+    } catch (err) {
+      failedPmRecords.push({ machine: m.name, error: err.message || String(err) });
     }
   }
 
-  // ── Auto-aggregate section-level PM summaries ────────────────────────────
+  // Auto-aggregate section-level PM summaries from the newly imported records
   const aggMap = {};
-  deduped.forEach((r) => {
+  newRecords.forEach((r) => {
     const period = (r.pmDate || '').slice(0, 7);
     if (!period) return;
     const section = r.plantSection || MASTER_SECTION;
@@ -5799,13 +5815,24 @@ export async function importMachinePmRecordsBulk(rows, userName) {
     }
   });
 
+  const skippedCount = skippedDuplicate.length + dupWithinFile;
   const detail = [
-    `${deduped.length} PM records imported`,
+    `${newRecords.length} PM records imported`,
+    skippedCount ? `${skippedCount} duplicate record${skippedCount > 1 ? 's' : ''} skipped` : '',
     autoCreated.length ? `${autoCreated.length} new machines auto-created` : '',
-    unmatchedRows.length ? `${unmatchedRows.length} unmatched` : '',
+    failedPmRecords.length ? `${failedPmRecords.length} row${failedPmRecords.length > 1 ? 's' : ''} failed cloud sync (queued for retry)` : '',
   ].filter(Boolean).join(' · ');
   logActivity(userName, 'bulk imported machine PM records', detail, 'pm');
-  return { created: deduped.length, total: rows.length, unmatched: unmatchedRows, autoMapped, autoCreated };
+  return {
+    created: newRecords.length,
+    updated: 0,
+    skipped: skippedCount,
+    total: rows.length,
+    unmatched: unmatchedRows,
+    autoMapped,
+    autoCreated,
+    failed: failedPmRecords,
+  };
 }
 
 export function dryRunImportMachinePmRecords(rows) {
@@ -6720,7 +6747,7 @@ const MASTER_IMPORTERS = {
  * @param {string} userName
  * @returns {{ total: number, [moduleId: string]: object }}
  */
-export function importMasterExcelBulk(masterResult, userName) {
+export async function importMasterExcelBulk(masterResult, userName) {
   const results = {};
   let total = 0;
   const labels = [];
@@ -6728,10 +6755,13 @@ export function importMasterExcelBulk(masterResult, userName) {
     const parsed = masterResult?.[moduleId]?.parsedRows || [];
     if (parsed.length && typeof importer === 'function') {
       try {
-        const r = importer(parsed, userName);
+        const r = await importer(parsed, userName);
         results[moduleId] = r;
         total += r.total || 0;
         labels.push(`${moduleId} ${r.total}`);
+        if (r.failed && r.failed.length) {
+          labels.push(`${moduleId} ${r.failed.length} cloud-write failure${r.failed.length > 1 ? 's' : ''}`);
+        }
       } catch (e) {
         results[moduleId] = { created: 0, total: 0, error: e.message };
       }

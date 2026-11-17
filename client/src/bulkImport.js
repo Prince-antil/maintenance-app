@@ -292,13 +292,13 @@ export const IMPORT_MODULES = {
     defaultCategory: 'Plantwise Breakdown Report',
     required: ['sn'],
     sampleRows: [
-      { Sn: 1, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'Asset / Equipment Availability – Plant', UoM: '%', 'KPI Wt %': 12, 'Pillar Wt %': 37, 'Annual Target (Rating 3)': '>=95', 'Rating 4': '>=97', 'Rating 5': '>=99', 'Parent Target': '>=95% (Engg Head)', 'Q1 Apr–Jun': '>=95', 'Q2 Jul–Sep': '>=95', 'Q3 Oct–Dec': '>=95', 'Q4 Jan–Mar': '>=95', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 1, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'Asset / Equipment Availability – Plant', UoM: '%', 'KPI Wt %': 12, 'Pillar Wt %': 34, 'Annual Target (Rating 3)': '>=95', 'Rating 4': '>=97', 'Rating 5': '>=99', 'Parent Target': '>=95% (Engg Head)', 'Q1 Apr–Jun': '>=95', 'Q2 Jul–Sep': '>=95', 'Q3 Oct–Dec': '>=95', 'Q4 Jan–Mar': '>=95', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 2, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'PM Schedule Adherence – Plant', UoM: '%', 'KPI Wt %': 10, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=90', 'Rating 4': '>=95', 'Rating 5': '>=98', 'Parent Target': '>=90% (Engg Head)', 'Q1 Apr–Jun': '>=90', 'Q2 Jul–Sep': '>=90', 'Q3 Oct–Dec': '>=90', 'Q4 Jan–Mar': '>=90', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 3, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'Breakdown Frequency Reduction (MTBF improvement)', UoM: '% improve', 'KPI Wt %': 7, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10% (Engg Head)', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 4, 'Focus Pillar': 'P – Productivity', 'KPI / Metric': 'MTTR – Mean Time to Repair Reduction', UoM: '% improve', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10% (Engg Head)', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 5, 'Focus Pillar': 'Q – Quality', 'KPI / Metric': 'Equipment Calibration Compliance – Plant', UoM: '%', 'KPI Wt %': 7, 'Pillar Wt %': 12, 'Annual Target (Rating 3)': '>=98', 'Rating 4': '>=99', 'Rating 5': '100', 'Parent Target': '>=98% (Engg Head)', 'Q1 Apr–Jun': '>=98', 'Q2 Jul–Sep': '>=98', 'Q3 Oct–Dec': '>=98', 'Q4 Jan–Mar': '>=98', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 6, 'Focus Pillar': 'Q – Quality', 'KPI / Metric': 'Audit/ Regulatory NC – Engineering – Plant', UoM: 'No. NCs', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '<=1', 'Rating 4': '0', 'Rating 5': '0', 'Parent Target': '<=2 consolidated', 'Q1 Apr–Jun': '<=1', 'Q2 Jul–Sep': '<=1', 'Q3 Oct–Dec': '<=1', 'Q4 Jan–Mar': '<=1', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
-      { Sn: 7, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'Zero LTI – Engineering / Maintenance – Plant', UoM: 'No. LTI', 'KPI Wt %': 8, 'Pillar Wt %': 20, 'Annual Target (Rating 3)': '0', 'Rating 4': '0', 'Rating 5': '0', 'Parent Target': '0 (Engg Head)', 'Q1 Apr–Jun': '0', 'Q2 Jul–Sep': '0', 'Q3 Oct–Dec': '0', 'Q4 Jan–Mar': '0', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 7, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'Zero LTI – Engineering / Maintenance – Plant', UoM: 'No. LTI', 'KPI Wt %': 8, 'Pillar Wt %': 23, 'Annual Target (Rating 3)': '0', 'Rating 4': '0', 'Rating 5': '0', 'Parent Target': '0 (Engg Head)', 'Q1 Apr–Jun': '0', 'Q2 Jul–Sep': '0', 'Q3 Oct–Dec': '0', 'Q4 Jan–Mar': '0', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 8, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'Near Miss Reporting – Production Team', UoM: 'No./Person/Mo', 'KPI Wt %': 3, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=2', 'Rating 4': '>=2.5', 'Rating 5': '>=3', 'Parent Target': '>=2 (HSE Head)', 'Q1 Apr–Jun': '>=2', 'Q2 Jul–Sep': '>=2', 'Q3 Oct–Dec': '>=2', 'Q4 Jan–Mar': '>=2', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 9, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'LOTO / PTW Compliance – Plant', UoM: '%', 'KPI Wt %': 7, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=98', 'Rating 4': '>=99', 'Rating 5': '100', 'Parent Target': '>=98%', 'Q1 Apr–Jun': '>=98', 'Q2 Jul–Sep': '>=98', 'Q3 Oct–Dec': '>=98', 'Q4 Jan–Mar': '>=98', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 10, 'Focus Pillar': 'S – Safety & Environment', 'KPI / Metric': 'ETP / STP Efficiency – Plant', UoM: '%', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=80', 'Rating 4': '>=85', 'Rating 5': '>=90', 'Parent Target': '>=80% (Engg Head)', 'Q1 Apr–Jun': '>=80', 'Q2 Jul–Sep': '>=80', 'Q3 Oct–Dec': '>=80', 'Q4 Jan–Mar': '>=80', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
@@ -306,7 +306,7 @@ export const IMPORT_MODULES = {
       { Sn: 12, 'Focus Pillar': 'C – Cost & OpEx', 'KPI / Metric': 'Maintenance Cost vs Budget – Plant', UoM: '%', 'KPI Wt %': 8, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '<=100', 'Rating 4': '<=98', 'Rating 5': '<=95', 'Parent Target': '<=100%', 'Q1 Apr–Jun': '<=100', 'Q2 Jul–Sep': '<=100', 'Q3 Oct–Dec': '<=100', 'Q4 Jan–Mar': '<=100', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 13, 'Focus Pillar': 'C – Cost & OpEx', 'KPI / Metric': 'Spare Parts Inventory Optimisation – Plant', UoM: '% reduction', 'KPI Wt %': 5, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=10', 'Rating 4': '>=15', 'Rating 5': '>=20', 'Parent Target': '>=10%', 'Q1 Apr–Jun': '>=10', 'Q2 Jul–Sep': '>=10', 'Q3 Oct–Dec': '>=10', 'Q4 Jan–Mar': '>=10', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 14, 'Focus Pillar': 'D – Delivery / OTIF', 'KPI / Metric': 'Engineering Clearance for Production – On Time', UoM: '% requests', 'KPI Wt %': 5, 'Pillar Wt %': 5, 'Annual Target (Rating 3)': '>=95', 'Rating 4': '>=97', 'Rating 5': '100', 'Parent Target': '>=95%', 'Q1 Apr–Jun': '>=95', 'Q2 Jul–Sep': '>=95', 'Q3 Oct–Dec': '>=95', 'Q4 Jan–Mar': '>=95', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
-      { Sn: 15, 'Focus Pillar': 'M – Morale & People', 'KPI / Metric': 'Engg Team Training Mandays – Plant', UoM: 'Mandays/Yr', 'KPI Wt %': 2, 'Pillar Wt %': 4, 'Annual Target (Rating 3)': '>=2', 'Rating 4': '>=3', 'Rating 5': '>=4', 'Parent Target': '>=2%', 'Q1 Apr–Jun': '>=2', 'Q2 Jul–Sep': '>=2', 'Q3 Oct–Dec': '>=2', 'Q4 Jan–Mar': '>=2', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
+      { Sn: 15, 'Focus Pillar': 'M – Morale & People', 'KPI / Metric': 'Engg Team Training Mandays – Plant', UoM: 'Mandays/Yr', 'KPI Wt %': 1, 'Pillar Wt %': 3, 'Annual Target (Rating 3)': '>=2', 'Rating 4': '>=3', 'Rating 5': '>=4', 'Parent Target': '>=2%', 'Q1 Apr–Jun': '>=2', 'Q2 Jul–Sep': '>=2', 'Q3 Oct–Dec': '>=2', 'Q4 Jan–Mar': '>=2', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
       { Sn: 16, 'Focus Pillar': 'M – Morale & People', 'KPI / Metric': '5S – Engineering Areas – Plant', UoM: '%', 'KPI Wt %': 2, 'Pillar Wt %': '', 'Annual Target (Rating 3)': '>=75', 'Rating 4': '>=85', 'Rating 5': '>=95', 'Parent Target': '>=75%', 'Q1 Apr–Jun': '>=75', 'Q2 Jul–Sep': '>=75', 'Q3 Oct–Dec': '>=75', 'Q4 Jan–Mar': '>=75', Apr: '', May: '', Jun: '', Jul: '', Aug: '', Sep: '', Oct: '', Nov: '', Dec: '', Jan: '', Feb: '', Mar: '', 'YTD Avg': '' },
     ],
   },
@@ -559,10 +559,29 @@ function parseDateValue(value) {
     const parsed = XLSX.SSF.parse_date_code(value);
     if (parsed) return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d, parsed.H, parsed.M, parsed.S)).toISOString();
   }
-  const direct = new Date(String(value).trim());
-  if (!Number.isNaN(direct.getTime())) return direct.toISOString();
+  const direct = String(value).trim();
+  // Date-only strings (YYYY-MM-DD) must be read as local calendar dates — not
+  // shifted through the browser's timezone (off-by-one-day risk outside UTC).
+  const isoOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(direct);
+  if (isoOnly) {
+    const y = Number(isoOnly[1]), m = Number(isoOnly[2]), d = Number(isoOnly[3]);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() === y && dt.getMonth() + 1 === m && dt.getDate() === d) return direct; // keep as calendar date, no timezone shift
+  }
+  const parsed = new Date(direct);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   return '';
 }
+
+function parseKpiCell(v) {
+  if (v === '' || v == null) return null;
+  const s = String(v).trim();
+  if (s.toLowerCase() === 'na' || s.toLowerCase() === 'n/a' || s === '—' || s === '-') return null;
+  const n = Number(String(s).replace(/[^0-9.\-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+export { parseKpiCell };
 
 export function normalizeMachineStatus(value) {
   const key = toKey(value);
@@ -727,6 +746,11 @@ function parseModuleRow(moduleId, row, mapping, index) {
     const mName = String(getCell(row, mapping, 'machineName') || '').trim();
     if (!mName) return { error: `Row ${index}: machine name is required.` };
 
+    // Skip the workbook's example breakdown row
+    if (mName === 'Filling Machine #1' && String(getCell(row, mapping, 'machineCode') || '').trim() === 'MC-101') {
+      return { skip: true };
+    }
+
     // Downtime: auto-calculate from start/end when the cell is blank or zero
     let downtimeHours = parseNumber(getCell(row, mapping, 'downtimeHours'));
     if (!downtimeHours && rawStartTime && rawEndTime) {
@@ -752,6 +776,12 @@ function parseModuleRow(moduleId, row, mapping, index) {
   if (moduleId === 'machinePmRecords') {
     const mName = String(getCell(row, mapping, 'machineName') || '').trim();
     if (!mName) return { error: `Row ${index}: machine name is required.` };
+
+    // Skip the workbook's example PM rows
+    if ((mName === 'Filling Machine #1' && String(getCell(row, mapping, 'machineCode') || '').trim() === 'MC-101')
+      || (mName === 'Capping Machine' && String(getCell(row, mapping, 'machineCode') || '').trim() === 'MC-102')) {
+      return { skip: true };
+    }
 
     const pmDateRaw = parseDateValue(getCell(row, mapping, 'pmDate'));
     const pmDate = pmDateRaw ? pmDateRaw.slice(0, 10) : new Date().toISOString().slice(0, 10);
@@ -940,7 +970,7 @@ function parseModuleRow(moduleId, row, mapping, index) {
     // YTD Avg is auto-calculated, ignore imported value
     const ytdRaw = String(getCell(row, mapping, 'ytdAvg') || '').trim();
     // Compute YTD as average of available monthly actuals (ignore blank and NA)
-    const monthVals = [apr, may, jun, jul, aug, sep, oct, nov, dec, jan, feb, mar].filter((v)=> v!=='' && v.toLowerCase()!=='na').map((v)=> Number(String(v).replace(/[^0-9.\-]/g,''))).filter((n)=> Number.isFinite(n));
+    const monthVals = [apr, may, jun, jul, aug, sep, oct, nov, dec, jan, feb, mar].map(parseKpiCell).filter((n) => n !== null);
     const ytdAvg = monthVals.length ? String(Math.round((monthVals.reduce((a,b)=>a+b,0)/monthVals.length)*10)/10) : '';
     return {
       sn,
@@ -979,6 +1009,12 @@ function parseModuleRow(moduleId, row, mapping, index) {
   // ── Machines (fallback) ───────────────────────────────────────────────────
   const machineName = String(getCell(row, mapping, 'machineName') || '').trim();
   if (!machineName) return { error: `Row ${index}: machine name is required.` };
+
+  // Skip the workbook's own example row so a template import never creates
+  // fake operational machines.
+  if (/^example\s*equipment$/i.test(machineName) && String(getCell(row, mapping, 'machineId') || '').trim() === 'MC-151') {
+    return { skip: true };
+  }
   return {
     machineCode: String(getCell(row, mapping, 'machineId') || '').trim(),
     name: machineName,
@@ -1019,11 +1055,13 @@ export async function parseImportFile(file, selectedModule = 'auto') {
   const missingRequired = definition.required.filter((field) => !mapping[field]);
   const errors = missingRequired.map((field) => `Missing required header mapping for "${field}".`);
   const parsedRows = [];
+  let skipped = 0;
 
   rows.forEach((row, idx) => {
     if (isRowEmpty(row)) return;
     const parsed = parseModuleRow(moduleId, row, mapping, idx + 2);
     if (parsed.error) errors.push(parsed.error);
+    else if (parsed.skip) skipped += 1;
     else parsedRows.push(parsed);
   });
 
@@ -1035,10 +1073,12 @@ export async function parseImportFile(file, selectedModule = 'auto') {
     previewRows: parsedRows.slice(0, PREVIEW_LIMIT),
     parsedRows,
     errors,
+    skipped,
     counts: {
       total: rows.filter((row) => !isRowEmpty(row)).length,
       valid: parsedRows.length,
       invalid: errors.length,
+      skipped,
     },
   };
 }
@@ -1126,20 +1166,24 @@ function parseSheet(workbook, sheetName, moduleId) {
   const missingRequired = definition.required.filter((field) => !mapping[field]);
   const errors = missingRequired.map((field) => `[${sheetName}] Missing required column for "${field}".`);
   const parsedRows = [];
+  let skipped = 0;
 
   nonEmptyRows.forEach((row, idx) => {
     const parsed = parseModuleRow(moduleId, row, mapping, idx + 2);
     if (parsed.error) errors.push(`[${sheetName}] ${parsed.error}`);
+    else if (parsed.skip) skipped += 1;
     else parsedRows.push(parsed);
   });
 
   return {
     parsedRows,
     errors,
+    skipped,
     counts: {
       total: nonEmptyRows.length,
       valid: parsedRows.length,
       invalid: errors.length,
+      skipped,
     },
   };
 }

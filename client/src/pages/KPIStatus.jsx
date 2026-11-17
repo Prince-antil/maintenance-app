@@ -227,9 +227,8 @@ export default function KPIStatus() {
         });
         // Recompute YTD
         if (changed) {
-          const vals = FY_MONTHS.map((mm) => updated[mm.key]).filter((v) => v !== '' && String(v).toLowerCase() !== 'na').map((v) => Number(String(v).replace(/[^0-9.\-]/g, ''))).filter((n) => Number.isFinite(n));
-          const ytd = vals.length ? String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10) : '';
-          updated.ytdAvg = ytd;
+          updated.ytdAvg = computeYtdAvg(updated);
+          return updated;
         }
         return updated;
       });
@@ -295,9 +294,7 @@ export default function KPIStatus() {
           }
         }
       });
-      const vals = FY_MONTHS.map((mm) => updated[mm.key]).filter((v) => v !== '' && String(v).toLowerCase() !== 'na').map((v) => Number(String(v).replace(/[^0-9.\-]/g, ''))).filter((n) => Number.isFinite(n));
-      const ytd = vals.length ? String(Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10) : '';
-      updated.ytdAvg = ytd;
+      updated.ytdAvg = computeYtdAvg(updated);
       return updated;
     }) };
     upsertKpiFySheet(updatedSheet, userName);
@@ -341,7 +338,7 @@ export default function KPIStatus() {
               <span className="text-emerald-400">◆</span> FY 2026-27 ◆ PQSCDM Goal Cascade ◆ Plant Engg Manager
             </h3>
             <p className="text-meta mt-1 text-xs">Plant Engineering / Maintenance Manager | Reports to Engg Head | Plant-specific | FY 2026-27</p>
-            <p className="text-slate-500 text-[11px] mt-1">P = 37 &nbsp; Q = 12 &nbsp; S = 20 &nbsp; C = 23 &nbsp; D = 5 &nbsp; M = 4 &nbsp; | &nbsp; Total KPI Wt = 100 (Pillar Wt shown on first row of each pillar)</p>
+            <p className="text-slate-500 text-[11px] mt-1">P = 34 &nbsp; Q = 12 &nbsp; S = 23 &nbsp; C = 23 &nbsp; D = 5 &nbsp; M = 3 &nbsp; | &nbsp; Total KPI Wt = 100 (Pillar Wt shown on first row of each pillar)</p>
           </div>
           <div className="flex items-center gap-2">
             {hasEdits && <span className="text-amber-400 text-xs flex items-center gap-1"><AlertTriangle size={12} /> Unsaved changes</span>}

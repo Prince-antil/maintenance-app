@@ -5,6 +5,8 @@
 // Frontend filtering is UX only — security is enforced by Supabase RLS.
 // ================================================================
 
+export const NATHUPUR_PLANT_ID = '00000000-0000-0000-0000-000000000001';
+
 export const ROLES = {
   SUPER_ADMIN: 'super_admin',
   CORPORATE_HEAD: 'corporate_head',
@@ -96,7 +98,7 @@ export function filterByPlant(records, plantId) {
   return records.filter((r) => {
     const pid = r.plant_id || r.plantId || r.plantId === '' ? (r.plant_id || r.plantId) : null;
     // Backwards compat: records without plant_id belong to Nathupur
-    if (!pid) return plantId === '00000000-0000-0000-0000-000000000001';
+    if (!pid) return plantId === NATHUPUR_PLANT_ID;
     return pid === plantId;
   });
 }
@@ -130,7 +132,7 @@ export function userCanAccessPlant(user, plantId) {
   const ids = getUserPlantIds(user);
   if (!ids.length) {
     // No explicit mapping — default to Nathupur only (backwards compat)
-    return plantId === '00000000-0000-0000-0000-000000000001';
+    return plantId === NATHUPUR_PLANT_ID;
   }
   return ids.includes(plantId);
 }

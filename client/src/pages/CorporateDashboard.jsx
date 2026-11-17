@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store.js';
 import { usePlant } from '../context/PlantContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { canViewCorporateDashboard } from '../lib/plantAccess.js';
+import { canViewCorporateDashboard, NATHUPUR_PLANT_ID } from '../lib/plantAccess.js';
 import { computeKPIs, aggregateBreakdownRecords, aggregatePMRecords, monthlyBreakdownTrend, monthlyPMCompletion } from '../analytics.js';
 import KPIStatCard from '../components/KPIStatCard.jsx';
 import { ChartCard, GroupedBarChart, DualTrendChart, PieDonutChart, TrendChart } from '../components/AnalyticsCharts.jsx';
@@ -116,40 +116,32 @@ export default function CorporateDashboard() {
   const [showAvailFormula, setShowAvailFormula] = useState(false);
   const [showEnergyFormula, setShowEnergyFormula] = useState(false);
 
-  if (!canViewCorporateDashboard(user?.role)) {
-    return (
-      <div className="max-w-3xl mx-auto text-center py-16">
-        <Shield size={32} className="text-slate-600 mx-auto mb-4" />
-        <h2 className="text-white text-lg font-bold">Corporate Access Required</h2>
-        <p className="text-slate-400 text-sm mt-2">This dashboard is available to Corporate Head and Super Admin users only.</p>
-      </div>
-    );
-  }
-
   // Plants visible to this corporate user
   const visiblePlants = authorizedPlants.length ? authorizedPlants : plants;
 
-  // Compute per-plant KPIs
+  // Compute per-plant KPIs (hooks run unconditionally — hook order must be stable)
   const plantData = useMemo(() => {
     const out = {};
     visiblePlants.forEach((p) => {
       const pid = p.id;
-      const filter = (arr) => (arr || []).filter((r) => (r.plant_id || r.plantId) === pid || (!r.plant_id && !r.plantId && pid === '00000000-0000-0000-0000-000000000001'));
-      const pMachines = filter(store.machines);
+      const filter = (arr) => (arr || []).filter((r) => (r.plant_id || r.plantId) === pid || (!r.plant_id && !r.plantId && pid === NATHUPUR_PLANT_ID));
+      const pMachines = filter(store.machines).filter((m) => m.archived !== true);
       const pBreakdowns = filter(store.breakdowns);
       const pPms = filter(store.pms);
       const pEnergy = filter(store.energy);
       const pBDLogs = filter(store.machineBreakdownLogs);
       const filteredStore = { machines: pMachines, breakdowns: pBreakdowns, pms: pPms, energy: pEnergy, machineBreakdownLogs: pBDLogs, machinePmRecords: filter(store.machinePmRecords), amc: filter(store.amc), dailyUtilityLog: filter(store.dailyUtilityLog), dailySolarGeneration: filter(store.dailySolarGeneration), activity: store.activity, settings: store.settings };
       const kpi = computeKPIs(filteredStore, 0, periodFilter);
-      const bdAgg = aggregateBreakdownRecords(pBreakdowns);
+      const mKey = periodFilter === 'all' ? null : periodFilter;
+      const bdAgg = aggregateBreakdownRecords(pBreakdowns, mKey);
+      const periodEnergy = periodFilter === 'all' ? pEnergy : pEnergy.filter((e) => String(e.date || '').slice(0, 7) === periodFilter);
       out[pid] = {
         machines: pMachines,
         breakdowns: pBreakdowns,
         pms: pPms,
         kpi,
         bdHours: bdAgg.downtimeHours,
-        energyTotal: pEnergy.reduce((s, e) => s + (e.kwh || e.totalKwh || 0), 0),
+        energyTotal: periodEnergy.reduce((s, e) => s + (e.kwh || e.totalKwh || 0), 0),
         breakdownTrend: monthlyBreakdownTrend(pBreakdowns, 6),
         pmTrend: monthlyPMCompletion(pPms, 6),
       };
@@ -239,6 +231,16 @@ export default function CorporateDashboard() {
     setCurrentPlant(plantId);
     navigate('/');
   };
+
+  if (!canViewCorporateDashboard(user?.role)) {
+    return (
+      <div className="max-w-3xl mx-auto text-center py-16">
+        <Shield size={32} className="text-slate-600 mx-auto mb-4" />
+        <h2 className="text-white text-lg font-bold">Corporate Access Required</h2>
+        <p className="text-slate-400 text-sm mt-2">This dashboard is available to Corporate Head and Super Admin users only.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

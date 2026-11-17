@@ -349,24 +349,27 @@ export function computeMTBF(breakdowns, machineCount, mKey = null) {
 }
 
 export function computeAvailability(breakdowns, machineCount, mKey = null) {
-  if (!machineCount) return 100;
+  const rows = breakdowns.filter((row) => !mKey || summaryMonthKey(row) === mKey);
+  if (!machineCount || rows.length === 0) return null;
 
   // If every row for this month carries an override, use the weighted average
   // of overrides instead of the dynamic formula. If even one row is missing an
   // override we fall back to the standard downtime-based calculation so the
   // result is always deterministic.
-  const rows = breakdowns.filter((row) => !mKey || summaryMonthKey(row) === mKey);
   const overrideRows = rows.filter((row) => row.availability_override != null);
   if (overrideRows.length > 0 && overrideRows.length === rows.length) {
-    // Weighted average by section count (equal weight per row — same as a
-    // simple mean since we aggregate across sections).
     const avg = overrideRows.reduce((sum, row) => sum + row.availability_override, 0) / overrideRows.length;
     return round1(avg);
   }
 
-  // Standard formula: (planned hours – downtime) / planned hours
+  // Standard formula: (planned hours – downtime) / planned hours.
+  // Planned capacity is scaled to the span of months actually covered by data
+  // (one month = 720 h per machine), so "All Time" is not measured against a
+  // single month of capacity.
   const summary = aggregateBreakdownRecords(breakdowns, mKey);
-  const planned = machineCount * HOURS_PER_MONTH;
+  const monthKeys = new Set(rows.map((row) => summaryMonthKey(row)).filter(Boolean));
+  const spanMonths = monthKeys.size || 1;
+  const planned = machineCount * HOURS_PER_MONTH * spanMonths;
   return Math.max(0, round1(((planned - summary.downtimeHours) / planned) * 100));
 }
 
@@ -391,14 +394,17 @@ export function pmStats(pms) {
 export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
   const { machines, breakdowns, pms } = state;
   const machinePmRecords = state.machinePmRecords || [];
-  const running = machines.filter((machine) => machine.status === 'running').length;
-  const maint = machines.filter((machine) => machine.status === 'maintenance').length;
-  const manualDown = machines.filter((machine) => machine.status === 'breakdown').length;
+  // Archived machines are out of service — exclude them from fleet counts and
+  // capacity denominators so availability / MTBF stay meaningful.
+  const activeMachines = machines.filter((machine) => machine.archived !== true);
+  const running = activeMachines.filter((machine) => machine.status === 'running').length;
+  const maint = activeMachines.filter((machine) => machine.status === 'maintenance').length;
+  const manualDown = activeMachines.filter((machine) => machine.status === 'breakdown').length;
   const mKey = periodFilter === 'all' ? null : periodFilter;
   const bd = aggregateBreakdownRecords(breakdowns, mKey);
   const pmSummary = aggregatePMRecords(pms, mKey);
   const pmFromRecords = aggregateMachinePmRecords(machinePmRecords, mKey);
-  const machineDocs = machines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
+  const machineDocs = activeMachines.reduce((sum, machine) => sum + (machine.docs?.length || 0), 0);
 
   // Auto-calculate from per-machine records; fall back to manual summary if no records exist
   const plannedCount = pmFromRecords.plannedCount > 0 ? pmFromRecords.plannedCount : pmSummary.plannedCount;
@@ -407,7 +413,7 @@ export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
   const compliance = pmFromRecords.plannedCount > 0 ? pmFromRecords.compliance : pmSummary.compliance;
 
   return {
-    machineCount: machines.length,
+    machineCount: activeMachines.length,
     running,
     underMaintenance: maint,
     breakdown: bd.breakdownCount,
@@ -417,9 +423,9 @@ export function computeKPIs(state, totalDocuments = 0, periodFilter = 'all') {
     pmPending: pendingCount,
     pmOverdue: pendingCount,
     pmCompliance: compliance,
-    availability: computeAvailability(breakdowns, machines.length, mKey),
+    availability: computeAvailability(breakdowns, activeMachines.length, mKey),
     mttr: bd.mttr,
-    mtbf: bd.mtbf,
+    mtbf: computeMTBF(breakdowns, activeMachines.length, mKey),
     totalDocuments: totalDocuments + machineDocs,
     openWorkOrders: pendingCount,
     breakdownsThisMonth: bd.breakdownCount,
@@ -1528,7 +1534,7 @@ export function computeRenewableSummary(dailyUtilityLogs, dailySolarLogs, energy
 export function computePfTrend(dailyUtilityLogs, n = 12, periodFilter = 'all') {
   const deltas = computeDailyDeltas(dailyUtilityLogs || []);
   const filtered = periodFilter === 'all' ? deltas : deltas.filter((d) => String(d.date || '').slice(0, 7) === periodFilter);
-  const last = filtered.slice(-n);
+  const last = filtered.slice(0, n).reverse();
 
   return last.map((d) => {
     const u1ImportKwh = Number(d._delta?.u1ImportKwhReading) || 0;

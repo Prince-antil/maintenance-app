@@ -166,11 +166,10 @@ export default function LoginModal({ onClose }) {
             <p className="text-meta text-center text-[11px]">
               Viewers have read-only access — contact the maintenance admin for credentials.
             </p>
-            <p className="text-slate-600 text-[10px]">Demo: Prince / Prince123 · viewer / viewer123 · corporate / corporate123</p>
           </div>
 
           <p className="text-slate-600 text-[10px] text-center border-t border-white/[0.06] pt-3">
-            Plant selection here is for convenience only. Access is enforced server-side — you will only see data for plants you are authorized to access.
+            Your role decides what you can do; data is filtered to the plants you are authorized for.
           </p>
         </form>
       </div>

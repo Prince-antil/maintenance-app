@@ -252,14 +252,19 @@ export default function Dashboard() {
   const pmTrend = useMemo(() => {
     const fromRecords = monthlyPMCompletionFromRecords(machinePmRecords, 6);
     const fromSummaries = monthlyPMCompletion(pms, 6);
-    return fromSummaries.map((s, i) => {
-      const r = fromRecords[i] || s;
+    // Per-machine PM records are the canonical work-order source; manual section
+    // summaries are the fallback. Never mix per-field maximums — that mixes two
+    // independent populations into an impossible row.
+    const recordByLabel = new Map(fromRecords.map((r) => [r.label, r]));
+    return fromSummaries.map((s) => {
+      const r = recordByLabel.get(s.label);
+      const source = r && r.plannedCount > 0 ? r : s;
       return {
         label: s.label,
-        planned: Math.max(s.planned, r.planned),
-        completed: Math.max(s.completed, r.completed),
-        pending: Math.max(s.pending, r.pending),
-        compliance: Math.max(s.compliance, r.compliance),
+        planned: source.planned,
+        completed: source.completed,
+        pending: source.pending,
+        compliance: source.planned > 0 ? Math.round((source.completed / source.planned) * 1000) / 10 : source.compliance,
       };
     });
   }, [machinePmRecords, pms]);
@@ -501,10 +506,10 @@ export default function Dashboard() {
           <KPIStatCard icon={Factory} label="Total Machines" value={kpi.machineCount} sub="Asset register" tone="accent" />
           <KPIStatCard icon={Activity} label="Running Machines" value={kpi.running} sub="Healthy & producing" tone="success" />
           <KPIStatCard icon={Wrench} label="Under Maintenance" value={kpi.underMaintenance} sub="Planned jobs" tone="warning" />
-          <KPIStatCard icon={AlertOctagon} label="Breakdowns This Month" value={kpi.breakdown} sub={`${kpi.breakdownSectionLogs} section summaries`} tone={kpi.breakdown ? 'danger' : 'neutral'} pulse={kpi.breakdown > 0} />
+          <KPIStatCard icon={AlertOctagon} label={`Breakdowns ${periodFilter === 'all' ? 'Logged' : 'This Month'}`} value={kpi.breakdown} sub={`${kpi.breakdownSectionLogs} section summaries`} tone={kpi.breakdown ? 'danger' : 'neutral'} pulse={kpi.breakdown > 0} />
           <KPIStatCard icon={ClipboardList} label="PM Planned" value={kpi.pmDue} sub={`${kpi.pmPending} pending`} tone={kpi.pmPending ? 'warning' : 'accent'} />
           <KPIStatCard icon={ClipboardCheck} label="PM Done" value={kpi.pmCompleted} sub={`Compliance ${kpi.pmCompliance}%`} tone="success" />
-          <KPIStatCard icon={Gauge} label="Availability" value={`${kpi.availability}%`} sub="This month" tone={kpi.availability >= 95 ? 'success' : kpi.availability >= 85 ? 'warning' : 'danger'} />
+          <KPIStatCard icon={Gauge} label="Availability" value={kpi.availability == null ? '—' : `${kpi.availability}%`} sub={periodFilter === 'all' ? 'All logged history' : 'This month'} tone={kpi.availability == null ? 'neutral' : kpi.availability >= 95 ? 'success' : kpi.availability >= 85 ? 'warning' : 'danger'} />
           <KPIStatCard icon={TimerReset} label="Avg MTTR" value={`${kpi.mttr} hrs`} sub="Mean time to repair" tone="accent" />
           <KPIStatCard icon={Timer} label="Avg MTBF" value={`${kpi.mtbf} hrs`} sub="Mean time between failures" tone="accent" />
           <KPIStatCard icon={FolderArchive} label="Total Documents" value={kpi.totalDocuments} sub="Reports + machine docs" tone="accent" />

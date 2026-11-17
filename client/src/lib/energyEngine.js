@@ -1,6 +1,8 @@
 // =============================================================================
 // File: lib/energyEngine.js (Pure Standalone Functions - No Component Imports)
 // =============================================================================
+import { computeDailyDeltas } from '../analytics.js';
+
 export function formatEnergy(val, decimals = 1) {
   if (val === null || val === undefined || isNaN(val)) return '0';
   const num = Number(val);
@@ -13,29 +15,23 @@ export function formatEnergy(val, decimals = 1) {
 export function computeEnergySnapshot(utilityRows = [], solarRows = []) {
   const safeUtility = Array.isArray(utilityRows) ? utilityRows : [];
   const safeSolar = Array.isArray(solarRows) ? solarRows : [];
-  // 1. Grid Import Sums - supports snake_case, camelCase, and reading variants
-  const unit1GridKwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.u1_import_kwh_reading ?? row?.u1_import_kwh ?? row?.u1_import ?? row?.u1ImportKwhReading ?? row?.u1ImportKwh ?? row?.u1_grid ?? 0);
-    return acc + (Number.isFinite(val) ? val : 0);
+  // Stored utility values are cumulative meter registers — diff per day before
+  // summing so totals reflect actual consumption/generation in the period.
+  const deltas = computeDailyDeltas(safeUtility);
+  const deltaSum = (key) => deltas.reduce((sum, row) => {
+    const value = row._delta?.[key];
+    return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
-  const unit2GridKwh = safeUtility.reduce((acc, row) => {
-    const val = Number(row?.u2_import_kwh_reading ?? row?.u2_import_kwh ?? row?.u2_import ?? row?.u2ImportKwhReading ?? row?.u2ImportKwh ?? row?.u2_grid ?? 0);
-    return acc + (Number.isFinite(val) ? val : 0);
-  }, 0);
+
+  // 1. Grid Import (daily deltas of cumulative registers)
+  const unit1GridKwh = deltaSum('u1ImportKwhReading');
+  const unit2GridKwh = deltaSum('u2ImportKwhReading');
   const totalGridKwh = unit1GridKwh + unit2GridKwh;
-  // 2. DG Sums & Hours
-  const dg380Kwh = safeUtility.reduce((acc, row) => {
-    return acc + Number(row?.dg380_kwh_reading ?? row?.dg380_kwh ?? row?.dg380 ?? row?.dg380KwhReading ?? row?.dg380Kwh ?? 0);
-  }, 0);
-  const dg500Kwh = safeUtility.reduce((acc, row) => {
-    return acc + Number(row?.dg500_kwh_reading ?? row?.dg500_kwh ?? row?.dg500 ?? row?.dg500KwhReading ?? row?.dg500Kwh ?? 0);
-  }, 0);
-  const dg380Hours = safeUtility.reduce((acc, row) => {
-    return acc + Number(row?.dg380_hourmeter_reading ?? row?.dg380_hours ?? row?.dg380Hours ?? row?.dg380_hrs ?? row?.dg380HourmeterReading ?? 0);
-  }, 0);
-  const dg500Hours = safeUtility.reduce((acc, row) => {
-    return acc + Number(row?.dg500_hourmeter_reading ?? row?.dg500_hours ?? row?.dg500Hours ?? row?.dg500_hrs ?? row?.dg500HourmeterReading ?? 0);
-  }, 0);
+  // 2. DG Sums & Hours (daily deltas of cumulative kWh / hourmeter registers)
+  const dg380Kwh = deltaSum('dg380KwhReading');
+  const dg500Kwh = deltaSum('dg500KwhReading');
+  const dg380Hours = deltaSum('dg380HourmeterReading');
+  const dg500Hours = deltaSum('dg500HourmeterReading');
   // 3. Fuel (Ltrs)
   const totalFuelLtrs = safeUtility.reduce((acc, row) => {
     const h380 = Number(row?.dg380_hsd_added_ltr ?? row?.dg380_hsd ?? row?.dg380HsdAddedLtr ?? row?.dg380Hsd ?? 0);

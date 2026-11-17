@@ -69,6 +69,9 @@ function SheetSummaryRow({ moduleId, result }) {
               Sheet: <span className="text-slate-300">{result.sheetName}</span>
               {' · '}
               <span className="text-emerald-400">{result.counts.valid} valid</span>
+              {result.counts.skipped > 0 && (
+                <span className="text-slate-400 ml-1">· {result.counts.skipped} example row{result.counts.skipped > 1 ? 's' : ''} skipped</span>
+              )}
               {result.errors.length > 0 && (
                 <span className="text-red-400 ml-1">· {result.errors.length} issue{result.errors.length > 1 ? 's' : ''}</span>
               )}

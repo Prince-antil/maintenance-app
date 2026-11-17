@@ -10,7 +10,7 @@ import EmptyState from '../components/EmptyState.jsx';
 import { MachineActionsMenu, ArchiveMachineModal, PurgeMachineModal, MachineArchivedBanner } from '../components/MachineActions.jsx';
 import { exportToCSV } from '../utils.js';
 import { getOperationalSections } from '../constants.js';
-import { normalizeRole, canArchiveMachine, canPurgeMachine } from '../lib/plantAccess.js';
+import { normalizeRole, canUpload, canDelete, canArchiveMachine, canPurgeMachine } from '../lib/plantAccess.js';
 import {
   Plus, Search, Cog, MapPin, FileText, ChevronRight, Factory,
   Download, HeartPulse, Upload, AlertOctagon, Timer, Wrench, TrendingUp,
@@ -169,15 +169,15 @@ export default function Machines() {
           <button onClick={handleExport} className="btn-ghost inline-flex items-center gap-2 text-xs whitespace-nowrap">
             <Download size={13} aria-hidden="true" /> Export CSV
           </button>
-          {user?.role === 'admin' && !viewArchived && (
-            <>
-              <button onClick={() => openUpload({ kind: 'bulk', module: 'machines' })} className="btn-success inline-flex items-center gap-2 whitespace-nowrap text-xs">
-                <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
-              </button>
-              <button onClick={openAddMachine} className="btn-primary inline-flex items-center gap-2 whitespace-nowrap">
-                <Plus size={15} aria-hidden="true" /> New Machine
-              </button>
-            </>
+          {canUpload(user?.role) && !viewArchived && (
+            <button onClick={() => openUpload({ kind: 'bulk', module: 'machines' })} className="btn-success inline-flex items-center gap-2 whitespace-nowrap text-xs">
+              <Upload size={13} aria-hidden="true" /> Upload Excel / Bulk Import
+            </button>
+          )}
+          {canDelete(user?.role) && !viewArchived && (
+            <button onClick={openAddMachine} className="btn-primary inline-flex items-center gap-2 whitespace-nowrap">
+              <Plus size={15} aria-hidden="true" /> New Machine
+            </button>
           )}
         </div>
       </div>

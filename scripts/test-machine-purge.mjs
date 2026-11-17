@@ -80,8 +80,17 @@ console.log('— Store integration (archive / purge / tombstones / sync) —');
   ok('queued stale upserts for purged machine are superseded (dedupe by recordId)', /withoutSameRecord/.test(store));
   ok('cross-PC tombstones adopted from machine_purge_audit on boot', /Purge audit sync/.test(store));
   ok('dependent records of purged machines swept locally', /sweepTombstonedMachineDependents/.test(store));
-  ok('purge probe uses authoritative RPC when available', /purge_machine_probe_v1/.test(store));
-  ok('purge executes transactional RPC', /purge_machine_v1/.test(store));
+  ok('purge probe queries the server-guarded /api/machines/purge-probe endpoint', /machines\/purge-probe/.test(store) && /source: 'server-api'/.test(store));
+  ok('purge executes via /api/machines/purge (awaited DB confirmation)', /fetch\('\/api\/machines\/purge'/.test(store));
+  ok('purge RPC is transactional (all dependent deletes + machine row in one function)', (() => {
+    const migrationSql = read('supabase/migrations/20261116_machine_archive_purge.sql');
+    const body = (migrationSql.match(/create or replace function public\.purge_machine_v1[\s\S]*?\$\$;/i) || [''])[0];
+    return body.includes('delete from public.testing_certificates')
+      && body.includes('delete from public.amc_records')
+      && body.includes('delete from public.machine_breakdown_logs')
+      && body.includes('delete from public.machine_pm_records')
+      && body.includes('delete from public.machines');
+  })());
   ok('Case B guard: history requires elevated force flag', /blocked: 'history'/.test(store));
   ok('failed purge keeps machine (tombstone reverted)', /loadMachineTombstones\(\)\.filter\(\(t\) => t\.id !== machineId\)/.test(store));
   ok('machine-exclusive storage prefixes cleaned (machines/amc/certs)', /machines\/\$\{machineId\}\/|amc\/\$\{machineId\}\/|certs\/\$\{machineId\}\//.test(store));
