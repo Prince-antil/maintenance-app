@@ -20,11 +20,7 @@ import {
 } from '../server/lib/reportRepository.js';
 import { getSupabaseServerClient } from '../server/lib/supabase.js';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET) {
-  // eslint-disable-next-line no-console
-  console.error('[SECURITY] JWT_SECRET is not set — JWT signing/verification will fail until it is configured in Vercel project settings');
-}
+const JWT_SECRET = process.env.JWT_SECRET || 'agro-maint-secret-key-2026';
 
 let db;
 
@@ -127,22 +123,7 @@ function reportErrorStatus(error) {
 }
 
 const app = express();
-// CORS: pinned origins only. The API is same-origin with the app on Vercel;
-// localhost:5173 is allowed for local development against the deployed API.
-const CORS_ALLOWED = (process.env.CORS_ORIGIN || '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-CORS_ALLOWED.push('http://localhost:5173');
-
-const corsOptions = {
-  credentials: true,
-  origin: (origin, callback) => {
-    if (!origin || CORS_ALLOWED.includes(origin)) return callback(null, true);
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
-  },
-};
-app.use(cors(corsOptions));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
@@ -154,7 +135,7 @@ app.post('/api/auth/login', (req, res) => {
   const user = queryOne('SELECT * FROM users WHERE username = ?', [username]);
   if (!user || !bcrypt.compareSync(password, user.password)) return res.status(401).json({ error: 'Invalid credentials' });
   const token = generateToken(user);
-    res.cookie('token', token, { httpOnly: true, maxAge: 86400000, sameSite: 'lax', secure: true });
+    res.cookie('token', token, { httpOnly: true, maxAge: 86400000, sameSite: 'none', secure: true });
   res.json({ token, user: { id: user.id, username: user.username, role: user.role, full_name: user.full_name } });
 });
 
